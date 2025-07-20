@@ -1,0 +1,42 @@
+{
+  "name": "cisv",
+  "version": "0.0.1",
+  "description": "The fastest zero copy csv parser ever made",
+  "author": "sanix<s4nixd@gmail.com>",
+  "main": "./build/Release/cisv.node",
+  "types": "./types/cisv.d.ts",
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "test": "mocha test/*.test.js",
+    "benchmark": "node benchmark/benchmark.js",
+    "lint": "clang-format -i src/*.{cc,h}",
+    "prepublishOnly": "npm test && npm run benchmark",
+    "test:typescript": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' ts-mocha -p tsconfig.json src/test/*.test.ts",
+    "pretest:typescript": "tsc --project tsconfig.json --noEmit",
+    "build:types": "tsc --project tsconfig.json --declaration --emitDeclarationOnly",
+    "test:all": "npm run test && npm run test:typescript",
+    "test:coverage": "nyc mocha test/*.test.js",
+    "test:perf": "node test/performance.test.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.9",
+    "benchmark": "^2.1.4",
+    "chai": "^4.3.6",
+    "mocha": "^10.0.0",
+    "node-addon-api": "^5.0.0",
+    "nyc": "^15.0.0",
+    "ts-mocha": "^10.1.0",
+    "typescript": "^5.8.3"
+  },
+  "gypfile": true,
+  "keywords": [
+    "csv",
+    "parser",
+    "fast",
+    "simd",
+    "native"
+  ],
+  "license": "MIT"
+}
