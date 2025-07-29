@@ -137,5 +137,4 @@ coverage:
 package: clean build test
 	npm pack
 
-.PHONY: all build cli clean test benchmark benchmark-cli perf coverage package install-cli install-benchmark-deps \
-		echo "
+.PHONY: all build cli clean test benchmark benchmark-cli perf coverage package install-cli install-benchmark-deps
