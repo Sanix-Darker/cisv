@@ -5,17 +5,18 @@
 
 #ifdef _WIN32
     #include <windows.h>
+    #include "win_getopt.h"
 #elif defined(__linux__) || defined(__APPLE__)
     #include <sys/mman.h>
     #include <fcntl.h>
     #include <unistd.h>
+    #include <getopt.h>
 #else
     #error "Unsupported platform"
 #endif
 
 #include <sys/stat.h>
 #include <errno.h>
-#include <getopt.h>
 #include <time.h>
 #include <sys/time.h>
 #include "cisv_parser.h"
