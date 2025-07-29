@@ -7,32 +7,6 @@
 
 > **cisv** is a high-performance CSV parser that leverages SIMD instructions and zero-copy memory mapping to achieve unparalleled parsing speeds. Available as both a Node.js native addon and a standalone CLI tool.
 
-```bash
-$ ./cisv --help
-cisv - The fastest CSV parser of the multiverse
-
-Usage: ./cisv [OPTIONS] [FILE]
-
-Options:
-  -h, --help              Show this help message
-  -v, --version           Show version information
-  -d, --delimiter DELIM   Field delimiter (default: ,)
-  -s, --select COLS       Select columns (comma-separated indices)
-  -c, --count             Show only row count
-  --head N                Show first N rows
-  --tail N                Show last N rows
-  -o, --output FILE       Write to FILE instead of stdout
-  -b, --benchmark         Run benchmark mode
-
-----------
-Examples:
-  ./cisv data.csv                    # Parse and display CSV
-  ./cisv -c data.csv                 # Count rows
-  ./cisv -s 0,2,3 data.csv           # Select columns 0, 2, and 3
-  ./cisv --head 10 data.csv          # Show first 10 rows
-  ./cisv -d ';' data.csv             # Use semicolon as delimiter
-```
-
 ### PERFORMANCE
 
 - **469,968 MB/s** throughput on 2M row CSV files (AVX-512)
@@ -50,7 +24,18 @@ $ make clean && make cli && cargo install qsv && make install-benchmark-deps && 
 
 We have this representation in terms of performances :
 
-## CSV PARSER BENCHMARK RESULTS - ROW COUNTING TEST
+- on 5M ROWs CSV (273Mb)
+
+Based on the provided benchmark data for a 273 MB CSV file with 5 million rows, here's the performance comparison table in markdown format:
+
+| Parser        | Speed (MB/s) | Time (ms) | Relative       |
+|---------------|--------------|-----------|----------------|
+| **cisv**      | 7,184        | 38        | 1.0x           |
+| rust-csv      | 391          | 698       | 18x slower     |
+| xsv           | 650          | 420       | 11x slower     |
+| csvkit        | 28           | 9,875     | 260x slower    |
+
+## BENCHMARK RESULTS FOR ROW COUNTING TEST
 
 ```console
 # by running :
@@ -121,6 +106,33 @@ make build
 $ ls -alh ./cisv
 Permissions Size User Date Modified Name
 .rwxrwxr-x   18k dk   29 Jul  9:34  ./cisv
+```
+
+
+```bash
+$ ./cisv --help
+cisv - The fastest CSV parser of the multiverse
+
+Usage: ./cisv [OPTIONS] [FILE]
+
+Options:
+  -h, --help              Show this help message
+  -v, --version           Show version information
+  -d, --delimiter DELIM   Field delimiter (default: ,)
+  -s, --select COLS       Select columns (comma-separated indices)
+  -c, --count             Show only row count
+  --head N                Show first N rows
+  --tail N                Show last N rows
+  -o, --output FILE       Write to FILE instead of stdout
+  -b, --benchmark         Run benchmark mode
+
+----------
+Examples:
+  ./cisv data.csv                    # Parse and display CSV
+  ./cisv -c data.csv                 # Count rows
+  ./cisv -s 0,2,3 data.csv           # Select columns 0, 2, and 3
+  ./cisv --head 10 data.csv          # Show first 10 rows
+  ./cisv -d ';' data.csv             # Use semicolon as delimiter
 ```
 
 and for entrypoint :
@@ -195,54 +207,6 @@ const rows: string[][] = parser.parseSync('./data.csv');
 - [x] Streaming API for unlimited file sizes
 - [x] Cross-platform (Linux, macOS, Windows via WSL)
 - [x] Safe fallback for non-x86 architectures
-
-## CLI BENCHMARK COMPARISON
-
-Run the benchmark suite against other popular CSV tools:
-
-```bash
-make benchmark-cli
-```
-
-This compares cisv with:
-- **xsv** - Rust's blazing fast CSV toolkit
-- **csvkit** - Python's CSV Swiss Army knife
-
-## DEVELOPMENT
-
-### BUILDING
-
-```bash
-# Build everything
-make all
-
-# Build CLI only
-make cli
-
-# Debug build
-make debug
-
-# Run tests
-make test
-
-# Run performance tests
-make perf
-```
-
-### PROJECT STRUCTURE
-
-```
-cisv/
-├── src/
-│   ├── cisv_parser.c      # Core parser implementation (with cli entrypoint)
-│   ├── cisv_parser.h      # Public API
-│   ├── cisv_simd.h        # SIMD abstractions
-│   ├── cisv_addon.cc      # Node.js binding
-├── benchmark/
-│   └── benchmark.js       # Node.js benchmarks
-├── test/                  # Test suites
-└── examples/              # Usage examples
-```
 
 ## CONTRIBUTING
 
