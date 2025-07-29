@@ -9,6 +9,7 @@
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
     "test": "mocha test/*.test.js",
+    "test:build": "npm run test",
     "benchmark": "node benchmark/benchmark.js",
     "lint": "clang-format -i src/*.{cc,h}",
     "prepublishOnly": "npm test && npm run benchmark",
