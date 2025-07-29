@@ -124,6 +124,19 @@ with open('large.csv', 'w', newline='') as f:
                    f'2024-{(i%12)+1:02d}-{(i%28)+1:02d}', f'{i*1.23:.2f}'])
 "
 
+# xLarge file (10M rows)
+echo "Creating xlarge.csv (10M rows)..."
+python3 -c "
+import csv
+with open('xlarge.csv', 'w', newline='') as f:
+    w = csv.writer(f)
+    w.writerow(['id', 'name', 'email', 'address', 'phone', 'date', 'amount'])
+    for i in range(10000000):
+        w.writerow([i, f'Person {i}', f'person{i}@email.com',
+                   f'{i} Main St, City {i%100}', f'555-{i:04d}',
+                   f'2024-{(i%12)+1:02d}-{(i%28)+1:02d}', f'{i*1.23:.2f}'])
+"
+
 echo -e "\n${GREEN}Test files created:${NC}"
 ls -lh *.csv
 echo ""
@@ -134,22 +147,29 @@ benchmark() {
     local cmd=$2
     local file=$3
 
-    if command -v ${cmd%% *} > /dev/null 2>&1; then
+    # Special handling for commands that need to be checked differently
+    local check_cmd="${cmd%% *}"
+
+    # For complex commands, extract the actual binary name
+    if [[ "$cmd" == *"./benchmark/rust-csv-bench"* ]]; then
+        if [ -f "./benchmark/rust-csv-bench/target/release/csv-bench" ] || [ -f "./benchmark/rust-csv-bench/target/release/csv-select" ]; then
+            check_cmd="exists"
+        else
+            check_cmd="not_exists"
+        fi
+    fi
+
+    if [[ "$check_cmd" == "exists" ]] || command -v "$check_cmd" > /dev/null 2>&1; then
         echo -e "${BLUE}--- $name ---${NC}"
         # Run 3 times and show average
-        /usr/bin/time -f "Time: %e seconds\nMemory: %M KB" bash -c "
-            for i in {1..3}; do
-                $cmd $file > /dev/null 2>&1
-            done
-        " 2>&1
-        echo ""
+        bash -c "start=\$(date +%s.%N); for i in {1..3}; do $cmd $file > /dev/null 2>&1; done; end=\$(date +%s.%N); echo \"Time: \$(echo \"\$end - \$start\" | bc) seconds\"; " && /usr/bin/time -f "Memory: %M KB" bash -c "$cmd $file > /dev/null 2>&1"
     else
         echo -e "${RED}$name: Not installed${NC}\n"
     fi
 }
 
 # Run benchmarks for each file size
-for size in "small" "medium" "large"; do
+for size in "small" "medium" "large" "xlarge"; do
     echo -e "${GREEN}=== Testing with $size.csv ===${NC}\n"
 
     # Count rows test
@@ -165,6 +185,7 @@ for size in "small" "medium" "large"; do
     benchmark "xsv (Rust CLI)" "xsv count" "$size.csv"
     benchmark "qsv (faster xsv fork)" "qsv count" "$size.csv"
     benchmark "csvkit (Python)" "csvstat --count" "$size.csv"
+    benchmark "miller" "mlr --csv count" "$size.csv"
 
     # Select columns test
     echo -e "${YELLOW}Column selection test (columns 0,2,3):${NC}\n"
@@ -172,19 +193,21 @@ for size in "small" "medium" "large"; do
     benchmark "cisv" "./cisv -s 0,2,3" "$size.csv"
 
     if [ -f "./benchmark/rust-csv-bench/target/release/csv-select" ]; then
-        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select $size.csv 0,2,3" ""
+        # Note: csv-select expects "file cols" not "file" with redirect
+        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "$size.csv 0,2,3"
     fi
 
     benchmark "xsv" "xsv select 1,3,4" "$size.csv"  # xsv uses 1-based indexing
     benchmark "qsv" "qsv select 1,3,4" "$size.csv"  # qsv uses 1-based indexing
     benchmark "csvkit" "csvcut -c 1,3,4" "$size.csv"
+    benchmark "miller" "mlr --csv cut -f id,email,address" "$size.csv"
 
     echo -e "${BLUE}${'='*50}${NC}\n"
 done
 
 # cisv specific benchmark mode
 echo -e "${GREEN}=== CISV Benchmark Mode ===${NC}\n"
-for size in "small" "medium" "large"; do
+for size in "small" "medium" "large" "xlarge"; do
     echo -e "${YELLOW}$size.csv:${NC}"
     ./cisv -b "$size.csv"
     echo ""
@@ -192,6 +215,6 @@ done
 
 # Cleanup
 echo -e "${YELLOW}Cleaning up test files...${NC}"
-rm -f small.csv medium.csv large.csv
+rm -f small.csv medium.csv large.csv xlarge.csv
 
 echo -e "${GREEN}Benchmark complete!${NC}"

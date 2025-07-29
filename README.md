@@ -19,7 +19,7 @@
 For this given command :
 
 ```console
-$ make clean && make cli && make install-benchmark-deps && make benchmark-cli
+$ make clean && make cli && cargo install qsv && make install-benchmark-deps && make benchmark-cli
 ```
 
 We have this representation in terms of performances :
@@ -42,6 +42,7 @@ Based on the provided benchmark data for a 273 MB CSV file with 5 million rows, 
 
 **IMPORTANT NOTE**: cisv outperforms even the baseline `wc -l` (0.072s = 72ms), which only counts lines without parsing CSV structure. All tests ran on the same 273 MB file.
 
+**NOTE:** For a much more detail benchmark, you have to run `benchmark_cli.sh` wich test on 1k, 100k, 1M and 10M rows.
 
 ## INSTALLATION
 
