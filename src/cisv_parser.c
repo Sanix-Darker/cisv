@@ -117,7 +117,7 @@ size_t cisv_parser_count_rows(const char *path) {
     }
 
     size_t count = 0;
-    for (size_t i = 0; i < st.st_size; i++) {
+    for (size_t i = 0; i < (size_t)st.st_size; i++) {
         if (base[i] == '\n') count++;
     }
 
@@ -331,7 +331,7 @@ static void row_callback(void *user) {
 }
 
 static void print_help(const char *prog) {
-    printf("cisv - The fastest CSV parser\n\n");
+    printf("cisv - The fastest CSV parser of the multiverse\n\n");
     printf("Usage: %s [OPTIONS] [FILE]\n\n", prog);
     printf("Options:\n");
     printf("  -h, --help              Show this help message\n");
@@ -343,6 +343,12 @@ static void print_help(const char *prog) {
     printf("  --tail N                Show last N rows\n");
     printf("  -o, --output FILE       Write to FILE instead of stdout\n");
     printf("  -b, --benchmark         Run benchmark mode\n");
+    printf("\n----------\nExamples:\n");
+    printf("  %s data.csv                    # Parse and display CSV\n", prog);
+    printf("  %s -c data.csv                 # Count rows\n", prog);
+    printf("  %s -s 0,2,3 data.csv           # Select columns 0, 2, and 3\n", prog);
+    printf("  %s --head 10 data.csv          # Show first 10 rows\n", prog);
+    printf("  %s -d ';' data.csv             # Use semicolon as delimiter\n", prog);
 }
 
 static double get_time_ms() {
@@ -501,6 +507,7 @@ int main(int argc, char *argv[]) {
 
     if (!filename) {
         fprintf(stderr, "Error: No input file specified\n");
+        print_help(argv[0]);
         free(ctx.current_row);
         free(ctx.select_cols);
         return 1;
