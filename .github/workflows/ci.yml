@@ -47,7 +47,7 @@ jobs:
      #- name: Test memory leak CLI basic functionality
      #  run: bash ./test_select.sh
    - name: Upload CLI binary
-     uses: actions/upload-artifact@v3
+     uses: actions/upload-artifact@v4
      with:
        name: cisv-${{ matrix.os }}
        path: cisv
