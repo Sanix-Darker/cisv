@@ -1,10 +1,16 @@
 CC ?= gcc
-CFLAGS ?= -O3 -march=native -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto
-LDFLAGS ?= -flto
+CFLAGS ?= -O3 -march=native -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops
+LDFLAGS ?= -flto -s
 NODE_GYP ?= node-gyp
 
+# CLI binary name
+CLI_BIN = cisv
+# Only cisv_parser.c is needed since it contains main()
+CLI_SRC = src/cisv_parser.c
+CLI_OBJ = $(CLI_SRC:.c=.o)
+
 # Build targets
-all: build
+all: build cli
 
 install:
 	npm install -g node-gyp
@@ -14,15 +20,109 @@ build:
 	npm install
 	$(NODE_GYP) configure build CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
 
+# Build CLI tool (cisv_parser.c contains main when CISV_CLI is defined)
+cli: $(CLI_BIN)
+
+$(CLI_BIN): $(CLI_OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Compile with CISV_CLI defined to include CLI code
+src/cisv_parser.o: src/cisv_parser.c
+	$(CC) $(CFLAGS) -DCISV_CLI -c -o $@ $<
+
+# Install CLI tool to /usr/local/bin
+install-cli: cli
+	install -m 755 $(CLI_BIN) /usr/local/bin/$(CLI_BIN)
+
+# Install benchmark dependencies
+install-benchmark-deps:
+	@echo "Installing benchmark dependencies..."
+	@# Install Rust if not present
+	@if ! command -v cargo > /dev/null; then \
+		echo "Installing Rust..."; \
+		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; \
+		. $$HOME/.cargo/env; \
+	fi
+	@# Install xsv
+	@if ! command -v xsv > /dev/null; then \
+		echo "Installing xsv..."; \
+		cargo install xsv; \
+	fi
+	@# Install qsv (faster fork of xsv)
+	@if ! command -v qsv > /dev/null; then \
+		echo "Installing qsv..."; \
+		cargo install qsv; \
+	fi
+	@# Build rust-csv example
+	@echo "Building rust-csv benchmark tool..."
+	@mkdir -p benchmark/rust-csv-bench
+	@cd benchmark/rust-csv-bench && \
+		if [ ! -f Cargo.toml ]; then \
+			cargo init --name csv-bench; \
+			echo 'csv = "1.3"' >> Cargo.toml; \
+		fi && \
+		echo 'use std::env;\nuse std::error::Error;\nuse csv::ReaderBuilder;\n\nfn main() -> Result<(), Box<dyn Error>> {\n    let args: Vec<String> = env::args().collect();\n    if args.len() < 2 { eprintln!("Usage: {} <file>", args[0]); std::process::exit(1); }\n    let mut rdr = ReaderBuilder::new().has_headers(true).from_path(&args[1])?;\n    let count = rdr.records().count();\n    println!("{}", count);\n    Ok(())\n}' > src/main.rs && \
+		cargo build --release
+	@# Fix csvkit Python 3.12 compatibility issue and install
+	@if command -v pip3 > /dev/null; then \
+		echo "Installing/fixing csvkit..."; \
+		pip3 install --upgrade pip; \
+		pip3 uninstall -y csvkit babel || true; \
+		pip3 install 'babel>=2.9.0' 'csvkit>=1.1.0'; \
+	fi
+
 debug:
 	$(NODE_GYP) configure build --debug
 
 clean:
 	$(NODE_GYP) clean
 	rm -rf build
+	rm -f $(CLI_BIN) $(CLI_OBJ)
+	rm -f src/cisv_cli.o  # Clean old object file if exists
 
 test: build
 	npm test
+
+# Benchmark comparing cisv CLI with other tools
+benchmark-cli: cli
+	@echo ""
+	@echo ""
+	@echo "====== Benchmarking CSV CLI tools ======"
+	@echo ""
+	@echo "Preparing test file... (5MILLIONS rows)"
+	@python3 -c "import csv; w=csv.writer(open('bench_test.csv','w')); [w.writerow([i,f'name_{i}',f'email_{i}@test.com',f'city_{i}']) for i in range(5000000)]"
+	@echo ""
+	@echo "--- cisv ---"
+	@bash -c "TIMEFORMAT='real %3R'; time ./$(CLI_BIN) -c bench_test.csv 2>&1"
+	@if [ -f benchmark/rust-csv-bench/target/release/csv-bench ]; then \
+		echo ""; \
+		echo "--- rust-csv (Rust library) ---"; \
+		bash -c "TIMEFORMAT='real %3R'; time ./benchmark/rust-csv-bench/target/release/csv-bench bench_test.csv 2>&1"; \
+	fi
+	@if command -v xsv > /dev/null 2>&1; then \
+		echo ""; \
+		echo "--- xsv (Rust CLI) ---"; \
+		bash -c "TIMEFORMAT='real %3R'; time xsv count bench_test.csv 2>&1"; \
+	fi
+	@if command -v qsv > /dev/null 2>&1; then \
+		echo ""; \
+		echo "--- qsv (Rust CLI - faster xsv fork) ---"; \
+		bash -c "TIMEFORMAT='real %3R'; time qsv count bench_test.csv 2>&1"; \
+	fi
+	@if command -v wc > /dev/null 2>&1; then \
+		echo ""; \
+		echo "--- wc -l (baseline) ---"; \
+		bash -c "TIMEFORMAT='real %3R'; time wc -l bench_test.csv 2>&1"; \
+	fi
+	@if command -v csvstat > /dev/null 2>&1; then \
+		echo ""; \
+		echo "--- csvkit (Python) ---"; \
+		bash -c "TIMEFORMAT='real %3R'; time csvstat --count bench_test.csv 2>&1" || echo "csvkit failed - may need: pip3 install --upgrade babel csvkit"; \
+	fi
+	@echo ""
+	@echo "File size: " && ls -lh bench_test.csv | awk '{print $5}'
+	@rm -f bench_test.csv
+	@echo ""
 
 benchmark: build
 	node benchmark/benchmark.js $(SAMPLE)
@@ -37,4 +137,5 @@ coverage:
 package: clean build test
 	npm pack
 
-.PHONY: all build clean test benchmark perf coverage package
+.PHONY: all build cli clean test benchmark benchmark-cli perf coverage package install-cli install-benchmark-deps \
+		echo "

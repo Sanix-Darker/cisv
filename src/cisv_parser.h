@@ -19,11 +19,12 @@ void cisv_parser_destroy(cisv_parser *p);
 // Parse whole file (zero‑copy if possible)
 int cisv_parser_parse_file(cisv_parser *p, const char *path);
 
+// Fast counting mode - no callbacks
+size_t cisv_parser_count_rows(const char *path);
+
 // Streaming API
 int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len);
 void cisv_parser_end(cisv_parser *p);
-
-// TODO: Parallel processing (threads)
 
 #ifdef __cplusplus
 }

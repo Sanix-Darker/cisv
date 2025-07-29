@@ -1,7 +1,7 @@
 {
   "name": "cisv",
   "version": "0.0.1",
-  "description": "The fastest zero copy csv parser ever made",
+  "description": "The fastest csv parser of the multiverse",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
   "types": "./types/cisv.d.ts",
