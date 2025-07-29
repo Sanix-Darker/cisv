@@ -3,33 +3,99 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: [22.x, 24.x]
+ build:
+   runs-on: ${{ matrix.os }}
+   strategy:
+     matrix:
+       os: [ubuntu-latest, macos-latest, windows-latest]
+       node-version: [22.x, 24.x]
+   steps:
+   - uses: actions/checkout@v3
+   - name: Use Node.js ${{ matrix.node-version }}
+     uses: actions/setup-node@v3
+     with:
+       node-version: ${{ matrix.node-version }}
+   - run: npm install
+   - run: npm test
+   - name: Build
+     run: |
+       npm run build
+       npm run test:build
 
-    steps:
-    - uses: actions/checkout@v3
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
-    - run: npm install
-    - run: npm test
-    - name: Build
-      run: |
-        npm run build
-        npm run test:build
+ cli-build:
+   runs-on: ${{ matrix.os }}
+   strategy:
+     matrix:
+       os: [ubuntu-latest, macos-latest, windows-latest]
+   steps:
+   - uses: actions/checkout@v3
+   - name: Build CLI
+     run: |
+       make clean
+       make cli
+   - name: Test CLI basic functionality
+     run: |
+       ./cisv --version
+       ./cisv --help
+       echo "id,name,value" > test.csv
+       echo "1,test,100" >> test.csv
+       echo "2,demo,200" >> test.csv
+       ./cisv -c test.csv | grep -q "2"
+       ./cisv test.csv
+       ./cisv -s 0,2 test.csv
+       ./cisv --head 1 test.csv
+     #- name: Test memory leak CLI basic functionality
+     #  run: bash ./test_select.sh
+   - name: Upload CLI binary
+     uses: actions/upload-artifact@v3
+     with:
+       name: cisv-${{ matrix.os }}
+       path: cisv
 
-  benchmark:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-node@v3
-      with:
-        node-version: 22.x
-    - run: npm install
-    - run: npm run benchmark
+ # NOTE :not yet sure if this should be ran each commit/push
+ #benchmark:
+ #  runs-on: ubuntu-latest
+ #  needs: [build, cli-build]
+ #  steps:
+ #  - uses: actions/checkout@v3
+ #  - uses: actions/setup-node@v3
+ #    with:
+ #      node-version: 22.x
+ #  - name: Install benchmark dependencies
+ #    run: |
+ #      sudo apt-get update
+ #      sudo apt-get install -y miller
+ #      pip3 install --upgrade pip
+ #      pip3 install 'babel>=2.9.0' 'csvkit>=1.1.0'
+ #  - name: Install Rust tools
+ #    uses: actions-rs/toolchain@v1
+ #    with:
+ #      toolchain: stable
+ #      override: true
+ #  - name: Install xsv and qsv
+ #    run: |
+ #      cargo install xsv
+ #      cargo install qsv
+ #  - name: Build cisv CLI
+ #    run: |
+ #      make clean
+ #      make cli
+ #  - name: Run Node.js benchmarks
+ #    run: |
+ #      npm install
+ #      npm run benchmark
+ #  - name: Run CLI benchmarks
+ #    run: |
+ #      make benchmark-cli
+ #  - name: Generate benchmark report
+ #    run: |
+ #      echo "## Benchmark Results" > benchmark-report.md
+ #      echo "Date: $(date)" >> benchmark-report.md
+ #      echo "Commit: ${{ github.sha }}" >> benchmark-report.md
+ #      echo "" >> benchmark-report.md
+ #      make benchmark-cli >> benchmark-report.md 2>&1
+ #  - name: Upload benchmark results
+ #    uses: actions/upload-artifact@v3
+ #    with:
+ #      name: benchmark-results
+ #      path: benchmark-report.md
