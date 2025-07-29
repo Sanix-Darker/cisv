@@ -7,14 +7,40 @@
 
 > **cisv** is a high-performance CSV parser that leverages SIMD instructions and zero-copy memory mapping to achieve unparalleled parsing speeds. Available as both a Node.js native addon and a standalone CLI tool.
 
-## PERFORMANCE
+```bash
+$ ./cisv --help
+cisv - The fastest CSV parser of the multiverse
+
+Usage: ./cisv [OPTIONS] [FILE]
+
+Options:
+  -h, --help              Show this help message
+  -v, --version           Show version information
+  -d, --delimiter DELIM   Field delimiter (default: ,)
+  -s, --select COLS       Select columns (comma-separated indices)
+  -c, --count             Show only row count
+  --head N                Show first N rows
+  --tail N                Show last N rows
+  -o, --output FILE       Write to FILE instead of stdout
+  -b, --benchmark         Run benchmark mode
+
+----------
+Examples:
+  ./cisv data.csv                    # Parse and display CSV
+  ./cisv -c data.csv                 # Count rows
+  ./cisv -s 0,2,3 data.csv           # Select columns 0, 2, and 3
+  ./cisv --head 10 data.csv          # Show first 10 rows
+  ./cisv -d ';' data.csv             # Use semicolon as delimiter
+```
+
+### PERFORMANCE
 
 - **469,968 MB/s** throughput on 2M row CSV files (AVX-512)
 - **10-100x faster** than popular CSV parsers
 - **Zero-copy** memory-mapped I/O with kernel optimizations
 - **SIMD accelerated** with AVX-512/AVX2 auto-detection
 
-## BENCHMARKS
+### BENCHMARKS
 
 For this given command :
 
@@ -24,25 +50,44 @@ $ make clean && make cli && cargo install qsv && make install-benchmark-deps && 
 
 We have this representation in terms of performances :
 
-### on 5M ROWs CSV (273Mb)
+## CSV PARSER BENCHMARK RESULTS - ROW COUNTING TEST
 
-Based on the provided benchmark data for a 273 MB CSV file with 5 million rows, here's the performance comparison table in markdown format:
+```console
+# by running :
+$ bash ./benchmark_cli.sh
+```
 
-| Parser        | Speed (MB/s) | Time (ms) | Relative       |
-|---------------|--------------|-----------|----------------|
-| **cisv**      | 7,184        | 38        | 1.0x           |
-| rust-csv      | 391          | 698       | 18x slower     |
-| xsv           | 650          | 420       | 11x slower     |
-| csvkit        | 28           | 9,875     | 260x slower    |
+### TEST FILES
 
-- **cisv** dominates with **7,184 MB/s** throughput, processing the file in just **38 ms** (18-260x faster than others)
-- **xsv** (Rust CLI) is the second fastest at 650 MB/s (11x slower than cisv)
-- **rust-csv** (library) shows lower throughput despite being Rust-based
-- **csvkit** (Python) is slowest at 28 MB/s due to Python interpreter overhead
+| File | Rows | Size |
+|------|------|------|
+| small.csv | 1,000 | 84 KB |
+| medium.csv | 100,000 | 9.2 MB |
+| large.csv | 1,000,000 | 98 MB |
+| xlarge.csv | 10,000,000 | 1.1 GB |
 
-**IMPORTANT NOTE**: cisv outperforms even the baseline `wc -l` (0.072s = 72ms), which only counts lines without parsing CSV structure. All tests ran on the same 273 MB file.
+### Benchmark Results for small.csv (1K rows, 84 KB)
 
-**NOTE:** For a much more detail benchmark, you have to run `benchmark_cli.sh` wich test on 1k, 100k, 1M and 10M rows.
+| Tool | Time (seconds) | Time (ms) | Memory (KB) | Relative Speed | Status |
+|------|----------------|-----------|-------------|----------------|---------|
+| **cisv (baseline)** | 0.003314527 | 3.31 | 3,648 | 1.0x | ✓ |
+| **wc -l** | 0.002764321 | 2.76 | 3,688 | 0.83x faster | ✓ |
+| **miller** | 0.003727007 | 3.73 | 3,728 | 1.12x slower | ❌ Error |
+| **rust-csv** | 0.004020831 | 4.02 | 3,660 | 1.21x slower | ✓ |
+| **xsv** | 0.013443824 | 13.44 | 5,944 | 4.06x slower | ✓ |
+| **csvkit** | 0.313832731 | 313.83 | 25,564 | 94.7x slower | ✓ |
+
+*Note: The benchmark script runs the same tests on medium.csv, large.csv, and xlarge.csv. For complete results, you would need to capture the output for all file sizes. Each test is run 3 times and the total time is reported.*
+
+### EXPECTED PERFORMANCE SCALING
+
+Based on the file sizes:
+
+- **medium.csv**: ~110x larger than small.csv
+- **large.csv**: ~1,170x larger than small.csv
+- **xlarge.csv**: ~13,100x larger than small.csv
+
+The actual performance difference between tools typically becomes more pronounced with larger files, where cisv's SIMD optimizations and memory-mapped I/O should show greater benefits compared to traditional parsers.
 
 ## INSTALLATION
 
