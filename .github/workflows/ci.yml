@@ -42,7 +42,7 @@ jobs:
        echo "id,name,value" > test.csv
        echo "1,test,100" >> test.csv
        echo "2,demo,200" >> test.csv
-       ./cisv -c test.csv | grep -q "2"
+       ./cisv -c test.csv | grep -q "3" # including headers
        ./cisv test.csv
        ./cisv -s 0,2 test.csv
        ./cisv --head 1 test.csv
