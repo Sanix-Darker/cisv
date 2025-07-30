@@ -74,6 +74,60 @@ Based on the file sizes:
 
 The actual performance difference between tools typically becomes more pronounced with larger files, where cisv's SIMD optimizations and memory-mapped I/O should show greater benefits compared to traditional parsers.
 
+
+## RUN BENCHMARK YOURSELF (with docker)
+
+```bash
+# Build the Docker image
+$ docker build -t cisv-benchmark .
+
+# Run with CPU and memory limits for consistent results
+# This example uses 2 CPUs and 4GB RAM
+$ docker run --rm \
+  --cpus="2.0" \
+  --memory="4g" \
+  --memory-swap="4g" \
+  --cpu-shares=1024 \
+  --security-opt seccomp=unconfined \
+  cisv-benchmark
+
+# For even more isolation, use specific CPU cores (e.g., cores 2-3)
+$ docker run --rm \
+  --cpuset-cpus="2-3" \
+  --memory="4g" \
+  --memory-swap="4g" \
+  --cpu-shares=1024 \
+  --security-opt seccomp=unconfined \
+  cisv-benchmark
+
+# To save results to host
+$ docker run --rm \
+  --cpus="2.0" \
+  --memory="4g" \
+  --memory-swap="4g" \
+  -v $(pwd)/results:/results \
+  cisv-benchmark bash -c '/home/benchmark/run_benchmarks.sh | tee /results/benchmark-$(date +%Y%m%d-%H%M%S).log'
+```
+
+Or, for even better isolation and consistent results, you can disable CPU frequency scaling on the host
+
+```bash
+# On the host system (requires root)
+# Save current governor
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor > /tmp/governors.txt
+
+# Set performance mode for consistent CPU frequency
+for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    echo performance | sudo tee $cpu
+done
+
+# Run benchmarks
+docker run --rm --cpus="2.0" --memory="4g" cisv-benchmark
+
+# Restore original governors
+# ... restore from /tmp/governors.txt
+```
+
 ## INSTALLATION
 
 ### NODE.JS PACKAGE (napi binding)
