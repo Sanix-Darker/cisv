@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        arch: [amd64]
+        arch: [amd64, arm64]
         include:
           - os: ubuntu-latest
             pkg_os: ubuntu
@@ -66,7 +66,7 @@ jobs:
         run: |
           npm run build
           # Package node addon
-          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${ARCH}.node"
+          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}${ARCH}.node"
           cp build/Release/cisv.node "$ADDON_OUTPUT"
           echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
 
