@@ -94,6 +94,7 @@
     #include <fcntl.h>
     #include <unistd.h>
     #include <getopt.h>
+    #include <sys/time.h>
 #else
     #error "Unsupported platform"
 #endif
