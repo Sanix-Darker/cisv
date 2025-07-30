@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        arch: [amd64]
+        arch: [amd64, arm64]
         include:
           - os: ubuntu-latest
             pkg_os: ubuntu
