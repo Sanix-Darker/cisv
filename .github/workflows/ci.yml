@@ -31,7 +31,9 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build CLI
       run: |
+        npm install -g node-gyp
         make clean
+        make build
         make cli
     - name: Test CLI basic functionality
       run: |
@@ -45,7 +47,7 @@ jobs:
         ./cisv -s 0,2 test.csv
         ./cisv --head 1 test.csv
     - name: Upload CLI binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: cisv-${{ matrix.os }}
         path: cisv
@@ -61,7 +63,9 @@ jobs:
         sudo apt-get install -y valgrind cppcheck clang-tools
     - name: Build CLI with debug symbols
       run: |
+        npm install -g node-gyp
         make clean
+        make build
         CFLAGS="-g -O0" make cli
     - name: Run memory leak tests with Valgrind
       run: |
@@ -87,7 +91,7 @@ jobs:
         ./cisv -s 0,2,3 test_select.csv
     - name: Upload memory check results
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: memory-check-logs
         path: valgrind-*.log
