@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         arch: [amd64]
         include:
           - os: ubuntu-latest
@@ -49,9 +49,6 @@ jobs:
           OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-latest//')
           ARCH="${{ matrix.arch }}"
           EXT=""
-          if [[ "$OS_NAME" == "windows" ]]; then
-            EXT=".exe"
-          fi
 
           # Build cisv with version info
           npm install -g node-gyp
@@ -97,10 +94,6 @@ jobs:
               usr/local/bin
 
             PACKAGE=$(ls cisv_*_${{ matrix.arch }}.deb)
-          elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            # Create zip with both CLI and Node addon
-            7z a cisv-${{ matrix.pkg_os }}-${{ matrix.arch }}.zip "$OUTPUT_FILE" "$ADDON_FILE" README.md LICENSE
-            PACKAGE="cisv-${{ matrix.pkg_os }}-${{ matrix.arch }}.zip"
           else
             # Create tarball with both CLI and Node addon
             tar czf cisv-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz "$OUTPUT_FILE" "$ADDON_FILE" README.md LICENSE
