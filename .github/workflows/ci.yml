@@ -87,8 +87,11 @@ jobs:
         make clean
         CC=clang CFLAGS="-g -O0 -fsanitize=address -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address" make cli
         ./cisv --version
-        ./cisv -c test_select.csv
-        ./cisv -s 0,2,3 test_select.csv
+        echo "id,name,value,x" > test_x.csv
+        echo "1,test,100,a" >> test_x.csv
+        echo "2,demo,200,b" >> test_x.csv
+        ./cisv -c test_x.csv
+        ./cisv -s 0,2,3 test_x.csv
     - name: Upload memory check results
       if: failure()
       uses: actions/upload-artifact@v4
