@@ -307,6 +307,11 @@ void cisv_parser_end(cisv_parser *parser) {
 
 #ifdef CISV_CLI
 
+#include "cisv_writer.h"
+
+// Forward declaration for writer
+int cisv_writer_main(int argc, char *argv[]);
+
 typedef struct {
     size_t row_count;
     size_t field_count;
@@ -427,7 +432,11 @@ static void row_callback(void *user) {
 
 static void print_help(const char *prog) {
     printf("cisv - The fastest CSV parser of the multiverse\n\n");
-    printf("Usage: %s [OPTIONS] [FILE]\n\n", prog);
+    printf("Usage: %s [COMMAND] [OPTIONS] [FILE]\n\n", prog);
+    printf("Commands:\n");
+    printf("  parse    Parse CSV file (default if no command given)\n");
+    printf("  write    Write/generate CSV files\n\n");
+    printf("\n");
     printf("Options:\n");
     printf("  -h, --help              Show this help message\n");
     printf("  -v, --version           Show version information\n");
@@ -444,6 +453,7 @@ static void print_help(const char *prog) {
     printf("  %s -s 0,2,3 data.csv           # Select columns 0, 2, and 3\n", prog);
     printf("  %s --head 10 data.csv          # Show first 10 rows\n", prog);
     printf("  %s -d ';' data.csv             # Use semicolon as delimiter\n", prog);
+    printf("\nFor write options, use: %s write --help\n", prog);
 }
 
 static double get_time_ms() {
@@ -478,6 +488,18 @@ static void benchmark_file(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
+    // Check for write command
+    if (argc > 1 && strcmp(argv[1], "write") == 0) {
+        // Shift arguments and call writer main
+        return cisv_writer_main(argc - 1, argv + 1);
+    }
+
+    // If first arg is "parse", skip it
+    if (argc > 1 && strcmp(argv[1], "parse") == 0) {
+        argc--;
+        argv++;
+    }
+
     static struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
         {"version", no_argument, 0, 'v'},

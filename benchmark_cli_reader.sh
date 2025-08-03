@@ -75,9 +75,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 EOF
-    echo '[[bin]]' >> Cargo.toml
-    echo 'name = "csv-select"' >> Cargo.toml
-    echo 'path = "src/select.rs"' >> Cargo.toml
+    if ! grep -q '^\[\[bin\]\]' Cargo.toml; then
+        echo '[[bin]]' >> Cargo.toml
+        echo 'name = "csv-select"' >> Cargo.toml
+        echo 'path = "src/select.rs"' >> Cargo.toml
+    fi
     cargo build --release --bin csv-select
     cd ../..
 fi
@@ -162,14 +164,16 @@ benchmark() {
     if [[ "$check_cmd" == "exists" ]] || command -v "$check_cmd" > /dev/null 2>&1; then
         echo -e "${BLUE}--- $name ---${NC}"
         # Run 3 times and show average
-        bash -c "start=\$(date +%s.%N); for i in {1..3}; do $cmd $file > /dev/null 2>&1; done; end=\$(date +%s.%N); echo \"Time: \$(echo \"\$end - \$start\" | bc) seconds\"; " && /usr/bin/time -f "Memory: %M KB" bash -c "$cmd $file > /dev/null 2>&1"
+        bash -c "start=\$(date +%s.%N); for i in {1..3}; do $cmd $file > /dev/null 2>&1; done; end=\$(date +%s.%N); echo \"Time: \$(echo \"\$end - \$start\" | bc) seconds\"; "
+        # Memory measurement with error suppression
+        /usr/bin/time -f "Memory: %M KB" bash -c "$cmd $file > /dev/null 2>&1" 2>&1 | grep -v 'Command exited with non-zero status' || true
     else
         echo -e "${RED}$name: Not installed${NC}\n"
     fi
 }
 
 # Run benchmarks for each file size
-for size in "small" "medium" "large" "xlarge"; do
+for size in "small" "medium" "large"; do  # Skip xlarge for all tools
     echo -e "${GREEN}=== Testing with $size.csv ===${NC}\n"
 
     # Count rows test
@@ -193,8 +197,7 @@ for size in "small" "medium" "large" "xlarge"; do
     benchmark "cisv" "./cisv -s 0,2,3" "$size.csv"
 
     if [ -f "./benchmark/rust-csv-bench/target/release/csv-select" ]; then
-        # Note: csv-select expects "file cols" not "file" with redirect
-        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "$size.csv 0,2,3"
+        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select $size.csv 0,2,3" ""
     fi
 
     benchmark "xsv" "xsv select 1,3,4" "$size.csv"  # xsv uses 1-based indexing
@@ -202,8 +205,21 @@ for size in "small" "medium" "large" "xlarge"; do
     benchmark "csvkit" "csvcut -c 1,3,4" "$size.csv"
     benchmark "miller" "mlr --csv cut -f id,email,address" "$size.csv"
 
-    echo -e "${BLUE}${'='*50}${NC}\n"
+    # Fixed separator line
+    echo -e "${BLUE}==================================================${NC}\n"
 done
+
+# Special handling for xlarge file - only test cisv and wc
+echo -e "${GREEN}=== Testing with xlarge.csv (limited tools) ===${NC}\n"
+
+echo -e "${YELLOW}Row counting test:${NC}\n"
+benchmark "cisv" "./cisv -c" "xlarge.csv"
+benchmark "wc -l (baseline)" "wc -l" "xlarge.csv"
+
+echo -e "${YELLOW}Column selection test (columns 0,2,3):${NC}\n"
+benchmark "cisv" "./cisv -s 0,2,3" "xlarge.csv"
+
+echo -e "${BLUE}==================================================${NC}\n"
 
 # cisv specific benchmark mode
 echo -e "${GREEN}=== CISV Benchmark Mode ===${NC}\n"

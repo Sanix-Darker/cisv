@@ -5,8 +5,8 @@ NODE_GYP ?= node-gyp
 
 # CLI binary name
 CLI_BIN = cisv
-# Only cisv_parser.c is needed since it contains main()
-CLI_SRC = src/cisv_parser.c
+# Include both parser and writer
+CLI_SRC = src/cisv_parser.c src/cisv_writer.c
 CLI_OBJ = $(CLI_SRC:.c=.o)
 
 # Build targets
@@ -28,7 +28,10 @@ $(CLI_BIN): $(CLI_OBJ)
 
 # Compile with CISV_CLI defined to include CLI code
 src/cisv_parser.o: src/cisv_parser.c
-	$(CC) $(CFLAGS) -DCISV_CLI -c -o $@ $<
+	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_parser.o src/cisv_parser.c
+
+src/cisv_writer.o: src/cisv_writer.c
+	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_writer.o src/cisv_writer.c
 
 # Install CLI tool to /usr/local/bin
 install-cli: cli
@@ -85,14 +88,11 @@ test: build
 
 # Benchmark comparing cisv CLI with other tools
 benchmark-cli: cli
+	@echo "=== Benchmarking CSV CLI tools ==="
+	@echo "Preparing test file..."
+	@python3 -c "import csv; w=csv.writer(open('bench_test.csv','w')); [w.writerow([i,f'name_{i}',f'email_{i}@test.com',f'city_{i}']) for i in range(1000000)]"
 	@echo ""
-	@echo ""
-	@echo "====== Benchmarking CSV CLI tools ======"
-	@echo ""
-	@echo "Preparing test file... (5MILLIONS rows)"
-	@python3 -c "import csv; w=csv.writer(open('bench_test.csv','w')); [w.writerow([i,f'name_{i}',f'email_{i}@test.com',f'city_{i}']) for i in range(5000000)]"
-	@echo ""
-	@echo "--- cisv ---"
+	@echo "--- cisv (this project) ---"
 	@bash -c "TIMEFORMAT='real %3R'; time ./$(CLI_BIN) -c bench_test.csv 2>&1"
 	@if [ -f benchmark/rust-csv-bench/target/release/csv-bench ]; then \
 		echo ""; \
@@ -119,10 +119,14 @@ benchmark-cli: cli
 		echo "--- csvkit (Python) ---"; \
 		bash -c "TIMEFORMAT='real %3R'; time csvstat --count bench_test.csv 2>&1" || echo "csvkit failed - may need: pip3 install --upgrade babel csvkit"; \
 	fi
+	@if command -v mlr > /dev/null 2>&1; then \
+		echo ""; \
+		echo "--- Miller ---"; \
+		bash -c "TIMEFORMAT='real %3R'; time mlr --csv count bench_test.csv 2>&1"; \
+	fi
 	@echo ""
-	@echo "File size: " && ls -lh bench_test.csv | awk '{print $5}'
+	@echo "File size: " && ls -lh bench_test.csv | awk '{print $$5}'
 	@rm -f bench_test.csv
-	@echo ""
 
 benchmark: build
 	node benchmark/benchmark.js $(SAMPLE)
@@ -137,4 +141,17 @@ coverage:
 package: clean build test
 	npm pack
 
-.PHONY: all build cli clean test benchmark benchmark-cli perf coverage package install-cli install-benchmark-deps
+# Test writer functionality
+test-writer: cli
+	chmod +x test_writer.sh
+	./test_writer.sh
+
+# Benchmark writer performance
+benchmark-writer: cli
+	chmod +x benchmark_cli_writer.sh
+	./benchmark_cli_writer.sh
+
+# Run all benchmarks
+benchmark-all: benchmark-cli benchmark-writer
+
+.PHONY: all build cli clean test benchmark benchmark-cli benchmark-writer benchmark-all perf coverage package install-cli install-benchmark-deps test-writer

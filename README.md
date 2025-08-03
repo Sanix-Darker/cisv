@@ -5,7 +5,12 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 
-> **cisv** is a high-performance CSV parser that leverages SIMD instructions and zero-copy memory mapping to achieve unparalleled parsing speeds. Available as both a Node.js native addon and a standalone CLI tool.
+> **cisv** is a high-performance CSV parser and writer that leverages SIMD instructions and zero-copy memory mapping to achieve unparalleled parsing and writing speeds. Available as both a Node.js native addon and a standalone CLI tool.
+
+### DISCLAIMER
+
+- The reader/parser is much more optimized than the writer,
+- This project is on hightly dev mode, don't assume everything will not break.
 
 ### PERFORMANCE
 
@@ -64,6 +69,51 @@ $ bash ./benchmark_cli.sh
 
 *Note: The benchmark script runs the same tests on medium.csv, large.csv, and xlarge.csv. For complete results, you would need to capture the output for all file sizes. Each test is run 3 times and the total time is reported.*
 
+## CSV WRITER BENCHMARK RESULTS
+
+```console
+# by running :
+$ bash ./benchmark_cli_writer.sh
+```
+
+### Writer Performance Comparison
+
+#### Small (1K rows, 50 KB)
+
+| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
+|------|----------|-------------------|----------|----------|
+| **C fprintf** | 0.003 | 16.85 | 337,140 | 1.0x (fastest) |
+| **awk** | 0.005 | 10.77 | 215,402 | 1.6x slower |
+| **cisv write** | 0.007 | 6.97 | 139,454 | 2.4x slower |
+| **Python csv** | 0.028 | 1.77 | 35,523 | 9.5x slower |
+
+#### Medium (100K rows, 6.46 MB)
+
+| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
+|------|----------|-------------------|----------|----------|
+| **C fprintf** | 0.057 | 112.73 | 1,745,141 | 1.0x (fastest) |
+| **awk** | 0.199 | 32.39 | 501,544 | 3.5x slower |
+| **cisv write** | 0.203 | 31.80 | 492,326 | 3.5x slower |
+| **Python csv** | 0.265 | 24.71 | 377,888 | 4.6x slower |
+
+#### Large (1M rows, 68.43 MB)
+
+| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
+|------|----------|-------------------|----------|----------|
+| **C fprintf** | 0.611 | 111.96 | 1,636,174 | 1.0x (fastest) |
+| **cisv write** | 1.970 | 34.74 | 507,689 | 3.2x slower |
+| **awk** | 2.139 | 31.98 | 467,476 | 3.5x slower |
+| **Python csv** | 2.568 | 26.98 | 389,422 | 4.2x slower |
+
+#### XLarge (10M rows, 722.53 MB)
+
+| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
+|------|----------|-------------------|----------|----------|
+| **C fprintf** | 6.625 | 109.06 | 1,509,538 | 1.0x (fastest) |
+| **cisv write** | 20.205 | 35.76 | 494,927 | 3.0x slower |
+| **awk** | 22.596 | 31.97 | 442,558 | 3.4x slower |
+| **Python csv** | 27.493 | 26.59 | 363,726 | 4.1x slower |
+
 ### EXPECTED PERFORMANCE SCALING
 
 Based on the file sizes:
@@ -73,7 +123,6 @@ Based on the file sizes:
 - **xlarge.csv**: ~13,100x larger than small.csv
 
 The actual performance difference between tools typically becomes more pronounced with larger files, where cisv's SIMD optimizations and memory-mapped I/O should show greater benefits compared to traditional parsers.
-
 
 ## RUN BENCHMARK YOURSELF (with docker)
 
@@ -156,20 +205,25 @@ make build
 
 ### CLI INTERFACE
 
+#### Reading/Parsing CSV
+
 ```console
 $ ls -alh ./cisv
 Permissions Size User Date Modified Name
 .rwxrwxr-x   18k dk   29 Jul  9:34  ./cisv
 ```
 
-
 ```bash
 $ ./cisv --help
 cisv - The fastest CSV parser of the multiverse
 
-Usage: ./cisv [OPTIONS] [FILE]
+Usage: ./cisv [COMMAND] [OPTIONS] [FILE]
 
-Options:
+Commands:
+  parse    Parse CSV file (default if no command given)
+  write    Write/generate CSV files
+
+Parse Options:
   -h, --help              Show this help message
   -v, --version           Show version information
   -d, --delimiter DELIM   Field delimiter (default: ,)
@@ -180,16 +234,8 @@ Options:
   -o, --output FILE       Write to FILE instead of stdout
   -b, --benchmark         Run benchmark mode
 
-----------
-Examples:
-  ./cisv data.csv                    # Parse and display CSV
-  ./cisv -c data.csv                 # Count rows
-  ./cisv -s 0,2,3 data.csv           # Select columns 0, 2, and 3
-  ./cisv --head 10 data.csv          # Show first 10 rows
-  ./cisv -d ';' data.csv             # Use semicolon as delimiter
+For write options, use: ./cisv write --help
 ```
-
-and for entrypoint :
 
 ```bash
 # Count rows (blazing fast)
@@ -209,6 +255,28 @@ cisv -b huge_file.csv
 
 # Output to file
 cisv -o processed.csv raw_data.csv
+```
+
+#### Writing/Generating CSV
+
+```bash
+# Generate 1 million rows of test data
+cisv write -g 1000000 -o test_data.csv
+
+# Generate with custom delimiter
+cisv write -g 10000 -d '|' -o pipe_delimited.csv
+
+# Always quote all fields
+cisv write -g 10000 -Q -o quoted.csv
+
+# Use CRLF line endings (Windows)
+cisv write -g 10000 -r -o windows.csv
+
+# Benchmark write performance
+cisv write -g 10000000 -o large.csv -b
+
+# Custom null representation
+cisv write -g 1000 -n "NULL" -o with_nulls.csv
 ```
 
 ### NODE.JS API
@@ -261,6 +329,7 @@ const rows: string[][] = parser.parseSync('./data.csv');
 - [x] Streaming API for unlimited file sizes
 - [x] Cross-platform (Linux, macOS, Windows via WSL)
 - [x] Safe fallback for non-x86 architectures
+- [x] High-performance CSV writer with SIMD optimization
 
 ## CONTRIBUTING
 
