@@ -14,7 +14,7 @@ const BENCH_FILE = process.argv[2] || './data.csv';
 const TARGET_ROW_INDEX = 857010;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const results = { sync: [], async: [] };
+const results = { sync: [], sync_data: [], async: [], async_data: [] };
 
 async function runAllBenchmarks() {
     const neatCsv = (await import('neat-csv')).default;
@@ -98,7 +98,7 @@ async function runAllBenchmarks() {
             const result = Papa.parse(fileString, { fastMode: true });
             const specificRow = result.data[TARGET_ROW_INDEX];
           })
-          .on('cycle', (event) => logCycle(event, 'sync'))
+          .on('cycle', (event) => logCycle(event, 'sync_data'))
           .on('error', reject)
           .on('complete', function() {
             console.log(`\n>>>>> Fastest Sync is ${this.filter('fastest').map('name')}\n`);
@@ -214,7 +214,7 @@ async function runAllBenchmarks() {
                 .catch((err) => deferred.reject(err));
             }
           })
-          .on('cycle', (event) => logCycle(event, 'async'))
+          .on('cycle', (event) => logCycle(event, 'async_data'))
           .on('error', reject)
           .on('complete', function() {
             console.log(`\n>>>>> Fastest Async is ${this.filter('fastest').map('name')}\n`);
@@ -256,6 +256,14 @@ async function runAllBenchmarks() {
         });
         console.log(syncTable);
 
+        console.log('### Synchronous Results (with data access)\n');
+        let syncTabled = '| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
+        syncTabled +=    '|--------------------|--------------|---------------|----------------|\n';
+        results.sync_data.forEach(r => {
+            syncTabled += `| ${r.name.padEnd(18)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
+        });
+        console.log(syncTabled);
+
         console.log('\n### Asynchronous Results\n');
         let asyncTable = '| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
         asyncTable +=    '|--------------------------|--------------|---------------|----------------|\n';
@@ -263,6 +271,14 @@ async function runAllBenchmarks() {
             asyncTable += `| ${r.name.padEnd(24)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
         });
         console.log(asyncTable);
+
+        console.log('\n### Asynchronous Results (with data access)\n');
+        let asyncTabled = '| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
+        asyncTabled +=    '|--------------------------|--------------|---------------|----------------|\n';
+        results.async_data.forEach(r => {
+            asyncTabled += `| ${r.name.padEnd(24)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
+        });
+        console.log(asyncTabled);
     }
 }
 
