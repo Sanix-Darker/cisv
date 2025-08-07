@@ -302,6 +302,16 @@ fs.createReadStream('./huge.csv')
   });
 ```
 
+**NOTE:** there are dependencies for benchmarking other tools
+```json
+  "dependencies": {
+    "csv-parse": "^6.0.0",
+    "fast-csv": "^5.0.2",
+    "neat-csv": "^7.0.0",
+    "papaparse": "^5.5.3"
+  }
+``
+
 ### TYPESCRIPT SUPPORT
 
 (yes)
@@ -312,6 +322,44 @@ import { cisvParser } from 'cisv';
 const parser = new cisvParser();
 const rows: string[][] = parser.parseSync('./data.csv');
 ```
+
+### BENCHMARS for the npm lib napi
+
+#### Synchronous Results
+
+| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------|--------------|---------------|----------------|
+| cisv (sync)        | 56.99        | 0.01          | 126880         |
+| csv-parse (sync)   | 15.70        | 0.03          | 34950          |
+| papaparse (sync)   | 26.78        | 0.02          | 59612          |
+
+#### Synchronous Results (with data access)
+
+| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------|--------------|---------------|----------------|
+| cisv (sync)        | 61.24        | 0.01          | 136343         |
+| csv-parse (sync)   | 15.48        | 0.03          | 34471          |
+| papaparse (sync)   | 25.67        | 0.02          | 57147          |
+
+
+#### Asynchronous Results
+
+| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------------|--------------|---------------|----------------|
+| cisv (async/stream)      | 76.94        | 0.01          | 171287         |
+| papaparse (async/stream) | 16.54        | 0.03          | 36815          |
+| neat-csv (async/promise) | 8.11         | 0.06          | 18055          |
+
+
+#### Asynchronous Results (with data access)
+
+| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------------|--------------|---------------|----------------|
+| cisv (async/stream)      | 52.48        | 0.01          | 116829         |
+| papaparse (async/stream) | 17.58        | 0.03          | 39131          |
+| neat-csv (async/promise) | 8.26         | 0.05          | 18385          |
+
+For more details, check `./benchmark/benchmark.js`
 
 ## TECHNICAL DETAILS
 

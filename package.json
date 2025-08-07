@@ -29,7 +29,11 @@
     "node-addon-api": "^5.0.0",
     "nyc": "^15.0.0",
     "ts-mocha": "^10.1.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "csv-parse": "^6.0.0",
+    "fast-csv": "^5.0.2",
+    "neat-csv": "^7.0.0",
+    "papaparse": "^5.5.3"
   },
   "gypfile": true,
   "keywords": [
