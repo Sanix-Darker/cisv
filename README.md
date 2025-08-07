@@ -302,6 +302,16 @@ fs.createReadStream('./huge.csv')
   });
 ```
 
+**NOTE:** there are dependencies for benchmarking other tools
+```json
+  "dependencies": {
+    "csv-parse": "^6.0.0",
+    "fast-csv": "^5.0.2",
+    "neat-csv": "^7.0.0",
+    "papaparse": "^5.5.3"
+  }
+``
+
 ### TYPESCRIPT SUPPORT
 
 (yes)

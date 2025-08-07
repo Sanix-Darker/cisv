@@ -6,16 +6,17 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
-// not dealing with windows for now, too much issues
+// NOTE: not dealing with windows for now, too much issues
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/time.h>
+#include "./cisv_simd.h"
 #include "cisv_parser.h"
 
-// NOTE: this is at compile time only
 #define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)
+#define PREFETCH_DISTANCE 256
 
 struct cisv_parser {
     uint8_t *base;              // pointer to the whole input, if memory-mapped
@@ -23,24 +24,74 @@ struct cisv_parser {
     int fd;                     // the underlying file descriptor (-1 ⇒ none)
     uint8_t *ring;              // malloc’ed circular buffer when not mmapped
     size_t head;                // write head: next byte slot to fill
-    enum {
-        S_UNQUOTED,             // Parsing ordinary characters outside quotes.
-
-        S_QUOTED,               // Inside a quoted field. Delimiters/newlines are treated as data.
-
-        S_QUOTE_ESC             // Just saw a ". Decide whether it’s a doubled quote ("" → stay in field) or
-                                // the closing quote.
-    } st;
+    uint8_t st;
     cisv_field_cb fcb;           // field callback fired whenever a full cell is ready
-                                // (delimiter or row-ending newline encountered, consistent with RFC 4180 rules)
+                                 // (delimiter or row-ending newline encountered, consistent with RFC 4180 rules)
 
     cisv_row_cb rcb;             // row callback fired after the last field of each record
     void *user;
-    const uint8_t *field_start; // where the in-progress field began
+    const uint8_t *field_start;  // where the in-progress field began
 };
 
+// State constants for branchless operations
+#define S_UNQUOTED  0
+#define S_QUOTED    1
+#define S_QUOTE_ESC 2
+
+// Action flags for each character in each state
+#define ACT_NONE       0
+#define ACT_FIELD      1
+#define ACT_ROW        2
+#define ACT_REPROCESS  4
+
+// Lookup tables for branchless state transitions - initialized at compile time
+static uint8_t state_table[3][256];
+static uint8_t action_table[3][256];
+static int tables_initialized = 0;
+
+// Initialize lookup tables (called lazily)
+static void init_tables(void) {
+    if (tables_initialized) return;
+
+    // Initialize state transitions
+    for (int c = 0; c < 256; c++) {
+        // S_UNQUOTED transitions
+        state_table[S_UNQUOTED][c] = S_UNQUOTED;
+        if (c == '"') state_table[S_UNQUOTED][c] = S_QUOTED;
+
+        // S_QUOTED transitions
+        state_table[S_QUOTED][c] = S_QUOTED;
+        if (c == '"') state_table[S_QUOTED][c] = S_QUOTE_ESC;
+
+        // S_QUOTE_ESC transitions
+        if (c == '"') {
+            state_table[S_QUOTE_ESC][c] = S_QUOTED;
+        } else {
+            state_table[S_QUOTE_ESC][c] = S_UNQUOTED;
+        }
+    }
+
+    // Initialize action table
+    memset(action_table, ACT_NONE, sizeof(action_table));
+
+    // S_UNQUOTED actions
+    action_table[S_UNQUOTED][','] = ACT_FIELD;
+    action_table[S_UNQUOTED]['\n'] = ACT_FIELD | ACT_ROW;
+
+    // S_QUOTE_ESC actions
+    for (int c = 0; c < 256; c++) {
+        if (c != '"') {
+            action_table[S_QUOTE_ESC][c] = ACT_REPROCESS;
+        }
+    }
+
+    tables_initialized = 1;
+}
+
 static inline void yield_field(cisv_parser *parser, const uint8_t *start, const uint8_t *end) {
-    if (parser->fcb && start && end && end >= start) {
+    // Branchless check: multiply callback by validity flag
+    size_t valid = (parser->fcb != NULL) & (start != NULL) & (end != NULL) & (end >= start);
+    if (valid) {
         parser->fcb(parser->user, (const char *)start, (size_t)(end - start));
     }
 }
@@ -51,45 +102,175 @@ static inline void yield_row(cisv_parser *parser) {
     }
 }
 
-static void parse_scalar(cisv_parser *parser, const uint8_t *buffer, size_t len) {
+#if defined(cisv_HAVE_AVX512) || defined(cisv_HAVE_AVX2)
+
+static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
+    // Ensure tables are initialized
+    if (!tables_initialized) init_tables();
+
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
 
-    for (; cur < end; ++cur) {
-        uint8_t c = *cur;
-        switch (parser->st) {
-            case S_UNQUOTED:
-                if (c == ',') {
-                    yield_field(parser, parser->field_start, cur);
-                    parser->field_start = cur + 1;
-                } else if (c == '"') {
-                    parser->st = S_QUOTED;
-                } else if (c == '\n') {
-                    yield_field(parser, parser->field_start, cur);
+    // SIMD constants - create them on stack to avoid segfault
+    uint8_t comma_bytes[64];
+    uint8_t quote_bytes[64];
+    uint8_t newline_bytes[64];
+    memset(comma_bytes, ',', 64);
+    memset(quote_bytes, '"', 64);
+    memset(newline_bytes, '\n', 64);
+
+    const cisv_vec comma_vec = cisv_LOAD(comma_bytes);
+    const cisv_vec quote_vec = cisv_LOAD(quote_bytes);
+    const cisv_vec newline_vec = cisv_LOAD(newline_bytes);
+
+    while (cur + cisv_VEC_BYTES <= end) {
+        // Prefetch next chunk
+        __builtin_prefetch(cur + PREFETCH_DISTANCE, 0, 1);
+
+        // Fast path for unquoted state
+        if (parser->st == S_UNQUOTED) {
+            cisv_vec chunk = cisv_LOAD(cur);
+
+            #ifdef cisv_HAVE_AVX512
+                uint64_t comma_mask = cisv_CMP_EQ(chunk, comma_vec);
+                uint64_t quote_mask = cisv_CMP_EQ(chunk, quote_vec);
+                uint64_t newline_mask = cisv_CMP_EQ(chunk, newline_vec);
+                uint64_t combined = comma_mask | quote_mask | newline_mask;
+            #else
+                cisv_vec comma_cmp = cisv_CMP_EQ(chunk, comma_vec);
+                cisv_vec quote_cmp = cisv_CMP_EQ(chunk, quote_vec);
+                cisv_vec newline_cmp = cisv_CMP_EQ(chunk, newline_vec);
+                cisv_vec combined_vec = cisv_OR_MASK(cisv_OR_MASK(comma_cmp, quote_cmp), newline_cmp);
+                uint32_t combined = cisv_MOVEMASK(combined_vec);
+            #endif
+
+            if (!combined) {
+                // No special chars, skip entire vector
+                cur += cisv_VEC_BYTES;
+                continue;
+            }
+
+            // Process special characters
+            while (combined) {
+                size_t pos = cisv_CTZ(combined);
+                const uint8_t *special_pos = cur + pos;
+                uint8_t c = *special_pos;
+
+                // Branchless field/row handling
+                uint8_t is_comma = (c == ',');
+                uint8_t is_newline = (c == '\n');
+                uint8_t is_quote = (c == '"');
+
+                // Process field before special char
+                if (special_pos > parser->field_start && (is_comma | is_newline)) {
+                    yield_field(parser, parser->field_start, special_pos);
+                    parser->field_start = special_pos + 1;
+                }
+
+                // Handle newline
+                if (is_newline) {
                     yield_row(parser);
-                    parser->field_start = cur + 1;
                 }
-                break;
-            case S_QUOTED:
-                if (c == '"') parser->st = S_QUOTE_ESC;
-                break;
-            case S_QUOTE_ESC:
-                if (c == '"') {
-                    parser->st = S_QUOTED;
-                } else {
-                    parser->st = S_UNQUOTED;
-                    cur--;
-                }
-                break;
+
+                // Update state branchlessly
+                parser->st = (parser->st & ~is_quote) | (S_QUOTED & -is_quote);
+
+                // Clear processed bit
+                combined &= combined - 1;
+            }
+
+            cur += cisv_VEC_BYTES;
+        } else {
+            // In quoted state - need scalar processing
+            break;
         }
     }
+
+    // Handle remainder with scalar code
+    while (cur < end) {
+        uint8_t c = *cur;
+        uint8_t next_state = state_table[parser->st][c];
+        uint8_t action = action_table[parser->st][c];
+
+        // Branchless state update
+        parser->st = next_state;
+
+        // Handle actions branchlessly where possible
+        if (action & ACT_FIELD) {
+            yield_field(parser, parser->field_start, cur);
+            parser->field_start = cur + 1;
+        }
+        if (action & ACT_ROW) {
+            yield_row(parser);
+        }
+
+        // Reprocess requires going back
+        cur += 1 - ((action & ACT_REPROCESS) >> 2);
+    }
 }
+
+#else
+// Non-SIMD fallback with branchless optimizations
+static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
+    // Ensure tables are initialized
+    if (!tables_initialized) init_tables();
+
+    const uint8_t *cur = buffer;
+    const uint8_t *end = buffer + len;
+
+    // Unroll loop by 8 for better performance
+    while (cur + 8 <= end) {
+        __builtin_prefetch(cur + 64, 0, 1);
+
+        for (int i = 0; i < 8; i++) {
+            uint8_t c = cur[i];
+            uint8_t next_state = state_table[parser->st][c];
+            uint8_t action = action_table[parser->st][c];
+
+            parser->st = next_state;
+
+            if (action & ACT_FIELD) {
+                yield_field(parser, parser->field_start, cur + i);
+                parser->field_start = cur + i + 1;
+            }
+            if (action & ACT_ROW) {
+                yield_row(parser);
+            }
+            if (action & ACT_REPROCESS) {
+                i--;
+            }
+        }
+        cur += 8;
+    }
+
+    // Handle remainder
+    while (cur < end) {
+        uint8_t c = *cur;
+        uint8_t next_state = state_table[parser->st][c];
+        uint8_t action = action_table[parser->st][c];
+
+        parser->st = next_state;
+
+        if (action & ACT_FIELD) {
+            yield_field(parser, parser->field_start, cur);
+            parser->field_start = cur + 1;
+        }
+        if (action & ACT_ROW) {
+            yield_row(parser);
+        }
+
+        cur += 1 - ((action & ACT_REPROCESS) >> 2);
+    }
+}
+#endif
 
 static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     parser->field_start = buffer;
     parser->st = S_UNQUOTED;
-    parse_scalar(parser, buffer, len);
 
+    parse_simd_chunk(parser, buffer, len);
+
+    // Handle final field if needed
     if (parser->field_start < buffer + len) {
         yield_field(parser, parser->field_start, buffer + len);
     }
@@ -117,10 +298,49 @@ size_t cisv_parser_count_rows(const char *path) {
         return 0;
     }
 
+    // Use madvise for sequential access
+    madvise(base, st.st_size, MADV_SEQUENTIAL);
+
     size_t count = 0;
-    for (size_t i = 0; i < (size_t)st.st_size; i++) {
-        if (base[i] == '\n') count++;
+
+#if defined(cisv_HAVE_AVX512) || defined(cisv_HAVE_AVX2)
+    uint8_t newline_bytes[64];
+    memset(newline_bytes, '\n', 64);
+    const cisv_vec newline_vec = cisv_LOAD(newline_bytes);
+
+    size_t i = 0;
+    for (; i + cisv_VEC_BYTES <= (size_t)st.st_size; i += cisv_VEC_BYTES) {
+        cisv_vec chunk = cisv_LOAD(base + i);
+        #ifdef cisv_HAVE_AVX512
+            uint64_t mask = cisv_CMP_EQ(chunk, newline_vec);
+            count += __builtin_popcountll(mask);
+        #else
+            uint32_t mask = cisv_MOVEMASK(cisv_CMP_EQ(chunk, newline_vec));
+            count += __builtin_popcount(mask);
+        #endif
     }
+
+    // Handle remainder
+    for (; i < (size_t)st.st_size; i++) {
+        count += (base[i] == '\n');
+    }
+#else
+    // Unrolled scalar version
+    size_t i = 0;
+    for (; i + 8 <= (size_t)st.st_size; i += 8) {
+        count += (base[i] == '\n');
+        count += (base[i+1] == '\n');
+        count += (base[i+2] == '\n');
+        count += (base[i+3] == '\n');
+        count += (base[i+4] == '\n');
+        count += (base[i+5] == '\n');
+        count += (base[i+6] == '\n');
+        count += (base[i+7] == '\n');
+    }
+    for (; i < (size_t)st.st_size; i++) {
+        count += (base[i] == '\n');
+    }
+#endif
 
     munmap(base, st.st_size);
     close(fd);
@@ -131,8 +351,8 @@ cisv_parser *cisv_parser_create(cisv_field_cb fcb, cisv_row_cb rcb, void *user) 
     cisv_parser *parser = calloc(1, sizeof(*parser));
     if (!parser) return NULL;
 
-    parser->ring = malloc(RINGBUF_SIZE + 64);
-    if (!parser->ring) {
+    // Align ring buffer to cache line
+    if (posix_memalign((void**)&parser->ring, 64, RINGBUF_SIZE + 64) != 0) {
         free(parser);
         return NULL;
     }
@@ -162,6 +382,9 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     parser->fd = open(path, O_RDONLY);
     if (parser->fd < 0) return -errno;
 
+    // Use posix_fadvise for sequential access hint
+    posix_fadvise(parser->fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+
     if (fstat(parser->fd, &st) < 0) {
         int err = errno;
         close(parser->fd);
@@ -176,7 +399,7 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     }
 
     parser->size = st.st_size;
-    parser->base = mmap(NULL, parser->size, PROT_READ, MAP_PRIVATE, parser->fd, 0);
+    parser->base = mmap(NULL, parser->size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, parser->fd, 0);
     if (parser->base == MAP_FAILED) {
         int err = errno;
         close(parser->fd);
@@ -184,13 +407,18 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
         return -err;
     }
 
+    // Advise kernel about access pattern
+    madvise(parser->base, parser->size, MADV_SEQUENTIAL);
+
     return parse_memory(parser, parser->base, parser->size);
 }
 
 int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len) {
     if (!parser || !chunk || len >= RINGBUF_SIZE) return -EINVAL;
 
-    if (parser->head + len > RINGBUF_SIZE) {
+    // Branchless overflow handling
+    size_t overflow = (parser->head + len > RINGBUF_SIZE);
+    if (overflow) {
         parse_memory(parser, parser->ring, parser->head);
         parser->head = 0;
     }
@@ -198,7 +426,10 @@ int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len) {
     memcpy(parser->ring + parser->head, chunk, len);
     parser->head += len;
 
-    if (memchr(chunk, '\n', len) || parser->head > (RINGBUF_SIZE / 2)) {
+    // Check for newline or buffer threshold
+    uint8_t has_newline = (memchr(chunk, '\n', len) != NULL);
+    uint8_t threshold = (parser->head > (RINGBUF_SIZE / 2));
+    if (has_newline | threshold) {
         parse_memory(parser, parser->ring, parser->head);
         parser->head = 0;
     }
