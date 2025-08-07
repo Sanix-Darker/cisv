@@ -26,6 +26,28 @@ size_t cisv_parser_count_rows(const char *path);
 int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len);
 void cisv_parser_end(cisv_parser *parser);
 
+
+// Platform-specific defines
+#ifdef __linux__
+    #define HAS_POSIX_FADVISE 1
+    #define HAS_MAP_POPULATE 1
+#endif
+
+#ifdef __APPLE__
+    #include <sys/types.h>
+    #include <sys/sysctl.h>
+    // F_RDADVISE for macOS file hints
+    #ifdef F_RDADVISE
+        #define HAS_RDADVISE 1
+    #endif
+#endif
+
+// ARM NEON support detection
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    #include <arm_neon.h>
+    #define HAS_NEON 1
+#endif
+
 #ifdef __cplusplus
 }
 #endif

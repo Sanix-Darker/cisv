@@ -32,7 +32,6 @@ struct cisv_parser {
     void *user;
     const uint8_t *field_start;  // where the in-progress field began
 };
-
 // State constants for branchless operations
 #define S_UNQUOTED  0
 #define S_QUOTED    1
@@ -209,6 +208,89 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
     }
 }
 
+#elif defined(HAS_NEON)
+
+// ARM NEON optimized parsing
+static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
+    // Ensure tables are initialized
+    if (!tables_initialized) init_tables();
+
+    const uint8_t *cur = buffer;
+    const uint8_t *end = buffer + len;
+
+    // NEON constants
+    uint8x16_t comma_vec = vdupq_n_u8(',');
+    uint8x16_t quote_vec = vdupq_n_u8('"');
+    uint8x16_t newline_vec = vdupq_n_u8('\n');
+
+    while (cur + 16 <= end && parser->st == S_UNQUOTED) {
+        // Prefetch next chunk
+        __builtin_prefetch(cur + 64, 0, 1);
+
+        // Load 16 bytes
+        uint8x16_t chunk = vld1q_u8(cur);
+
+        // Compare with special characters
+        uint8x16_t comma_cmp = vceqq_u8(chunk, comma_vec);
+        uint8x16_t quote_cmp = vceqq_u8(chunk, quote_vec);
+        uint8x16_t newline_cmp = vceqq_u8(chunk, newline_vec);
+
+        // Combine masks
+        uint8x16_t combined = vorrq_u8(vorrq_u8(comma_cmp, quote_cmp), newline_cmp);
+
+        // Check if any special char found
+        uint64_t mask_low = vgetq_lane_u64(vreinterpretq_u64_u8(combined), 0);
+        uint64_t mask_high = vgetq_lane_u64(vreinterpretq_u64_u8(combined), 1);
+
+        if (!(mask_low | mask_high)) {
+            // No special chars, advance
+            cur += 16;
+            continue;
+        }
+
+        // Process special characters byte by byte
+        for (int i = 0; i < 16 && cur + i < end; i++) {
+            uint8_t c = cur[i];
+            if (c == ',' || c == '\n' || c == '"') {
+                if (c == ',' || c == '\n') {
+                    if (cur + i > parser->field_start) {
+                        yield_field(parser, parser->field_start, cur + i);
+                        parser->field_start = cur + i + 1;
+                    }
+                    if (c == '\n') {
+                        yield_row(parser);
+                    }
+                } else if (c == '"') {
+                    parser->st = S_QUOTED;
+                    cur += i + 1;
+                    goto scalar_fallback;
+                }
+            }
+        }
+        cur += 16;
+    }
+
+scalar_fallback:
+    // Handle remainder with scalar code
+    while (cur < end) {
+        uint8_t c = *cur;
+        uint8_t next_state = state_table[parser->st][c];
+        uint8_t action = action_table[parser->st][c];
+
+        parser->st = next_state;
+
+        if (action & ACT_FIELD) {
+            yield_field(parser, parser->field_start, cur);
+            parser->field_start = cur + 1;
+        }
+        if (action & ACT_ROW) {
+            yield_row(parser);
+        }
+
+        cur += 1 - ((action & ACT_REPROCESS) >> 2);
+    }
+}
+
 #else
 // Non-SIMD fallback with branchless optimizations
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
@@ -304,6 +386,7 @@ size_t cisv_parser_count_rows(const char *path) {
     size_t count = 0;
 
 #if defined(cisv_HAVE_AVX512) || defined(cisv_HAVE_AVX2)
+    // x86 SIMD path
     uint8_t newline_bytes[64];
     memset(newline_bytes, '\n', 64);
     const cisv_vec newline_vec = cisv_LOAD(newline_bytes);
@@ -318,6 +401,41 @@ size_t cisv_parser_count_rows(const char *path) {
             uint32_t mask = cisv_MOVEMASK(cisv_CMP_EQ(chunk, newline_vec));
             count += __builtin_popcount(mask);
         #endif
+    }
+
+    // Handle remainder
+    for (; i < (size_t)st.st_size; i++) {
+        count += (base[i] == '\n');
+    }
+#elif defined(HAS_NEON)
+    // ARM NEON path
+    uint8x16_t newline_vec = vdupq_n_u8('\n');
+    size_t i = 0;
+
+    // Process 64 bytes at a time using 4 NEON registers
+    for (; i + 64 <= (size_t)st.st_size; i += 64) {
+        uint8x16_t data0 = vld1q_u8(base + i);
+        uint8x16_t data1 = vld1q_u8(base + i + 16);
+        uint8x16_t data2 = vld1q_u8(base + i + 32);
+        uint8x16_t data3 = vld1q_u8(base + i + 48);
+
+        uint8x16_t cmp0 = vceqq_u8(data0, newline_vec);
+        uint8x16_t cmp1 = vceqq_u8(data1, newline_vec);
+        uint8x16_t cmp2 = vceqq_u8(data2, newline_vec);
+        uint8x16_t cmp3 = vceqq_u8(data3, newline_vec);
+
+        // Count set bits in comparison results
+        count += vaddvq_u8(vandq_u8(cmp0, vdupq_n_u8(1)));
+        count += vaddvq_u8(vandq_u8(cmp1, vdupq_n_u8(1)));
+        count += vaddvq_u8(vandq_u8(cmp2, vdupq_n_u8(1)));
+        count += vaddvq_u8(vandq_u8(cmp3, vdupq_n_u8(1)));
+    }
+
+    // Process 16 bytes at a time
+    for (; i + 16 <= (size_t)st.st_size; i += 16) {
+        uint8x16_t data = vld1q_u8(base + i);
+        uint8x16_t cmp = vceqq_u8(data, newline_vec);
+        count += vaddvq_u8(vandq_u8(cmp, vdupq_n_u8(1)));
     }
 
     // Handle remainder
@@ -382,8 +500,15 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     parser->fd = open(path, O_RDONLY);
     if (parser->fd < 0) return -errno;
 
-    // Use posix_fadvise for sequential access hint
-    posix_fadvise(parser->fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+    // Platform-specific file hints
+    #ifdef HAS_POSIX_FADVISE
+        posix_fadvise(parser->fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+    #elif defined(__APPLE__) && defined(HAS_RDADVISE)
+        struct radvisory radv;
+        radv.ra_offset = 0;
+        radv.ra_count = 0;  // 0 means whole file
+        fcntl(parser->fd, F_RDADVISE, &radv);
+    #endif
 
     if (fstat(parser->fd, &st) < 0) {
         int err = errno;
@@ -399,7 +524,14 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     }
 
     parser->size = st.st_size;
-    parser->base = mmap(NULL, parser->size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, parser->fd, 0);
+
+    // mmap with platform-specific flags
+    int mmap_flags = MAP_PRIVATE;
+    #ifdef HAS_MAP_POPULATE
+        mmap_flags |= MAP_POPULATE;
+    #endif
+
+    parser->base = mmap(NULL, parser->size, PROT_READ, mmap_flags, parser->fd, 0);
     if (parser->base == MAP_FAILED) {
         int err = errno;
         close(parser->fd);
@@ -409,6 +541,9 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
 
     // Advise kernel about access pattern
     madvise(parser->base, parser->size, MADV_SEQUENTIAL);
+    #ifdef MADV_WILLNEED
+        madvise(parser->base, parser->size < (1<<20) ? parser->size : (1<<20), MADV_WILLNEED);
+    #endif
 
     return parse_memory(parser, parser->base, parser->size);
 }
