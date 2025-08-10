@@ -15,15 +15,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest] # , macos-latest
         arch: [amd64, arm64]
         include:
           - os: ubuntu-latest
             pkg_os: ubuntu
             pkg_type: deb
-          - os: macos-latest
-            pkg_os: macos
-            pkg_type: tar.gz
+         # - os: macos-latest
+         #   pkg_os: macos
+         #   pkg_type: tar.gz
 
     steps:
       - name: Checkout
