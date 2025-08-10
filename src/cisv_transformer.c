@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include "cisv_transformer.h"
-#include "cisv_simd.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -12,14 +11,6 @@
 
 #define TRANSFORM_POOL_SIZE (1 << 20)  // 1MB default pool
 #define SIMD_ALIGNMENT 64
-
-static void free_transform_result_if_needed(cisv_transform_result_t *result, const char *original_data) {
-    if (result && result->needs_free && result->data && result->data != original_data) {
-        free(result->data);
-        result->data = NULL;
-        result->needs_free = 0;
-    }
-}
 
 // Create transform pipeline
 cisv_transform_pipeline_t *cisv_transform_pipeline_create(size_t initial_capacity) {
