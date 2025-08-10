@@ -199,7 +199,7 @@ public:
         parse_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
         if (result < 0) {
-            throw Napi::Error::New(env, "Parse error: " + std::to_string(result));
+            throw Napi::Error::New(env, "parse error: " + std::to_string(result));
         }
 
         return drainRows(env);
@@ -265,20 +265,24 @@ public:
             throw Napi::TypeError::New(env, "Expected one argument");
         }
 
-        // Set environment for JS transforms
+        // Make sure JS transforms (if any) can run
         rc_->env = env;
 
         if (info[0].IsBuffer()) {
             auto buf = info[0].As<Napi::Buffer<uint8_t>>();
             cisv_parser_write(parser_, buf.Data(), buf.Length());
             total_bytes_ += buf.Length();
-        } else if (info[0].IsString()) {
-            std::string str = info[0].As<Napi::String>();
-            cisv_parser_write(parser_, (const uint8_t*)str.c_str(), str.length());
-            total_bytes_ += str.length();
-        } else {
-            throw Napi::TypeError::New(env, "Expected Buffer or String");
+            return;
         }
+
+        if (info[0].IsString()) {
+            std::string chunk = info[0].As<Napi::String>();
+            cisv_parser_write(parser_, reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size());
+            total_bytes_ += chunk.size();
+            return;
+        }
+
+        throw Napi::TypeError::New(env, "Expected Buffer or String");
     }
 
     void End(const Napi::CallbackInfo &info) {
