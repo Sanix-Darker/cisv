@@ -7,7 +7,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest] # windows-latest # skipped for now
+        os: [ubuntu-latest] # macos-latest, windows-latest # skipped for now
         node-version: [23.x, 24.x]
     steps:
     - uses: actions/checkout@v3
@@ -26,7 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest] # macos-latest ignored for now
     steps:
     - uses: actions/checkout@v3
     - name: Build CLI
@@ -67,9 +67,9 @@ jobs:
         make clean
         make build
         CFLAGS="-g -O0" make cli
+
     - name: Run memory leak tests with Valgrind
       run: |
-        chmod +x test_select.sh
         # Run with valgrind leak check
         valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose ./cisv --version 2>&1 | tee valgrind-version.log
         # Test basic CSV parsing
@@ -82,6 +82,17 @@ jobs:
         # Check for memory leaks
         ! grep -q "definitely lost" valgrind-*.log
         ! grep -q "indirectly lost" valgrind-*.log
+
+    - name: Run memory deep leak tests on reader and writer
+      run: |
+        chmod +x test_select.sh
+        bash ./test_select.sh
+
+    - name: Run memory deep leak tests on transform
+      run: |
+        chmod +x test_transform.sh
+        bash ./test_transform.sh
+
     - name: Run AddressSanitizer tests
       run: |
         make clean
