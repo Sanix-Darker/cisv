@@ -227,14 +227,17 @@ docker run --rm --cpus="2.0" --memory="4g" cisv-benchmark
 - **Optimized Buffering**: 1MB ring buffer sized for L3 cache efficiency
 - **Compiler Optimizations**: LTO and architecture-specific tuning with `-march=native`
 
-## FEATURES
+## FEATURES (PROS)
 
 - RFC 4180 compliant
 - Handles quoted fields with embedded delimiters
 - Streaming API for unlimited file sizes
-- Cross-platform (Linux, macOS, Windows via WSL)
 - Safe fallback for non-x86 architectures
 - High-performance CSV writer with SIMD optimization
+
+## CONS
+
+- Only Linux support for now (really good on x86_64 CPU)
 
 ## CONTRIBUTING
 

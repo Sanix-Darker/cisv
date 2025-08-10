@@ -12,6 +12,7 @@ const parser1 = new cisvParser()
     .transform(2, 'trim');
 const rows1 = parser1.parseSync('leak_test.csv');
 console.log(`  - Parsed ${rows1.length} rows with 3 transforms`);
+parser1.destroy();
 
 // Test 2: Chain of transforms on same field
 console.log('\nTest 2: Multiple transforms on same field');
@@ -21,6 +22,7 @@ const parser2 = new cisvParser()
     .transform(0, 'lowercase');  // Multiple transforms on field 0
 const rows2 = parser2.parseSync('leak_test.csv');
 console.log(`  - Parsed ${rows2.length} rows with chained transforms`);
+parser2.destroy();
 
 // Test 3: Large dataset with transforms
 console.log('\nTest 3: Large dataset (1000 rows)');
@@ -38,6 +40,7 @@ const parser3 = new cisvParser()
     .transform(4, 'trim');
 const rows3 = parser3.parseSync('leak_test_large.csv');
 console.log(`  - Parsed ${rows3.length} rows with 5 transforms`);
+parser3.destroy();
 
 // Test 4: JavaScript callback transforms
 console.log('\nTest 4: JavaScript callback transforms');
@@ -47,6 +50,7 @@ const parser4 = new cisvParser()
     .transform(2, (val) => parseInt(val) * 2);
 const rows4 = parser4.parseSync('leak_test.csv');
 console.log(`  - Parsed ${rows4.length} rows with JS callbacks`);
+parser4.destroy();
 
 // Test 5: Mixed transforms (native + JS)
 console.log('\nTest 5: Mixed native and JS transforms');
@@ -56,6 +60,7 @@ const parser5 = new cisvParser()
     .transform(2, 'to_int');
 const rows5 = parser5.parseSync('leak_test.csv');
 console.log(`  - Parsed ${rows5.length} rows with mixed transforms`);
+parser5.destroy();
 
 // Test 6: Multiple parser instances
 console.log('\nTest 6: Multiple parser instances');
@@ -66,6 +71,7 @@ for (let i = 0; i < 10; i++) {
         .transform(1, 'trim');
     parsers.push(p);
     p.parseSync('leak_test.csv');
+    p.destroy();
 }
 console.log(`  - Created and used ${parsers.length} parser instances`);
 
@@ -78,6 +84,7 @@ const parser7 = new cisvParser()
     .transform(2, 'to_int');     // Already a number
 const rows7 = parser7.parseSync('leak_test_clean.csv');
 console.log(`  - Parsed ${rows7.length} rows (no-op transforms)`);
+parser7.destroy();
 
 // Cleanup
 fs.unlinkSync('leak_test.csv');
@@ -85,4 +92,3 @@ fs.unlinkSync('leak_test_large.csv');
 fs.unlinkSync('leak_test_clean.csv');
 
 console.log('\nAll tests completed successfully!');
-process.exit(0);

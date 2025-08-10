@@ -1,0 +1,69 @@
+# valgrind-node.supp
+# Suppressions for Node.js/V8 false positives :
+# - "Conditional jump or move depends on uninitialised value" warnings from V8's garbage collector
+# - This is a known V8/Node.js issue where the GC uses uninitialized stack memory for optimization
+# - It's harmless and by design
+
+# V8 Garbage Collector intentionally uses uninitialized memory
+{
+   V8_GC_Uninitialized_Stack
+   Memcheck:Cond
+   fun:*IteratePointersInStack*
+   fun:*IteratePointersUntilMarker*
+   fun:*VisitLocalRoots*
+   fun:*EnterAtomicPause*
+}
+
+# Alternative pattern for V8 GC
+{
+   V8_GC_Stack_Iteration
+   Memcheck:Cond
+   ...
+   fun:*PushAllRegistersAndIterateStack*
+}
+
+# Node.js possibly lost (false positive)
+{
+   Node_Possibly_Lost
+   Memcheck:Leak
+   match-leak-kinds: possible
+   ...
+   fun:_dl_init
+}
+
+# ICU library initialization
+{
+   ICU_Initialization
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:uhash_open_*
+}
+
+# Node platform initialization
+{
+   Node_Platform_Init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:_Znwm
+   ...
+   fun:*NodePlatform*
+}
+
+# UV loop initialization
+{
+   UV_Loop_Init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:calloc
+   fun:uv_loop_init
+}
+
+# Dynamic linker
+{
+   DL_Open
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:calloc
+   fun:_dl_*
+}
