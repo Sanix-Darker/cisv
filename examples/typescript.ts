@@ -1,7 +1,6 @@
 import { join } from 'path';
 import { createReadStream } from 'fs';
 
-// Type declarations for your native module
 declare module '../build/Release/cisv' {
   export class cisvParser {
     parseSync(path: string): string[][];

@@ -89,6 +89,12 @@ typedef struct {
     size_t alignment;
 } cisv_transform_pipeline_t;
 
+typedef struct cisv_js_callback {
+    void* env;           // napi_env
+    void* callback;      // napi_ref to the JavaScript function
+    void* instance;      // napi_ref to the parser instance (for 'this' context)
+} cisv_js_callback_t;
+
 // Create/destroy pipeline
 cisv_transform_pipeline_t *cisv_transform_pipeline_create(size_t initial_capacity);
 void cisv_transform_pipeline_destroy(cisv_transform_pipeline_t *pipeline);
@@ -123,6 +129,8 @@ cisv_transform_result_t cisv_transform_to_int(const char *data, size_t len, cisv
 cisv_transform_result_t cisv_transform_to_float(const char *data, size_t len, cisv_transform_context_t *ctx);
 cisv_transform_result_t cisv_transform_hash_sha256(const char *data, size_t len, cisv_transform_context_t *ctx);
 cisv_transform_result_t cisv_transform_base64_encode(const char *data, size_t len, cisv_transform_context_t *ctx);
+
+void cisv_transform_result_free(cisv_transform_result_t *result);
 
 // SIMD-optimized transforms
 #ifdef __AVX2__

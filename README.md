@@ -5,188 +5,23 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 
-> **cisv** is a high-performance CSV parser and writer that leverages SIMD instructions and zero-copy memory mapping to achieve unparalleled parsing and writing speeds. Available as both a Node.js native addon and a standalone CLI tool.
+High-performance CSV parser and writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool.
 
-### DISCLAIMER
-
-- The reader/parser is much more optimized than the writer,
-- This project is on hightly dev mode, don't assume everything will not break.
-
-### PERFORMANCE
+## PERFORMANCE
 
 - **469,968 MB/s** throughput on 2M row CSV files (AVX-512)
 - **10-100x faster** than popular CSV parsers
-- **Zero-copy** memory-mapped I/O with kernel optimizations
-- **SIMD accelerated** with AVX-512/AVX2 auto-detection
-
-### BENCHMARKS
-
-For this given command :
-
-```console
-$ make clean && make cli && cargo install qsv && make install-benchmark-deps && make benchmark-cli
-```
-
-We have this representation in terms of performances :
-
-- on 5M ROWs CSV (273Mb)
-
-Based on the provided benchmark data for a 273 MB CSV file with 5 million rows, here's the performance comparison table in markdown format:
-
-| Parser        | Speed (MB/s) | Time (ms) | Relative       |
-|---------------|--------------|-----------|----------------|
-| **cisv**      | 7,184        | 38        | 1.0x           |
-| rust-csv      | 391          | 698       | 18x slower     |
-| xsv           | 650          | 420       | 11x slower     |
-| csvkit        | 28           | 9,875     | 260x slower    |
-
-## BENCHMARK RESULTS FOR ROW COUNTING TEST
-
-```console
-# by running :
-$ bash ./benchmark_cli.sh
-```
-
-### TEST FILES
-
-| File | Rows | Size |
-|------|------|------|
-| small.csv | 1,000 | 84 KB |
-| medium.csv | 100,000 | 9.2 MB |
-| large.csv | 1,000,000 | 98 MB |
-| xlarge.csv | 10,000,000 | 1.1 GB |
-
-### Benchmark Results for small.csv (1K rows, 84 KB)
-
-| Tool | Time (seconds) | Time (ms) | Memory (KB) | Relative Speed | Status |
-|------|----------------|-----------|-------------|----------------|---------|
-| **cisv (baseline)** | 0.003314527 | 3.31 | 3,648 | 1.0x | ✓ |
-| **wc -l** | 0.002764321 | 2.76 | 3,688 | 0.83x faster | ✓ |
-| **miller** | 0.003727007 | 3.73 | 3,728 | 1.12x slower | ❌ Error |
-| **rust-csv** | 0.004020831 | 4.02 | 3,660 | 1.21x slower | ✓ |
-| **xsv** | 0.013443824 | 13.44 | 5,944 | 4.06x slower | ✓ |
-| **csvkit** | 0.313832731 | 313.83 | 25,564 | 94.7x slower | ✓ |
-
-*Note: The benchmark script runs the same tests on medium.csv, large.csv, and xlarge.csv. For complete results, you would need to capture the output for all file sizes. Each test is run 3 times and the total time is reported.*
-
-## CSV WRITER BENCHMARK RESULTS
-
-```console
-# by running :
-$ bash ./benchmark_cli_writer.sh
-```
-
-### Writer Performance Comparison
-
-#### Small (1K rows, 50 KB)
-
-| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
-|------|----------|-------------------|----------|----------|
-| **C fprintf** | 0.003 | 16.85 | 337,140 | 1.0x (fastest) |
-| **awk** | 0.005 | 10.77 | 215,402 | 1.6x slower |
-| **cisv write** | 0.007 | 6.97 | 139,454 | 2.4x slower |
-| **Python csv** | 0.028 | 1.77 | 35,523 | 9.5x slower |
-
-#### Medium (100K rows, 6.46 MB)
-
-| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
-|------|----------|-------------------|----------|----------|
-| **C fprintf** | 0.057 | 112.73 | 1,745,141 | 1.0x (fastest) |
-| **awk** | 0.199 | 32.39 | 501,544 | 3.5x slower |
-| **cisv write** | 0.203 | 31.80 | 492,326 | 3.5x slower |
-| **Python csv** | 0.265 | 24.71 | 377,888 | 4.6x slower |
-
-#### Large (1M rows, 68.43 MB)
-
-| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
-|------|----------|-------------------|----------|----------|
-| **C fprintf** | 0.611 | 111.96 | 1,636,174 | 1.0x (fastest) |
-| **cisv write** | 1.970 | 34.74 | 507,689 | 3.2x slower |
-| **awk** | 2.139 | 31.98 | 467,476 | 3.5x slower |
-| **Python csv** | 2.568 | 26.98 | 389,422 | 4.2x slower |
-
-#### XLarge (10M rows, 722.53 MB)
-
-| Tool | Time (s) | Throughput (MB/s) | Rows/sec | Relative |
-|------|----------|-------------------|----------|----------|
-| **C fprintf** | 6.625 | 109.06 | 1,509,538 | 1.0x (fastest) |
-| **cisv write** | 20.205 | 35.76 | 494,927 | 3.0x slower |
-| **awk** | 22.596 | 31.97 | 442,558 | 3.4x slower |
-| **Python csv** | 27.493 | 26.59 | 363,726 | 4.1x slower |
-
-### EXPECTED PERFORMANCE SCALING
-
-Based on the file sizes:
-
-- **medium.csv**: ~110x larger than small.csv
-- **large.csv**: ~1,170x larger than small.csv
-- **xlarge.csv**: ~13,100x larger than small.csv
-
-The actual performance difference between tools typically becomes more pronounced with larger files, where cisv's SIMD optimizations and memory-mapped I/O should show greater benefits compared to traditional parsers.
-
-## RUN BENCHMARK YOURSELF (with docker)
-
-```bash
-# Build the Docker image
-$ docker build -t cisv-benchmark .
-
-# Run with CPU and memory limits for consistent results
-# This example uses 2 CPUs and 4GB RAM
-$ docker run --rm \
-  --cpus="2.0" \
-  --memory="4g" \
-  --memory-swap="4g" \
-  --cpu-shares=1024 \
-  --security-opt seccomp=unconfined \
-  cisv-benchmark
-
-# For even more isolation, use specific CPU cores (e.g., cores 2-3)
-$ docker run --rm \
-  --cpuset-cpus="2-3" \
-  --memory="4g" \
-  --memory-swap="4g" \
-  --cpu-shares=1024 \
-  --security-opt seccomp=unconfined \
-  cisv-benchmark
-
-# To save results to host
-$ docker run --rm \
-  --cpus="2.0" \
-  --memory="4g" \
-  --memory-swap="4g" \
-  -v $(pwd)/results:/results \
-  cisv-benchmark bash -c '/home/benchmark/run_benchmarks.sh | tee /results/benchmark-$(date +%Y%m%d-%H%M%S).log'
-```
-
-Or, for even better isolation and consistent results, you can disable CPU frequency scaling on the host
-
-```bash
-# On the host system (requires root)
-# Save current governor
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor > /tmp/governors.txt
-
-# Set performance mode for consistent CPU frequency
-for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-    echo performance | sudo tee $cpu
-done
-
-# Run benchmarks
-docker run --rm --cpus="2.0" --memory="4g" cisv-benchmark
-
-# Restore original governors
-# ... restore from /tmp/governors.txt
-```
+- Zero-copy memory-mapped I/O with kernel optimizations
+- SIMD accelerated with AVX-512/AVX2 auto-detection
 
 ## INSTALLATION
 
-### NODE.JS PACKAGE (napi binding)
-
+### NODE.JS PACKAGE
 ```bash
 npm install cisv
 ```
 
 ### CLI TOOL (FROM SOURCE)
-
 ```bash
 git clone https://github.com/sanix-darker/cisv
 cd cisv
@@ -195,201 +30,220 @@ sudo make install-cli
 ```
 
 ### BUILD FROM SOURCE (NODE.JS ADDON)
-
 ```bash
 npm install -g node-gyp
 make build
 ```
 
-## USAGE
+## QUICK START
 
-### CLI INTERFACE
+### NODE.JS
+```javascript
+const { cisvParser } = require('cisv');
 
-#### Reading/Parsing CSV
-
-```console
-$ ls -alh ./cisv
-Permissions Size User Date Modified Name
-.rwxrwxr-x   18k dk   29 Jul  9:34  ./cisv
+const parser = new cisvParser();
+const rows = parser.parseSync('./data.csv');
+console.log(`Parsed ${rows.length} rows`);
 ```
 
-```bash
-$ ./cisv --help
-cisv - The fastest CSV parser of the multiverse
-
-Usage: ./cisv [COMMAND] [OPTIONS] [FILE]
-
-Commands:
-  parse    Parse CSV file (default if no command given)
-  write    Write/generate CSV files
-
-Parse Options:
-  -h, --help              Show this help message
-  -v, --version           Show version information
-  -d, --delimiter DELIM   Field delimiter (default: ,)
-  -s, --select COLS       Select columns (comma-separated indices)
-  -c, --count             Show only row count
-  --head N                Show first N rows
-  --tail N                Show last N rows
-  -o, --output FILE       Write to FILE instead of stdout
-  -b, --benchmark         Run benchmark mode
-
-For write options, use: ./cisv write --help
-```
+### CLI
 
 ```bash
-# Count rows (blazing fast)
+# Count rows
 cisv -c large_file.csv
 
-# Select specific columns
+# Select columns
 cisv -s 0,2,5 data.csv
 
 # First 100 rows
 cisv --head 100 data.csv
-
-# Use semicolon delimiter
-cisv -d ';' european_data.csv
-
-# Benchmark mode
-cisv -b huge_file.csv
-
-# Output to file
-cisv -o processed.csv raw_data.csv
 ```
 
-#### Writing/Generating CSV
+## API REFERENCE
+
+### TYPESCRIPT DEFINITIONS
+```typescript
+interface ParsedRow extends Array<string> {}
+interface ParseStats {
+   rowCount: number;
+   fieldCount: number;
+   totalBytes: number;
+   parseTime: number;
+}
+interface TransformInfo {
+   cTransformCount: number;
+   jsTransformCount: number;
+   fieldIndices: number[];
+}
+```
+
+### BASIC PARSING
+```javascript
+const parser = new cisv.cisvParser();
+
+// Synchronous
+const rows = parser.parseSync('data.csv');
+
+// Asynchronous
+const asyncRows = await parser.parse('large-file.csv');
+
+// From string
+const csvString = 'name,age,city\nJohn,30,NYC\nJane,25,LA';
+const stringRows = parser.parseString(csvString);
+```
+
+### STREAMING
+```javascript
+const streamParser = new cisv.cisvParser();
+const stream = fs.createReadStream('huge-file.csv');
+
+stream.on('data', chunk => streamParser.write(chunk));
+stream.on('end', () => {
+    streamParser.end();
+    const results = streamParser.getRows();
+});
+```
+
+### DATA TRANSFORMATION
+
+Built-in C transforms (optimized):
+```javascript
+parser
+    .transform(0, 'uppercase')      // Column 0 to uppercase
+    .transform(1, 'lowercase')       // Column 1 to lowercase
+    .transform(2, 'trim')           // Column 2 trim whitespace
+    .transform(3, 'to_int')         // Column 3 to integer
+    .transform(4, 'to_float')       // Column 4 to float
+    .transform(5, 'base64_encode')  // Column 5 to base64
+    .transform(6, 'hash_sha256');   // Column 6 to SHA256
+```
+
+Custom JavaScript transforms:
+```javascript
+// Single field
+parser.transform(7, value => new Date(value).toISOString());
+
+// All fields
+parser.transform(-1, value => value.replace(/[^\w\s]/gi, ''));
+
+// Chain transforms
+parser
+    .transform(0, 'trim')
+    .transform(0, 'uppercase')
+    .transform(0, val => val.substring(0, 10));
+```
+
+### CONFIGURATION
+```javascript
+const customParser = new cisv.cisvParser({
+    delimiter: '|',
+    quote: "'",
+    escape: '\\',
+    headers: true,
+    skipEmptyLines: true
+});
+```
+
+## CLI USAGE
+
+### PARSING
+```bash
+cisv [OPTIONS] [FILE]
+
+Options:
+  -h, --help              Show help message
+  -v, --version           Show version
+  -d, --delimiter DELIM   Field delimiter (default: ,)
+  -s, --select COLS       Select columns (comma-separated indices)
+  -c, --count            Show only row count
+  --head N               Show first N rows
+  --tail N               Show last N rows
+  -o, --output FILE      Write to FILE instead of stdout
+  -b, --benchmark        Run benchmark mode
+```
+
+### WRITING
 
 ```bash
-# Generate 1 million rows of test data
-cisv write -g 1000000 -o test_data.csv
+cisv write [OPTIONS]
 
-# Generate with custom delimiter
-cisv write -g 10000 -d '|' -o pipe_delimited.csv
-
-# Always quote all fields
-cisv write -g 10000 -Q -o quoted.csv
-
-# Use CRLF line endings (Windows)
-cisv write -g 10000 -r -o windows.csv
-
-# Benchmark write performance
-cisv write -g 10000000 -o large.csv -b
-
-# Custom null representation
-cisv write -g 1000 -n "NULL" -o with_nulls.csv
+Options:
+  -g, --generate N       Generate N rows of test data
+  -o, --output FILE      Output file
+  -d, --delimiter DELIM  Field delimiter
+  -Q, --quote-all        Quote all fields
+  -r, --crlf             Use CRLF line endings
+  -n, --null TEXT        Null representation
+  -b, --benchmark        Benchmark mode
 ```
 
-### NODE.JS API
+## BENCHMARKS
 
-```javascript
-const { cisvParser } = require('cisv');
+### PARSER PERFORMANCE (273 MB, 5M ROWS)
 
-// Synchronous parsing
-const parser = new cisvParser();
-const rows = parser.parseSync('./data.csv');
-console.log(`Parsed ${rows.length} rows`);
+| Parser        | Speed (MB/s) | Time (ms) | Relative       |
+|---------------|--------------|-----------|----------------|
+| **cisv**      | 7,184        | 38        | 1.0x (fastest) |
+| rust-csv      | 391          | 698       | 18x slower     |
+| xsv           | 650          | 420       | 11x slower     |
+| csvkit        | 28           | 9,875     | 260x slower    |
 
-// Streaming for large files
-const fs = require('fs');
-const parser = new cisvParser();
+### NODE.JS LIBRARY BENCHMARKS
 
-fs.createReadStream('./huge.csv')
-  .on('data', chunk => parser.write(chunk))
-  .on('end', () => {
-    parser.end();
-    const rows = parser.getRows();
-    console.log(`Processed ${rows.length} rows`);
-  });
+- **Synchronous with Data Access:**
+
+| Library            | Speed (MB/s) | Operations/sec |
+|--------------------|--------------|----------------|
+| cisv              | 61.24        | 136,343        |
+| csv-parse         | 15.48        | 34,471         |
+| papaparse         | 25.67        | 57,147         |
+
+- **Asynchronous Streaming:**
+
+| Library            | Speed (MB/s) | Operations/sec |
+|--------------------|--------------|----------------|
+| cisv              | 76.94        | 171,287        |
+| papaparse         | 16.54        | 36,815         |
+| neat-csv          | 8.11         | 18,055         |
+
+### RUNNING BENCHMARKS
+
+```bash
+# CLI benchmarks
+make clean && make cli && make benchmark-cli
+
+# Node.js benchmarks
+npm run benchmark
+
+# Docker isolated benchmarks
+docker build -t cisv-benchmark .
+docker run --rm --cpus="2.0" --memory="4g" cisv-benchmark
 ```
 
-**NOTE:** there are dependencies for benchmarking other tools
-```json
-  "dependencies": {
-    "csv-parse": "^6.0.0",
-    "fast-csv": "^5.0.2",
-    "neat-csv": "^7.0.0",
-    "papaparse": "^5.5.3"
-  }
-``
+## TECHNICAL ARCHITECTURE
 
-### TYPESCRIPT SUPPORT
-
-(yes)
-
-```typescript
-import { cisvParser } from 'cisv';
-
-const parser = new cisvParser();
-const rows: string[][] = parser.parseSync('./data.csv');
-```
-
-### BENCHMARS for the npm lib napi
-
-#### Synchronous Results
-
-| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 56.99        | 0.01          | 126880         |
-| csv-parse (sync)   | 15.70        | 0.03          | 34950          |
-| papaparse (sync)   | 26.78        | 0.02          | 59612          |
-
-#### Synchronous Results (with data access)
-
-| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 61.24        | 0.01          | 136343         |
-| csv-parse (sync)   | 15.48        | 0.03          | 34471          |
-| papaparse (sync)   | 25.67        | 0.02          | 57147          |
-
-
-#### Asynchronous Results
-
-| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 76.94        | 0.01          | 171287         |
-| papaparse (async/stream) | 16.54        | 0.03          | 36815          |
-| neat-csv (async/promise) | 8.11         | 0.06          | 18055          |
-
-
-#### Asynchronous Results (with data access)
-
-| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 52.48        | 0.01          | 116829         |
-| papaparse (async/stream) | 17.58        | 0.03          | 39131          |
-| neat-csv (async/promise) | 8.26         | 0.05          | 18385          |
-
-For more details, check `./benchmark/benchmark.js`
-
-## TECHNICAL DETAILS
-
-### ARCHITECTURE
-
-- **SIMD Processing**: Utilizes AVX-512 (64-byte vectors) or AVX2 (32-byte vectors) for parallel character processing
+- **SIMD Processing**: AVX-512 (64-byte vectors) or AVX2 (32-byte vectors) for parallel processing
 - **Memory Mapping**: Direct kernel-to-userspace zero-copy with `mmap()`
-- **Optimized Buffering**: 1MB ring buffer sized for L3 cache efficiency (still considering upgrading this...)
+- **Optimized Buffering**: 1MB ring buffer sized for L3 cache efficiency
 - **Compiler Optimizations**: LTO and architecture-specific tuning with `-march=native`
 
-### KEY FEATURES
+## FEATURES
 
-- [x] RFC 4180 compliant
-- [x] Handles quoted fields with embedded delimiters
-- [x] Streaming API for unlimited file sizes
-- [x] Cross-platform (Linux, macOS, Windows via WSL)
-- [x] Safe fallback for non-x86 architectures
-- [x] High-performance CSV writer with SIMD optimization
+- RFC 4180 compliant
+- Handles quoted fields with embedded delimiters
+- Streaming API for unlimited file sizes
+- Cross-platform (Linux, macOS, Windows via WSL)
+- Safe fallback for non-x86 architectures
+- High-performance CSV writer with SIMD optimization
 
 ## CONTRIBUTING
 
-Contributions are welcome! Areas of interest:
-
-- [ ] ARM NEON/SVE support
-- [ ] Windows native support (without WSL)
-- [ ] Parallel parsing for multi-core systems
-- [ ] Custom memory allocators
-- [ ] Streaming compression support
-
-Please ensure all tests pass and benchmarks show no regression.
+Areas of interest:
+- ARM NEON/SVE support
+- Windows native support
+- Parallel parsing for multi-core systems
+- Custom memory allocators
+- Streaming compression support
 
 ## LICENSE
 
@@ -397,7 +251,7 @@ GPL2 © [sanix-darker](https://github.com/sanix-darker)
 
 ## ACKNOWLEDGMENTS
 
-Inspired by the excellent work in:
+Inspired by:
 - [simdjson](https://github.com/simdjson/simdjson) - Parsing gigabytes of JSON per second
-- [xsv](https://github.com/BurntSushi/xsv) - A fast CSV command line toolkit
-- [rust-csv](https://github.com/BurntSushi/rust-csv) - A CSV parser for Rust, with Serde support.
+- [xsv](https://github.com/BurntSushi/xsv) - Fast CSV command line toolkit
+- [rust-csv](https://github.com/BurntSushi/rust-csv) - CSV parser for Rust
