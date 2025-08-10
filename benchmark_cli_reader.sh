@@ -186,13 +186,13 @@ for size in "small" "medium" "large"; do  # Skip xlarge for all tools
         benchmark "rust-csv (Rust library)" "./benchmark/rust-csv-bench/target/release/csv-bench" "$size.csv"
     fi
 
-    benchmark "xsv (Rust CLI)" "xsv count" "$size.csv"
-    benchmark "qsv (faster xsv fork)" "qsv count" "$size.csv"
+    # benchmark "xsv (Rust CLI)" "xsv count" "$size.csv"
+    # benchmark "qsv (faster xsv fork)" "qsv count" "$size.csv"
     benchmark "csvkit (Python)" "csvstat --count" "$size.csv"
     benchmark "miller" "mlr --csv count" "$size.csv"
 
     # Select columns test
-    echo -e "${YELLOW}Column selection test (columns 0,2,3):${NC}\n"
+    echo -e "${YELLOW}\n---\nColumn selection test (columns 0,2,3):${NC}\n"
 
     benchmark "cisv" "./cisv -s 0,2,3" "$size.csv"
 
@@ -200,8 +200,8 @@ for size in "small" "medium" "large"; do  # Skip xlarge for all tools
         benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select $size.csv 0,2,3" ""
     fi
 
-    benchmark "xsv" "xsv select 1,3,4" "$size.csv"  # xsv uses 1-based indexing
-    benchmark "qsv" "qsv select 1,3,4" "$size.csv"  # qsv uses 1-based indexing
+    # benchmark "xsv" "xsv select 1,3,4" "$size.csv"  # xsv uses 1-based indexing
+    # benchmark "qsv" "qsv select 1,3,4" "$size.csv"  # qsv uses 1-based indexing
     benchmark "csvkit" "csvcut -c 1,3,4" "$size.csv"
     benchmark "miller" "mlr --csv cut -f id,email,address" "$size.csv"
 

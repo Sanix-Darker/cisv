@@ -1,151 +1,262 @@
 #!/bin/bash
+# Test script for CSV transform functionality with detailed memory leak detection
 
-# Test script for CSV transform functionality
+set -e  # Exit on error
 
-echo "Testing CSV transform functionality..."
+echo "============================================"
+echo "CSV Transform Functionality & Memory Testing"
+echo "============================================"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
 # Build if needed
 if [ ! -f "./build/Release/cisv.node" ]; then
-    echo "Building Node.js addon..."
+    echo -e "${YELLOW}Building Node.js addon...${NC}"
     make build
 fi
 
 # Create test script
-cat > test_transform_basic.js << 'EOF'
-const { cisvParser } = require('./build/Release/cisv');
-
-// Test data
-const testData = `id,name,email,amount
-1,john doe,JOHN@EXAMPLE.COM,123.45
-2,  jane smith  ,Jane@Example.Com,234.56
-3,BOB JOHNSON,bob@example.com,345.67`;
-
-// Write test file
-require('fs').writeFileSync('test_transform.csv', testData);
-
-console.log('Original data:');
-console.log(testData);
-console.log('\n=== Transform Tests ===\n');
-
-// Test 1: Individual transforms
-console.log('1. Individual field transforms:');
-const parser1 = new cisvParser()
-    .transform(1, 'uppercase')
-    .transform(2, 'lowercase')
-    .transform(3, 'float');
-
-const rows1 = parser1.parseSync('test_transform.csv');
-console.log('Row 1:', rows1[1]);
-console.log('Row 2:', rows1[2]);
-
-// Test 2: Trim transform
-console.log('\n2. Trim transform:');
-const parser2 = new cisvParser()
-    .transform(1, 'trim');
-
-const rows2 = parser2.parseSync('test_transform.csv');
-console.log('Trimmed name:', `"${rows2[2][1]}"`);
-
-// Test 3: Custom JS transform
-console.log('\n3. Custom JavaScript transform:');
-const parser3 = new cisvParser()
-    .transform(2, (email) => {
-        // Normalize email: lowercase and remove dots
-        return email.toLowerCase().replace(/\./g, '');
-    });
-
-const rows3 = parser3.parseSync('test_transform.csv');
-console.log('Normalized emails:', rows3.slice(1).map(r => r[2]));
-
-// Test 4: Chained transforms
-console.log('\n4. Chained transforms:');
-const parser4 = new cisvParser()
-    .transform(1, 'trim')
-    .transform(1, 'uppercase');
-
-const rows4 = parser4.parseSync('test_transform.csv');
-console.log('Trim then uppercase:', rows4[2][1]);
-
-// Test 5: Hash transform
-console.log('\n5. Hash transform:');
-const parser5 = new cisvParser()
-    .transform(2, 'sha256');
-
-const rows5 = parser5.parseSync('test_transform.csv');
-console.log('Hashed email:', rows5[1][2].substring(0, 20) + '...');
-
-// Test 6: Base64 transform
-console.log('\n6. Base64 encoding:');
-const parser6 = new cisvParser()
-    .transform(1, 'base64');
-
-const rows6 = parser6.parseSync('test_transform.csv');
-console.log('Base64 names:', rows6.slice(1).map(r => r[1]));
-
-// Test 7: Performance test
-console.log('\n7. Performance test (100k rows):');
-const bigData = ['id,name,email,amount'];
-for (let i = 0; i < 100000; i++) {
-    bigData.push(`${i},user ${i},USER${i}@EMAIL.COM,${i}.99`);
-}
-require('fs').writeFileSync('test_big.csv', bigData.join('\n'));
-
-// No transforms
-console.time('No transforms');
-new cisvParser().parseSync('test_big.csv');
-console.timeEnd('No transforms');
-
-// With transforms
-console.time('With transforms');
-new cisvParser()
-    .transform(1, 'uppercase')
-    .transform(2, 'lowercase')
-    .transform(3, 'float')
-    .parseSync('test_big.csv');
-console.timeEnd('With transforms');
-
-// Cleanup
-require('fs').unlinkSync('test_transform.csv');
-require('fs').unlinkSync('test_big.csv');
-
-console.log('\n✓ All transform tests passed!');
-EOF
-
-# Run tests
-echo ""
-echo "Running transform tests..."
-node test_transform_basic.js
+echo -e "\n${GREEN}Running transform tests...${NC}"
+node ./examples/transform.js
 
 # Test memory leaks if valgrind is available
 if command -v valgrind > /dev/null 2>&1; then
     echo ""
-    echo "Testing for memory leaks..."
+    echo "============================================"
+    echo "MEMORY LEAK DETECTION TESTS"
+    echo "============================================"
 
+    # Create comprehensive test file
     cat > test_transform_leak.js << 'EOF'
 const { cisvParser } = require('./build/Release/cisv');
 const fs = require('fs');
 
-// Small test file
-fs.writeFileSync('leak_test.csv', 'a,b,c\n1,2,3\n4,5,6');
+console.log('Starting memory leak tests...\n');
 
-// Test transforms
-const parser = new cisvParser()
+// Test 1: Basic transforms
+console.log('Test 1: Basic transforms');
+fs.writeFileSync('leak_test.csv', 'name,email,age\njohn,john@test.com,25\njane,jane@test.com,30');
+const parser1 = new cisvParser()
     .transform(0, 'uppercase')
     .transform(1, 'lowercase')
-    .transform(2, (val) => val + '_modified');
+    .transform(2, 'trim');
+const rows1 = parser1.parseSync('leak_test.csv');
+console.log(`  - Parsed ${rows1.length} rows with 3 transforms`);
 
-const rows = parser.parseSync('leak_test.csv');
-console.log('Rows:', rows.length);
+// Test 2: Chain of transforms on same field
+console.log('\nTest 2: Multiple transforms on same field');
+const parser2 = new cisvParser()
+    .transform(0, 'uppercase')
+    .transform(0, 'trim')
+    .transform(0, 'lowercase');  // Multiple transforms on field 0
+const rows2 = parser2.parseSync('leak_test.csv');
+console.log(`  - Parsed ${rows2.length} rows with chained transforms`);
 
+// Test 3: Large dataset with transforms
+console.log('\nTest 3: Large dataset (1000 rows)');
+let largeCSV = 'col1,col2,col3,col4,col5\n';
+for (let i = 0; i < 1000; i++) {
+    largeCSV += `value${i},  data${i}  ,${i},test${i}@email.com,  trimme  \n`;
+}
+fs.writeFileSync('leak_test_large.csv', largeCSV);
+
+const parser3 = new cisvParser()
+    .transform(0, 'uppercase')
+    .transform(1, 'trim')
+    .transform(2, 'to_int')
+    .transform(3, 'lowercase')
+    .transform(4, 'trim');
+const rows3 = parser3.parseSync('leak_test_large.csv');
+console.log(`  - Parsed ${rows3.length} rows with 5 transforms`);
+
+// Test 4: JavaScript callback transforms
+console.log('\nTest 4: JavaScript callback transforms');
+const parser4 = new cisvParser()
+    .transform(0, (val) => val.toUpperCase())
+    .transform(1, (val) => val.trim())
+    .transform(2, (val) => parseInt(val) * 2);
+const rows4 = parser4.parseSync('leak_test.csv');
+console.log(`  - Parsed ${rows4.length} rows with JS callbacks`);
+
+// Test 5: Mixed transforms (native + JS)
+console.log('\nTest 5: Mixed native and JS transforms');
+const parser5 = new cisvParser()
+    .transform(0, 'uppercase')
+    .transform(1, (val) => val.replace('@', '_at_'))
+    .transform(2, 'to_int');
+const rows5 = parser5.parseSync('leak_test.csv');
+console.log(`  - Parsed ${rows5.length} rows with mixed transforms`);
+
+// Test 6: Multiple parser instances
+console.log('\nTest 6: Multiple parser instances');
+const parsers = [];
+for (let i = 0; i < 10; i++) {
+    const p = new cisvParser()
+        .transform(0, 'uppercase')
+        .transform(1, 'trim');
+    parsers.push(p);
+    p.parseSync('leak_test.csv');
+}
+console.log(`  - Created and used ${parsers.length} parser instances`);
+
+// Test 7: Transform with no actual changes (edge case)
+console.log('\nTest 7: Transform with no changes needed');
+fs.writeFileSync('leak_test_clean.csv', 'ALREADY_UPPER,already_lower,123\n');
+const parser7 = new cisvParser()
+    .transform(0, 'uppercase')  // Already uppercase
+    .transform(1, 'lowercase')  // Already lowercase
+    .transform(2, 'to_int');     // Already a number
+const rows7 = parser7.parseSync('leak_test_clean.csv');
+console.log(`  - Parsed ${rows7.length} rows (no-op transforms)`);
+
+// Cleanup
 fs.unlinkSync('leak_test.csv');
+fs.unlinkSync('leak_test_large.csv');
+fs.unlinkSync('leak_test_clean.csv');
+
+console.log('\nAll tests completed successfully!');
+process.exit(0);
 EOF
 
-    valgrind --leak-check=full --show-leak-kinds=all node test_transform_leak.js 2>&1 | grep -E "(definitely lost:|ERROR SUMMARY)"
+    echo -e "${YELLOW}Running Valgrind memory analysis...${NC}"
+    echo "--------------------------------------------"
+
+    # Run valgrind and save to file to avoid hanging
+    valgrind \
+        --leak-check=full \
+        --show-leak-kinds=all \
+        --track-origins=yes \
+        --log-file=valgrind_output.log \
+        --error-exitcode=1 \
+        node test_transform_leak.js 2>&1
+
+    VALGRIND_EXIT_CODE=$?
+
+    # Read the valgrind output from file
+    if [ -f valgrind_output.log ]; then
+        VALGRIND_OUTPUT=$(cat valgrind_output.log)
+
+        # Parse and display results
+        echo "$VALGRIND_OUTPUT" | grep -A5 "HEAP SUMMARY" || echo "No HEAP SUMMARY found"
+        echo "--------------------------------------------"
+
+        # Extract key metrics
+        DEFINITELY_LOST=$(echo "$VALGRIND_OUTPUT" | grep "definitely lost:" | tail -1)
+        INDIRECTLY_LOST=$(echo "$VALGRIND_OUTPUT" | grep "indirectly lost:" | tail -1)
+        POSSIBLY_LOST=$(echo "$VALGRIND_OUTPUT" | grep "possibly lost:" | tail -1)
+        STILL_REACHABLE=$(echo "$VALGRIND_OUTPUT" | grep "still reachable:" | tail -1)
+        ERROR_SUMMARY=$(echo "$VALGRIND_OUTPUT" | grep "ERROR SUMMARY:" | tail -1)
+
+        echo -e "\n${YELLOW}MEMORY LEAK SUMMARY:${NC}"
+        echo "--------------------------------------------"
+
+        # Check for definitely lost bytes
+        if [ -n "$DEFINITELY_LOST" ]; then
+            if echo "$DEFINITELY_LOST" | grep -q "0 bytes in 0 blocks"; then
+                echo -e "${GREEN}✓ Definitely lost: 0 bytes${NC}"
+                DEFINITELY_OK=true
+            else
+                echo -e "${RED}✗ $DEFINITELY_LOST${NC}"
+                DEFINITELY_OK=false
+            fi
+        else
+            echo -e "${YELLOW}⚠ Definitely lost: not found in output${NC}"
+            DEFINITELY_OK=false
+        fi
+
+        # Check for indirectly lost bytes
+        if [ -n "$INDIRECTLY_LOST" ]; then
+            if echo "$INDIRECTLY_LOST" | grep -q "0 bytes in 0 blocks"; then
+                echo -e "${GREEN}✓ Indirectly lost: 0 bytes${NC}"
+            else
+                echo -e "${YELLOW}⚠ $INDIRECTLY_LOST${NC}"
+            fi
+        fi
+
+        # Check for possibly lost bytes
+        if [ -n "$POSSIBLY_LOST" ]; then
+            if echo "$POSSIBLY_LOST" | grep -q "0 bytes in 0 blocks"; then
+                echo -e "${GREEN}✓ Possibly lost: 0 bytes${NC}"
+            else
+                echo -e "${YELLOW}⚠ $POSSIBLY_LOST${NC}"
+            fi
+        fi
+
+        # Display still reachable (usually OK for Node.js)
+        if [ -n "$STILL_REACHABLE" ]; then
+            echo -e "  $STILL_REACHABLE"
+        fi
+
+        # Check error summary
+        echo "--------------------------------------------"
+        if [ -n "$ERROR_SUMMARY" ]; then
+            if echo "$ERROR_SUMMARY" | grep -q "0 errors from 0 contexts"; then
+                echo -e "${GREEN}✓ $ERROR_SUMMARY${NC}"
+                ERROR_OK=true
+            else
+                echo -e "${RED}✗ $ERROR_SUMMARY${NC}"
+                ERROR_OK=false
+            fi
+        else
+            echo -e "${YELLOW}⚠ ERROR SUMMARY not found${NC}"
+            ERROR_OK=false
+        fi
+
+        # Determine overall pass/fail
+        if [ "$DEFINITELY_OK" = true ] && [ "$ERROR_OK" = true ]; then
+            echo -e "${GREEN}✓ No memory leaks detected!${NC}"
+            MEMORY_TEST_PASSED=true
+        else
+            echo -e "${RED}✗ Memory issues detected!${NC}"
+            MEMORY_TEST_PASSED=false
+
+            # Show detailed errors if any
+            echo -e "\n${YELLOW}Checking for detailed errors...${NC}"
+            grep -i "invalid\|definitely lost\|indirectly lost" valgrind_output.log | head -20 || echo "No specific errors found"
+        fi
+
+        # Save report
+        mv valgrind_output.log valgrind_report.txt
+        echo -e "\n${YELLOW}Full Valgrind report saved to: valgrind_report.txt${NC}"
+    else
+        echo -e "${RED}Error: Valgrind output file not created${NC}"
+        MEMORY_TEST_PASSED=false
+    fi
+
+    # Cleanup
     rm -f test_transform_leak.js
+
+    # Exit with appropriate code
+    if [ "$MEMORY_TEST_PASSED" = true ]; then
+        echo -e "\n${GREEN}============================================${NC}"
+        echo -e "${GREEN}ALL MEMORY TESTS PASSED SUCCESSFULLY!${NC}"
+        echo -e "${GREEN}============================================${NC}"
+    else
+        echo -e "\n${RED}============================================${NC}"
+        echo -e "${RED}MEMORY TESTS FAILED - LEAKS DETECTED${NC}"
+        echo -e "${RED}============================================${NC}"
+        echo -e "\n${YELLOW}Debug tips:${NC}"
+        echo "1. Check valgrind_report.txt for full details"
+        echo "2. Look for 'definitely lost' blocks in the report"
+        echo "3. Use gdb to trace the allocation points"
+        echo "4. Consider using AddressSanitizer for additional debugging"
+    fi
+else
+    echo -e "\n${YELLOW}Warning: Valgrind not installed. Skipping memory leak tests.${NC}"
+    echo "To install valgrind:"
+    echo "  Ubuntu/Debian: sudo apt-get install valgrind"
+    echo "  macOS: brew install valgrind"
+    echo "  RHEL/CentOS: sudo yum install valgrind"
 fi
 
-# Cleanup
-rm -f test_transform_basic.js
+# Cleanup any remaining files
+rm -f test_transform_basic.js leak_test*.csv valgrind_output.log
 
 echo ""
+echo "============================================"
 echo "Transform tests completed!"
+echo "============================================"

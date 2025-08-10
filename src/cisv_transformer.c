@@ -13,6 +13,14 @@
 #define TRANSFORM_POOL_SIZE (1 << 20)  // 1MB default pool
 #define SIMD_ALIGNMENT 64
 
+static void free_transform_result_if_needed(cisv_transform_result_t *result, const char *original_data) {
+    if (result && result->needs_free && result->data && result->data != original_data) {
+        free(result->data);
+        result->data = NULL;
+        result->needs_free = 0;
+    }
+}
+
 // Create transform pipeline
 cisv_transform_pipeline_t *cisv_transform_pipeline_create(size_t initial_capacity) {
     cisv_transform_pipeline_t *pipeline = calloc(1, sizeof(*pipeline));
@@ -53,10 +61,20 @@ void cisv_transform_pipeline_destroy(cisv_transform_pipeline_t *pipeline) {
     // Free transform contexts
     for (size_t i = 0; i < pipeline->count; i++) {
         if (pipeline->transforms[i].ctx) {
-            if (pipeline->transforms[i].ctx->key) free(pipeline->transforms[i].ctx->key);
-            if (pipeline->transforms[i].ctx->iv) free(pipeline->transforms[i].ctx->iv);
-            if (pipeline->transforms[i].ctx->extra) free(pipeline->transforms[i].ctx->extra);
+            if (pipeline->transforms[i].ctx->key) {
+                free(pipeline->transforms[i].ctx->key);
+                pipeline->transforms[i].ctx->key = NULL;
+            }
+            if (pipeline->transforms[i].ctx->iv) {
+                free(pipeline->transforms[i].ctx->iv);
+                pipeline->transforms[i].ctx->iv = NULL;
+            }
+            if (pipeline->transforms[i].ctx->extra) {
+                free(pipeline->transforms[i].ctx->extra);
+                pipeline->transforms[i].ctx->extra = NULL;
+            }
             free(pipeline->transforms[i].ctx);
+            pipeline->transforms[i].ctx = NULL;
         }
     }
 
@@ -102,6 +120,11 @@ int cisv_transform_pipeline_add(
             new_capacity * sizeof(cisv_transform_t)
         );
         if (!new_transforms) return -1;
+
+        // Zero-initialize new memory
+        memset(new_transforms + pipeline->capacity, 0,
+               (new_capacity - pipeline->capacity) * sizeof(cisv_transform_t));
+
         pipeline->transforms = new_transforms;
         pipeline->capacity = new_capacity;
     }
@@ -132,6 +155,11 @@ int cisv_transform_pipeline_add_js(
             new_capacity * sizeof(cisv_transform_t)
         );
         if (!new_transforms) return -1;
+
+        // Zero-initialize new memory
+        memset(new_transforms + pipeline->capacity, 0,
+               (new_capacity - pipeline->capacity) * sizeof(cisv_transform_t));
+
         pipeline->transforms = new_transforms;
         pipeline->capacity = new_capacity;
     }
@@ -164,6 +192,9 @@ cisv_transform_result_t cisv_transform_apply(
         return result;
     }
 
+    // Keep track of original data
+    const char *original_data = data;
+
     // Apply all matching transforms
     for (size_t i = 0; i < pipeline->count; i++) {
         cisv_transform_t *t = &pipeline->transforms[i];
@@ -177,16 +208,35 @@ cisv_transform_result_t cisv_transform_apply(
         if (t->fn) {
             cisv_transform_result_t new_result = t->fn(result.data, result.len, t->ctx);
 
-            // Free previous result if needed
-            if (result.needs_free && result.data) {
+            // IMPORTANT: Only free the previous result if:
+            // 1. It needs freeing (needs_free is true)
+            // 2. It's not the original data
+            // 3. The new result is different from the old result
+            if (result.needs_free &&
+                result.data != original_data &&
+                result.data != new_result.data) {
                 free(result.data);
+                //free_transform_result_if_needed(&result, original_data);
             }
 
             result = new_result;
+        } else if (t->js_callback) {
+            // FIXME: need to implement
+            continue;
         }
     }
 
     return result;
+}
+
+// Clean up transform result
+void cisv_transform_result_free(cisv_transform_result_t *result) {
+    if (result && result->needs_free && result->data) {
+        free(result->data);
+        result->data = NULL;
+        result->needs_free = 0;
+        result->len = 0;
+    }
 }
 
 // SIMD uppercase transform
@@ -225,7 +275,8 @@ void cisv_transform_uppercase_simd(char *dst, const char *src, size_t len) {
 cisv_transform_result_t cisv_transform_uppercase(const char *data, size_t len, cisv_transform_context_t *ctx) {
     (void)ctx;
 
-    cisv_transform_result_t result;
+    cisv_transform_result_t result = {0};
+
     result.data = malloc(len + 1);
     if (!result.data) {
         result.data = (char*)data;
@@ -313,10 +364,19 @@ cisv_transform_result_t cisv_transform_trim(const char *data, size_t len, cisv_t
     cisv_transform_result_t result;
     result.len = end - start;
 
-    if (result.len == len) {
-        // No trimming needed
-        result.data = (char*)data;
-        result.needs_free = 0;
+    if (result.len == len && start == 0) {
+        // No trimming needed - DO NOT return the same pointer
+        // This prevents issues with the transform pipeline
+        result.data = malloc(len + 1);
+        if (!result.data) {
+            result.data = (char*)data;
+            result.len = len;
+            result.needs_free = 0;
+            return result;
+        }
+        memcpy(result.data, data, len);
+        result.data[len] = '\0';
+        result.needs_free = 1;
     } else {
         result.data = malloc(result.len + 1);
         if (!result.data) {

@@ -4,4 +4,5 @@ build
 npm-debug.log
 */*.o
 cisv
+valgrind_output.log
 benchmark/rust-csv-bench/

@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <chrono>
 
 namespace {
 
@@ -15,7 +16,11 @@ struct RowCollector {
     cisv_transform_pipeline_t* pipeline;
     int current_field_index;
 
-    RowCollector() : pipeline(nullptr), current_field_index(0) {
+    // JavaScript transforms stored separately
+    std::unordered_map<int, Napi::FunctionReference> js_transforms;
+    Napi::Env env;
+
+    RowCollector() : pipeline(nullptr), current_field_index(0), env(nullptr) {
         pipeline = cisv_transform_pipeline_create(16);
     }
 
@@ -23,35 +28,75 @@ struct RowCollector {
         if (pipeline) {
             cisv_transform_pipeline_destroy(pipeline);
         }
+        // js_transforms will be cleaned up automatically
+    }
+
+    // Apply both C and JS transforms
+    std::string applyTransforms(const char* data, size_t len, int field_index) {
+        std::string result(data, len);
+
+        // First apply C transforms
+        if (pipeline && pipeline->count > 0) {
+            cisv_transform_result_t c_result = cisv_transform_apply(
+                pipeline,
+                field_index,
+                result.c_str(),
+                result.length()
+            );
+
+            if (c_result.data) {
+                result = std::string(c_result.data, c_result.len);
+                cisv_transform_result_free(&c_result);
+            }
+        }
+
+        // Then apply JavaScript transforms if we have an environment
+        if (env) {
+            // Apply field-specific transform
+            auto it = js_transforms.find(field_index);
+            if (it != js_transforms.end() && !it->second.IsEmpty()) {
+                try {
+                    Napi::String input = Napi::String::New(env, result);
+                    Napi::Number field = Napi::Number::New(env, field_index);
+
+                    Napi::Value js_result = it->second.Call({input, field});
+
+                    if (js_result.IsString()) {
+                        result = js_result.As<Napi::String>().Utf8Value();
+                    }
+                } catch (...) {
+                    // Keep original result if JS transform fails
+                }
+            }
+
+            // Apply transforms that apply to all fields (-1 index)
+            auto it_all = js_transforms.find(-1);
+            if (it_all != js_transforms.end() && !it_all->second.IsEmpty()) {
+                try {
+                    Napi::String input = Napi::String::New(env, result);
+                    Napi::Number field = Napi::Number::New(env, field_index);
+
+                    Napi::Value js_result = it_all->second.Call({input, field});
+
+                    if (js_result.IsString()) {
+                        result = js_result.As<Napi::String>().Utf8Value();
+                    }
+                } catch (...) {
+                    // Keep original result if JS transform fails
+                }
+            }
+        }
+
+        return result;
     }
 };
 
 static void field_cb(void *user, const char *data, size_t len) {
     auto *rc = reinterpret_cast<RowCollector *>(user);
 
-    // Apply transforms using the C transformer
-    if (rc->pipeline && rc->pipeline->count > 0) {
-        cisv_transform_result_t result = cisv_transform_apply(
-            rc->pipeline,
-            rc->current_field_index,
-            data,
-            len
-        );
-
-        if (result.data) {
-            rc->current.emplace_back(result.data, result.len);
-
-            // Free if the transformer allocated memory
-            if (result.needs_free) {
-                free(result.data);
-            }
-        } else {
-            rc->current.emplace_back(data, len);
-        }
-    } else {
-        rc->current.emplace_back(data, len);
-    }
-
+    // Apply all transforms (C and JS)
+    std::string transformed = rc->applyTransforms(data, len, rc->current_field_index);
+    rc->current.emplace_back(transformed);
     rc->current_field_index++;
 }
 
@@ -79,6 +124,7 @@ public:
             InstanceMethod("removeTransform", &CisvParser::RemoveTransform),
             InstanceMethod("clearTransforms", &CisvParser::ClearTransforms),
             InstanceMethod("getStats", &CisvParser::GetStats),
+            InstanceMethod("getTransformInfo", &CisvParser::GetTransformInfo),
             StaticMethod("countRows", &CisvParser::CountRows)
         });
 
@@ -94,7 +140,29 @@ public:
 
         // Handle constructor options if provided
         if (info.Length() > 0 && info[0].IsObject()) {
-            // Parse options object here if needed
+            Napi::Object options = info[0].As<Napi::Object>();
+
+            // Example: handle delimiter option
+            if (options.Has("delimiter")) {
+                Napi::Value delim_val = options.Get("delimiter");
+                if (delim_val.IsString()) {
+                    std::string delim = delim_val.As<Napi::String>();
+                    if (!delim.empty()) {
+                        // cisv_parser_set_delimiter(parser_, delim[0]);
+                    }
+                }
+            }
+
+            // Example: handle quote option
+            if (options.Has("quote")) {
+                Napi::Value quote_val = options.Get("quote");
+                if (quote_val.IsString()) {
+                    std::string quote = quote_val.As<Napi::String>();
+                    if (!quote.empty()) {
+                        // cisv_parser_set_quote(parser_, quote[0]);
+                    }
+                }
+            }
         }
     }
 
@@ -121,6 +189,9 @@ public:
         rc_->rows.clear();
         rc_->current.clear();
         rc_->current_field_index = 0;
+
+        // Set environment for JS transforms
+        rc_->env = env;
 
         int result = cisv_parser_parse_file(parser_, path.c_str());
 
@@ -174,6 +245,9 @@ public:
         rc_->current.clear();
         rc_->current_field_index = 0;
 
+        // Set environment for JS transforms
+        rc_->env = env;
+
         // Write the string content as chunks
         cisv_parser_write(parser_, (const uint8_t*)content.c_str(), content.length());
         cisv_parser_end(parser_);
@@ -190,6 +264,9 @@ public:
         if (info.Length() != 1) {
             throw Napi::TypeError::New(env, "Expected one argument");
         }
+
+        // Set environment for JS transforms
+        rc_->env = env;
 
         if (info[0].IsBuffer()) {
             auto buf = info[0].As<Napi::Buffer<uint8_t>>();
@@ -220,12 +297,12 @@ public:
         parse_time_ = 0;
     }
 
-    // Add transform using native C transformer
+    // Add transform using native C transformer or JavaScript function
     Napi::Value Transform(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
 
         if (info.Length() < 2) {
-            throw Napi::TypeError::New(env, "Expected field index and transform type");
+            throw Napi::TypeError::New(env, "Expected field index and transform type/function");
         }
 
         if (!info[0].IsNumber()) {
@@ -233,6 +310,9 @@ public:
         }
 
         int field_index = info[0].As<Napi::Number>().Int32Value();
+
+        // Store the environment
+        rc_->env = env;
 
         // Handle string transform types - using the actual C transformer
         if (info[1].IsString()) {
@@ -295,12 +375,12 @@ public:
             }
 
         } else if (info[1].IsFunction()) {
-            // For JavaScript functions, we need to store them and call back
-            // This is complex and requires storing JS callbacks
-            // For now, throw an error or implement a callback system
-            throw Napi::Error::New(env,
-                "JavaScript function transforms require using the JS wrapper. "
-                "Use string transform types for native performance.");
+            // Handle JavaScript function transforms
+            Napi::Function func = info[1].As<Napi::Function>();
+
+            // Store the function reference for this field
+            rc_->js_transforms[field_index] = Napi::Persistent(func);
+
         } else {
             throw Napi::TypeError::New(env, "Transform must be a string type or function");
         }
@@ -315,18 +395,55 @@ public:
             throw Napi::TypeError::New(env, "Expected field index");
         }
 
-        // This would need implementation in cisv_transformer.c
-        // For now, we can only clear all transforms
+        int field_index = info[0].As<Napi::Number>().Int32Value();
+
+        // Remove from JavaScript transforms
+        rc_->js_transforms.erase(field_index);
+
+        // TODO: Implement removal of C transforms in cisv_transformer.c
+        // For now, this only removes JS transforms
 
         return info.This();
     }
 
     Napi::Value ClearTransforms(const Napi::CallbackInfo &info) {
+        // Clear JavaScript transforms
+        rc_->js_transforms.clear();
+
+        // Clear C transforms
         if (rc_->pipeline) {
             cisv_transform_pipeline_destroy(rc_->pipeline);
             rc_->pipeline = cisv_transform_pipeline_create(16);
         }
+
         return info.This();
+    }
+
+    // Get information about registered transforms
+    Napi::Value GetTransformInfo(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+        Napi::Object result = Napi::Object::New(env);
+
+        // Count C transforms
+        size_t c_transform_count = rc_->pipeline ? rc_->pipeline->count : 0;
+        result.Set("cTransformCount", Napi::Number::New(env, c_transform_count));
+
+        // Count JS transforms
+        size_t js_transform_count = rc_->js_transforms.size();
+        result.Set("jsTransformCount", Napi::Number::New(env, js_transform_count));
+
+        // List field indices with transforms
+        Napi::Array fields = Napi::Array::New(env);
+        size_t idx = 0;
+
+        // Add JS transform field indices
+        for (const auto& pair : rc_->js_transforms) {
+            fields[idx++] = Napi::Number::New(env, pair.first);
+        }
+
+        result.Set("fieldIndices", fields);
+
+        return result;
     }
 
     Napi::Value GetStats(const Napi::CallbackInfo &info) {
