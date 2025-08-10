@@ -6,7 +6,7 @@ NODE_GYP ?= node-gyp
 # CLI binary name
 CLI_BIN = cisv
 # Include both parser and writer
-CLI_SRC = src/cisv_parser.c src/cisv_writer.c
+CLI_SRC = src/cisv_parser.c src/cisv_writer.c src/cisv_transformer.c
 CLI_OBJ = $(CLI_SRC:.c=.o)
 
 # Build targets
@@ -33,6 +33,9 @@ src/cisv_parser.o: src/cisv_parser.c
 src/cisv_writer.o: src/cisv_writer.c
 	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_writer.o src/cisv_writer.c
 
+src/cisv_transformer.o: src/cisv_transformer.c
+	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_transformer.o src/cisv_transformer.c
+
 # Install CLI tool to /usr/local/bin
 install-cli: cli
 	install -m 755 $(CLI_BIN) /usr/local/bin/$(CLI_BIN)
@@ -46,16 +49,16 @@ install-benchmark-deps:
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; \
 		. $$HOME/.cargo/env; \
 	fi
-	@# Install xsv
-	@if ! command -v xsv > /dev/null; then \
-		echo "Installing xsv..."; \
-		cargo install xsv; \
-	fi
+	#@# Install xsv
+	#@if ! command -v xsv > /dev/null; then \
+	#	echo "Installing xsv..."; \
+	#	cargo install xsv; \
+	#fi
 	@# Install qsv (faster fork of xsv)
-	@if ! command -v qsv > /dev/null; then \
-		echo "Installing qsv..."; \
-		cargo install qsv; \
-	fi
+	#@if ! command -v qsv > /dev/null; then \
+	#	echo "Installing qsv..."; \
+	#	cargo install qsv; \
+	#fi
 	@# Build rust-csv example
 	@echo "Building rust-csv benchmark tool..."
 	@mkdir -p benchmark/rust-csv-bench

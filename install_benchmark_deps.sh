@@ -127,12 +127,12 @@ cd ../..
 echo "✓ rust-csv benchmark tools built"
 
 # Install xsv
-if ! command -v xsv &> /dev/null; then
-    echo "Installing xsv..."
-    cargo install xsv
-else
-    echo "✓ xsv already installed"
-fi
+#if ! command -v xsv &> /dev/null; then
+#    echo "Installing xsv..."
+#    cargo install xsv
+#else
+#    echo "✓ xsv already installed"
+#fi
 
 # Install csvkit
 if command -v pip3 &> /dev/null; then
@@ -150,7 +150,7 @@ echo ""
 echo "Installation complete! Installed tools:"
 echo "-----------------------------------"
 [ -f "benchmark/rust-csv-bench/target/release/csv-bench" ] && echo "✓ rust-csv (benchmark tool)"
-command -v xsv &> /dev/null && echo "✓ xsv"
+# command -v xsv &> /dev/null && echo "✓ xsv"
 command -v csvcut &> /dev/null && echo "✓ csvkit"
 echo ""
 echo "You can now run: make benchmark-cli"

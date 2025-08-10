@@ -15,7 +15,8 @@
 #include "./cisv_simd.h"
 #include "cisv_parser.h"
 
-#define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)
+// #define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)
+#define RINGBUF_SIZE (1 << 16) // 64kb (for memory safe reasons)
 #define PREFETCH_DISTANCE 256
 
 struct cisv_parser {
