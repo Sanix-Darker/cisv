@@ -21,14 +21,31 @@ struct RowCollector {
     Napi::Env env;
 
     RowCollector() : pipeline(nullptr), current_field_index(0), env(nullptr) {
-        pipeline = cisv_transform_pipeline_create(16);
+        // DON'T create the pipeline here - do it lazily when needed
+        pipeline = nullptr;
     }
 
     ~RowCollector() {
+        cleanup();
+    }
+
+    void cleanup() {
         if (pipeline) {
             cisv_transform_pipeline_destroy(pipeline);
+            pipeline = nullptr;
         }
-        // js_transforms will be cleaned up automatically
+        js_transforms.clear();
+        rows.clear();
+        current.clear();
+        current_field_index = 0;
+        env = nullptr;
+    }
+
+    // Lazy initialization of pipeline
+    void ensurePipeline() {
+        if (!pipeline) {
+            pipeline = cisv_transform_pipeline_create(16);
+        }
     }
 
     // Apply both C and JS transforms
@@ -46,7 +63,10 @@ struct RowCollector {
 
             if (c_result.data) {
                 result = std::string(c_result.data, c_result.len);
-                cisv_transform_result_free(&c_result);
+                // IMPORTANT: Free the result if it was allocated
+                if (c_result.needs_free) {
+                    cisv_transform_result_free(&c_result);
+                }
             }
         }
 
@@ -125,6 +145,7 @@ public:
             InstanceMethod("clearTransforms", &CisvParser::ClearTransforms),
             InstanceMethod("getStats", &CisvParser::GetStats),
             InstanceMethod("getTransformInfo", &CisvParser::GetTransformInfo),
+            InstanceMethod("destroy", &CisvParser::Destroy),  // Add explicit destroy
             StaticMethod("countRows", &CisvParser::CountRows)
         });
 
@@ -137,45 +158,48 @@ public:
         parser_ = cisv_parser_create(field_cb, row_cb, rc_);
         parse_time_ = 0;
         total_bytes_ = 0;
+        is_destroyed_ = false;
 
         // Handle constructor options if provided
         if (info.Length() > 0 && info[0].IsObject()) {
             Napi::Object options = info[0].As<Napi::Object>();
 
-            // Example: handle delimiter option
-            if (options.Has("delimiter")) {
-                Napi::Value delim_val = options.Get("delimiter");
-                if (delim_val.IsString()) {
-                    std::string delim = delim_val.As<Napi::String>();
-                    if (!delim.empty()) {
-                        // cisv_parser_set_delimiter(parser_, delim[0]);
-                    }
-                }
-            }
-
-            // Example: handle quote option
-            if (options.Has("quote")) {
-                Napi::Value quote_val = options.Get("quote");
-                if (quote_val.IsString()) {
-                    std::string quote = quote_val.As<Napi::String>();
-                    if (!quote.empty()) {
-                        // cisv_parser_set_quote(parser_, quote[0]);
-                    }
-                }
-            }
+            // Handle options...
         }
     }
 
     ~CisvParser() {
-        if (parser_) {
-            cisv_parser_destroy(parser_);
+        Cleanup();
+    }
+
+    // Explicit cleanup method
+    void Cleanup() {
+        if (!is_destroyed_) {
+            if (parser_) {
+                cisv_parser_destroy(parser_);
+                parser_ = nullptr;
+            }
+            if (rc_) {
+                rc_->cleanup();
+                delete rc_;
+                rc_ = nullptr;
+            }
+            is_destroyed_ = true;
         }
-        delete rc_;
+    }
+
+    // Explicit destroy method callable from JavaScript
+    void Destroy(const Napi::CallbackInfo &info) {
+        Cleanup();
     }
 
     // Synchronous file parsing
     Napi::Value ParseSync(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
 
         if (info.Length() != 1 || !info[0].IsString()) {
             throw Napi::TypeError::New(env, "Expected file path string");
@@ -198,6 +222,9 @@ public:
         auto end = std::chrono::high_resolution_clock::now();
         parse_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
+        // Clear the environment reference after parsing
+        rc_->env = nullptr;
+
         if (result < 0) {
             throw Napi::Error::New(env, "parse error: " + std::to_string(result));
         }
@@ -205,34 +232,13 @@ public:
         return drainRows(env);
     }
 
-    // Async file parsing (returns a Promise)
-    Napi::Value ParseAsync(const Napi::CallbackInfo &info) {
-        Napi::Env env = info.Env();
-
-        if (info.Length() != 1 || !info[0].IsString()) {
-            throw Napi::TypeError::New(env, "Expected file path string");
-        }
-
-        std::string path = info[0].As<Napi::String>();
-
-        // Create a promise
-        auto deferred = Napi::Promise::Deferred::New(env);
-
-        // For simplicity, we'll use sync parsing here
-        // In production, this should use worker threads
-        try {
-            Napi::Value result = ParseSync(info);
-            deferred.Resolve(result);
-        } catch (const Napi::Error& e) {
-            deferred.Reject(e.Value());
-        }
-
-        return deferred.Promise();
-    }
-
     // Parse string content
     Napi::Value ParseString(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
 
         if (info.Length() != 1 || !info[0].IsString()) {
             throw Napi::TypeError::New(env, "Expected CSV string");
@@ -254,6 +260,9 @@ public:
 
         total_bytes_ = content.length();
 
+        // Clear the environment reference after parsing
+        rc_->env = nullptr;
+
         return drainRows(env);
     }
 
@@ -261,11 +270,15 @@ public:
     void Write(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
 
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
         if (info.Length() != 1) {
             throw Napi::TypeError::New(env, "Expected one argument");
         }
 
-        // Make sure JS transforms (if any) can run
+        // Set environment for JS transforms
         rc_->env = env;
 
         if (info[0].IsBuffer()) {
@@ -286,24 +299,40 @@ public:
     }
 
     void End(const Napi::CallbackInfo &info) {
-        cisv_parser_end(parser_);
+        if (!is_destroyed_) {
+            cisv_parser_end(parser_);
+            // Clear the environment reference after ending
+            rc_->env = nullptr;
+        }
     }
 
     Napi::Value GetRows(const Napi::CallbackInfo &info) {
+        if (is_destroyed_) {
+            Napi::Env env = info.Env();
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
         return drainRows(info.Env());
     }
 
     void Clear(const Napi::CallbackInfo &info) {
-        rc_->rows.clear();
-        rc_->current.clear();
-        rc_->current_field_index = 0;
-        total_bytes_ = 0;
-        parse_time_ = 0;
+        if (!is_destroyed_ && rc_) {
+            rc_->rows.clear();
+            rc_->current.clear();
+            rc_->current_field_index = 0;
+            total_bytes_ = 0;
+            parse_time_ = 0;
+            // Also clear the environment reference
+            rc_->env = nullptr;
+        }
     }
 
     // Add transform using native C transformer or JavaScript function
     Napi::Value Transform(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
 
         if (info.Length() < 2) {
             throw Napi::TypeError::New(env, "Expected field index and transform type/function");
@@ -314,6 +343,9 @@ public:
         }
 
         int field_index = info[0].As<Napi::Number>().Int32Value();
+
+        // Ensure pipeline exists (lazy initialization)
+        rc_->ensurePipeline();
 
         // Store the environment
         rc_->env = env;
@@ -370,9 +402,11 @@ public:
 
             // Add to the C transform pipeline
             if (cisv_transform_pipeline_add(rc_->pipeline, field_index, type, ctx) < 0) {
+                // Clean up context if adding failed
                 if (ctx) {
                     if (ctx->key) free(ctx->key);
                     if (ctx->iv) free(ctx->iv);
+                    if (ctx->extra) free(ctx->extra);
                     free(ctx);
                 }
                 throw Napi::Error::New(env, "Failed to add transform");
@@ -395,6 +429,10 @@ public:
     Napi::Value RemoveTransform(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
 
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
         if (info.Length() != 1 || !info[0].IsNumber()) {
             throw Napi::TypeError::New(env, "Expected field index");
         }
@@ -411,29 +449,68 @@ public:
     }
 
     Napi::Value ClearTransforms(const Napi::CallbackInfo &info) {
+        if (is_destroyed_) {
+            Napi::Env env = info.Env();
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
         // Clear JavaScript transforms
         rc_->js_transforms.clear();
 
-        // Clear C transforms
+        // Clear C transforms - destroy and DON'T recreate pipeline yet
         if (rc_->pipeline) {
             cisv_transform_pipeline_destroy(rc_->pipeline);
-            rc_->pipeline = cisv_transform_pipeline_create(16);
+            rc_->pipeline = nullptr;  // Will be recreated lazily when needed
         }
 
         return info.This();
     }
 
+    // Async file parsing (returns a Promise)
+    Napi::Value ParseAsync(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
+        if (info.Length() != 1 || !info[0].IsString()) {
+            throw Napi::TypeError::New(env, "Expected file path string");
+        }
+
+        std::string path = info[0].As<Napi::String>();
+
+        // Create a promise
+        auto deferred = Napi::Promise::Deferred::New(env);
+
+        // For simplicity, we'll use sync parsing here
+        // In production, this should use worker threads
+        try {
+            Napi::Value result = ParseSync(info);
+            deferred.Resolve(result);
+        } catch (const Napi::Error& e) {
+            deferred.Reject(e.Value());
+        }
+
+        return deferred.Promise();
+    }
+
     // Get information about registered transforms
     Napi::Value GetTransformInfo(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
         Napi::Object result = Napi::Object::New(env);
 
         // Count C transforms
-        size_t c_transform_count = rc_->pipeline ? rc_->pipeline->count : 0;
+        size_t c_transform_count = (rc_ && rc_->pipeline) ? rc_->pipeline->count : 0;
         result.Set("cTransformCount", Napi::Number::New(env, c_transform_count));
 
         // Count JS transforms
-        size_t js_transform_count = rc_->js_transforms.size();
+        size_t js_transform_count = rc_ ? rc_->js_transforms.size() : 0;
         result.Set("jsTransformCount", Napi::Number::New(env, js_transform_count));
 
         // List field indices with transforms
@@ -441,8 +518,10 @@ public:
         size_t idx = 0;
 
         // Add JS transform field indices
-        for (const auto& pair : rc_->js_transforms) {
-            fields[idx++] = Napi::Number::New(env, pair.first);
+        if (rc_) {
+            for (const auto& pair : rc_->js_transforms) {
+                fields[idx++] = Napi::Number::New(env, pair.first);
+            }
         }
 
         result.Set("fieldIndices", fields);
@@ -452,11 +531,16 @@ public:
 
     Napi::Value GetStats(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
         Napi::Object stats = Napi::Object::New(env);
 
-        stats.Set("rowCount", Napi::Number::New(env, rc_->rows.size()));
+        stats.Set("rowCount", Napi::Number::New(env, rc_ ? rc_->rows.size() : 0));
         stats.Set("fieldCount", Napi::Number::New(env,
-            rc_->rows.empty() ? 0 : rc_->rows[0].size()));
+            (rc_ && !rc_->rows.empty()) ? rc_->rows[0].size() : 0));
         stats.Set("totalBytes", Napi::Number::New(env, total_bytes_));
         stats.Set("parseTime", Napi::Number::New(env, parse_time_));
 
@@ -479,6 +563,10 @@ public:
 
 private:
     Napi::Value drainRows(Napi::Env env) {
+        if (!rc_) {
+            return Napi::Array::New(env, 0);
+        }
+
         Napi::Array rows = Napi::Array::New(env, rc_->rows.size());
 
         for (size_t i = 0; i < rc_->rows.size(); ++i) {
@@ -499,6 +587,7 @@ private:
     RowCollector *rc_;
     size_t total_bytes_;
     double parse_time_;
+    bool is_destroyed_;
 };
 
 // Initialize all exports

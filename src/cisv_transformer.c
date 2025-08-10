@@ -9,7 +9,8 @@
 #include <immintrin.h>
 #endif
 
-#define TRANSFORM_POOL_SIZE (1 << 20)  // 1MB default pool
+//#define TRANSFORM_POOL_SIZE (1 << 20)  // 1MB default pool
+#define TRANSFORM_POOL_SIZE (1 << 16)  // 64kb (for memory safe reasons)
 #define SIMD_ALIGNMENT 64
 
 // Create transform pipeline
@@ -53,10 +54,14 @@ void cisv_transform_pipeline_destroy(cisv_transform_pipeline_t *pipeline) {
     for (size_t i = 0; i < pipeline->count; i++) {
         if (pipeline->transforms[i].ctx) {
             if (pipeline->transforms[i].ctx->key) {
+                // Clear sensitive data before freeing
+                memset(pipeline->transforms[i].ctx->key, 0, pipeline->transforms[i].ctx->key_len);
                 free(pipeline->transforms[i].ctx->key);
                 pipeline->transforms[i].ctx->key = NULL;
             }
             if (pipeline->transforms[i].ctx->iv) {
+                // Clear sensitive data before freeing
+                memset(pipeline->transforms[i].ctx->iv, 0, pipeline->transforms[i].ctx->iv_len);
                 free(pipeline->transforms[i].ctx->iv);
                 pipeline->transforms[i].ctx->iv = NULL;
             }
@@ -70,12 +75,14 @@ void cisv_transform_pipeline_destroy(cisv_transform_pipeline_t *pipeline) {
     }
 
     free(pipeline->transforms);
+    pipeline->transforms = NULL;
 
 #ifdef _WIN32
     _aligned_free(pipeline->buffer_pool);
 #else
     free(pipeline->buffer_pool);
 #endif
+    pipeline->buffer_pool = NULL;
 
     free(pipeline);
 }
@@ -183,8 +190,8 @@ cisv_transform_result_t cisv_transform_apply(
         return result;
     }
 
-    // Keep track of original data
-    const char *original_data = data;
+    // Keep track of allocated memory to free
+    char *prev_allocated = NULL;
 
     // Apply all matching transforms
     for (size_t i = 0; i < pipeline->count; i++) {
@@ -199,20 +206,20 @@ cisv_transform_result_t cisv_transform_apply(
         if (t->fn) {
             cisv_transform_result_t new_result = t->fn(result.data, result.len, t->ctx);
 
-            // IMPORTANT: Only free the previous result if:
-            // 1. It needs freeing (needs_free is true)
-            // 2. It's not the original data
-            // 3. The new result is different from the old result
-            if (result.needs_free &&
-                result.data != original_data &&
-                result.data != new_result.data) {
-                free(result.data);
-                //free_transform_result_if_needed(&result, original_data);
+            // Free the previous result if it was allocated and different from new result
+            if (result.needs_free && result.data != data && result.data != new_result.data) {
+                prev_allocated = result.data;
             }
 
             result = new_result;
+
+            // Now free the previous allocation if needed
+            if (prev_allocated) {
+                free(prev_allocated);
+                prev_allocated = NULL;
+            }
         } else if (t->js_callback) {
-            // FIXME: need to implement
+            // JS callback handling - to be implemented
             continue;
         }
     }
@@ -355,32 +362,20 @@ cisv_transform_result_t cisv_transform_trim(const char *data, size_t len, cisv_t
     cisv_transform_result_t result;
     result.len = end - start;
 
-    if (result.len == len && start == 0) {
-        // No trimming needed - DO NOT return the same pointer
-        // This prevents issues with the transform pipeline
-        result.data = malloc(len + 1);
-        if (!result.data) {
-            result.data = (char*)data;
-            result.len = len;
-            result.needs_free = 0;
-            return result;
-        }
-        memcpy(result.data, data, len);
-        result.data[len] = '\0';
-        result.needs_free = 1;
-    } else {
-        result.data = malloc(result.len + 1);
-        if (!result.data) {
-            result.data = (char*)data;
-            result.len = len;
-            result.needs_free = 0;
-            return result;
-        }
-
-        memcpy(result.data, data + start, result.len);
-        result.data[result.len] = '\0';
-        result.needs_free = 1;
+    // Always allocate new memory to avoid pointer confusion
+    result.data = malloc(result.len + 1);
+    if (!result.data) {
+        result.data = (char*)data;
+        result.len = len;
+        result.needs_free = 0;
+        return result;
     }
+
+    if (result.len > 0) {
+        memcpy(result.data, data + start, result.len);
+    }
+    result.data[result.len] = '\0';
+    result.needs_free = 1;
 
     return result;
 }
@@ -415,7 +410,8 @@ cisv_transform_result_t cisv_transform_to_int(const char *data, size_t len, cisv
         return result;
     }
 
-    result.len = snprintf(result.data, 32, "%lld", value);
+    int written = snprintf(result.data, 32, "%lld", value);
+    result.len = (written > 0) ? (size_t)written : 0;
     result.needs_free = 1;
     return result;
 }
@@ -450,12 +446,12 @@ cisv_transform_result_t cisv_transform_to_float(const char *data, size_t len, ci
         return result;
     }
 
-    result.len = snprintf(result.data, 64, "%.6f", value);
+    int written = snprintf(result.data, 64, "%.6f", value);
+    result.len = (written > 0) ? (size_t)written : 0;
     result.needs_free = 1;
     return result;
 }
 
-// SHA256 implementation (simplified - in production use a proper crypto library)
 // SHA256 implementation (simplified - in production use a proper crypto library)
 cisv_transform_result_t cisv_transform_hash_sha256(const char *data, size_t len, cisv_transform_context_t *ctx) {
     (void)ctx;
