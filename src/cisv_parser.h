@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +27,17 @@ size_t cisv_parser_count_rows(const char *path);
 int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len);
 void cisv_parser_end(cisv_parser *parser);
 
+void cisv_parser_set_delimiter(cisv_parser* parser, char delimiter);
+void cisv_parser_set_quote(cisv_parser* parser, char quote);
+void cisv_parser_set_escape(cisv_parser* parser, char escape);
+void cisv_parser_set_skip_empty_lines(cisv_parser* parser, bool skip);
+void cisv_parser_set_comment(cisv_parser* parser, char comment);
+void cisv_parser_set_trim(cisv_parser* parser, bool trim);
+void cisv_parser_set_relaxed(cisv_parser* parser, bool relaxed);
+void cisv_parser_set_max_row_size(cisv_parser* parser, size_t max_size);
+void cisv_parser_set_from_line(cisv_parser* parser, int from_line);
+void cisv_parser_set_to_line(cisv_parser* parser, int to_line);
+void cisv_parser_set_skip_lines_with_error(cisv_parser* parser, bool skip);
 
 // Platform-specific defines
 #ifdef __linux__

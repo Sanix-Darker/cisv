@@ -145,7 +145,9 @@ public:
             InstanceMethod("clearTransforms", &CisvParser::ClearTransforms),
             InstanceMethod("getStats", &CisvParser::GetStats),
             InstanceMethod("getTransformInfo", &CisvParser::GetTransformInfo),
-            InstanceMethod("destroy", &CisvParser::Destroy),  // Add explicit destroy
+            InstanceMethod("destroy", &CisvParser::Destroy),
+            InstanceMethod("getHeaders", &CisvParser::GetHeaders),
+            InstanceMethod("setHeaders", &CisvParser::SetHeaders),
             StaticMethod("countRows", &CisvParser::CountRows)
         });
 
@@ -159,12 +161,231 @@ public:
         parse_time_ = 0;
         total_bytes_ = 0;
         is_destroyed_ = false;
+        has_headers_ = false;
+        skip_empty_lines_ = false;
+        headers_processed_ = false;
 
         // Handle constructor options if provided
         if (info.Length() > 0 && info[0].IsObject()) {
             Napi::Object options = info[0].As<Napi::Object>();
 
-            // Handle options...
+            // Handle delimiter option
+            if (options.Has("delimiter")) {
+                Napi::Value delim_val = options.Get("delimiter");
+                if (delim_val.IsString()) {
+                    std::string delim = delim_val.As<Napi::String>();
+                    if (!delim.empty()) {
+                        cisv_parser_set_delimiter(parser_, delim[0]);
+                    }
+                } else if (delim_val.IsNumber()) {
+                    // Allow numeric ASCII codes
+                    char delim = static_cast<char>(delim_val.As<Napi::Number>().Int32Value());
+                    cisv_parser_set_delimiter(parser_, delim);
+                }
+            }
+
+            // Handle quote option
+            if (options.Has("quote")) {
+                Napi::Value quote_val = options.Get("quote");
+                if (quote_val.IsString()) {
+                    std::string quote = quote_val.As<Napi::String>();
+                    if (!quote.empty()) {
+                        cisv_parser_set_quote(parser_, quote[0]);
+                    } else {
+                        // Empty string means no quote character
+                        cisv_parser_set_quote(parser_, '\0');
+                    }
+                } else if (quote_val.IsNull() || quote_val.IsUndefined()) {
+                    // Null/undefined means no quote character
+                    cisv_parser_set_quote(parser_, '\0');
+                } else if (quote_val.IsNumber()) {
+                    char quote = static_cast<char>(quote_val.As<Napi::Number>().Int32Value());
+                    cisv_parser_set_quote(parser_, quote);
+                }
+            }
+
+            // Handle escape option
+            if (options.Has("escape")) {
+                Napi::Value escape_val = options.Get("escape");
+                if (escape_val.IsString()) {
+                    std::string escape = escape_val.As<Napi::String>();
+                    if (!escape.empty()) {
+                        cisv_parser_set_escape(parser_, escape[0]);
+                    } else {
+                        // Empty string means no escape character
+                        cisv_parser_set_escape(parser_, '\0');
+                    }
+                } else if (escape_val.IsNull() || escape_val.IsUndefined()) {
+                    // Null/undefined means no escape character
+                    cisv_parser_set_escape(parser_, '\0');
+                } else if (escape_val.IsNumber()) {
+                    char escape = static_cast<char>(escape_val.As<Napi::Number>().Int32Value());
+                    cisv_parser_set_escape(parser_, escape);
+                }
+            }
+
+            // Handle headers option
+            if (options.Has("headers")) {
+                Napi::Value headers_val = options.Get("headers");
+                if (headers_val.IsBoolean()) {
+                    has_headers_ = headers_val.As<Napi::Boolean>().Value();
+                } else if (headers_val.IsNumber()) {
+                    // Non-zero number means true
+                    has_headers_ = headers_val.As<Napi::Number>().Int32Value() != 0;
+                } else if (headers_val.IsArray()) {
+                    // Custom headers provided
+                    Napi::Array headers_array = headers_val.As<Napi::Array>();
+                    headers_.clear();
+                    for (uint32_t i = 0; i < headers_array.Length(); i++) {
+                        if (headers_array.Get(i).IsString()) {
+                            headers_.push_back(headers_array.Get(i).As<Napi::String>().Utf8Value());
+                        }
+                    }
+                    has_headers_ = false;  // Don't skip first row if custom headers provided
+                    headers_processed_ = true;  // Mark as already having headers
+                }
+            }
+
+            // Handle skipEmptyLines option
+            if (options.Has("skipEmptyLines")) {
+                Napi::Value skip_val = options.Get("skipEmptyLines");
+                if (skip_val.IsBoolean()) {
+                    skip_empty_lines_ = skip_val.As<Napi::Boolean>().Value();
+                    cisv_parser_set_skip_empty_lines(parser_, skip_empty_lines_);
+                } else if (skip_val.IsNumber()) {
+                    skip_empty_lines_ = skip_val.As<Napi::Number>().Int32Value() != 0;
+                    cisv_parser_set_skip_empty_lines(parser_, skip_empty_lines_);
+                }
+            }
+
+            // Handle comment character option (if supported)
+            if (options.Has("comment")) {
+                Napi::Value comment_val = options.Get("comment");
+                if (comment_val.IsString()) {
+                    std::string comment = comment_val.As<Napi::String>();
+                    if (!comment.empty()) {
+                        cisv_parser_set_comment(parser_, comment[0]);
+                    }
+                } else if (comment_val.IsNumber()) {
+                    char comment = static_cast<char>(comment_val.As<Napi::Number>().Int32Value());
+                    cisv_parser_set_comment(parser_, comment);
+                }
+            }
+
+            // Handle trim option (trim whitespace from fields)
+            if (options.Has("trim")) {
+                Napi::Value trim_val = options.Get("trim");
+                if (trim_val.IsBoolean()) {
+                    bool trim = trim_val.As<Napi::Boolean>().Value();
+                    cisv_parser_set_trim(parser_, trim);
+                } else if (trim_val.IsNumber()) {
+                    bool trim = trim_val.As<Napi::Number>().Int32Value() != 0;
+                    cisv_parser_set_trim(parser_, trim);
+                }
+            }
+
+            // Handle relaxed option (relax column count checking)
+            if (options.Has("relaxed") || options.Has("relax")) {
+                Napi::Value relax_val = options.Has("relaxed") ?
+                    options.Get("relaxed") : options.Get("relax");
+                if (relax_val.IsBoolean()) {
+                    bool relaxed = relax_val.As<Napi::Boolean>().Value();
+                    cisv_parser_set_relaxed(parser_, relaxed);
+                } else if (relax_val.IsNumber()) {
+                    bool relaxed = relax_val.As<Napi::Number>().Int32Value() != 0;
+                    cisv_parser_set_relaxed(parser_, relaxed);
+                }
+            }
+
+            // Handle maxRowSize option
+            if (options.Has("maxRowSize")) {
+                Napi::Value max_size_val = options.Get("maxRowSize");
+                if (max_size_val.IsNumber()) {
+                    size_t max_size = static_cast<size_t>(max_size_val.As<Napi::Number>().Int64Value());
+                    cisv_parser_set_max_row_size(parser_, max_size);
+                }
+            }
+
+            // Handle encoding option (default is UTF-8)
+            if (options.Has("encoding")) {
+                Napi::Value encoding_val = options.Get("encoding");
+                if (encoding_val.IsString()) {
+                    encoding_ = encoding_val.As<Napi::String>().Utf8Value();
+                    // Store encoding for later use, actual encoding conversion
+                    // would be handled during parsing
+                }
+            }
+
+            // Handle columns option (column definitions for parsing)
+            if (options.Has("columns")) {
+                Napi::Value columns_val = options.Get("columns");
+                if (columns_val.IsBoolean() && columns_val.As<Napi::Boolean>().Value()) {
+                    // true means auto-detect columns from first row
+                    has_headers_ = true;
+                } else if (columns_val.IsArray()) {
+                    // Array of column names or definitions
+                    Napi::Array columns_array = columns_val.As<Napi::Array>();
+                    columns_.clear();
+                    for (uint32_t i = 0; i < columns_array.Length(); i++) {
+                        Napi::Value col = columns_array.Get(i);
+                        if (col.IsString()) {
+                            columns_.push_back(col.As<Napi::String>().Utf8Value());
+                        } else if (col.IsObject()) {
+                            // Could be column definition object with name, type, etc.
+                            Napi::Object col_obj = col.As<Napi::Object>();
+                            if (col_obj.Has("name")) {
+                                columns_.push_back(col_obj.Get("name").As<Napi::String>().Utf8Value());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Handle fromLine option (start parsing from specific line)
+            if (options.Has("fromLine") || options.Has("from_line")) {
+                Napi::Value from_val = options.Has("fromLine") ?
+                    options.Get("fromLine") : options.Get("from_line");
+                if (from_val.IsNumber()) {
+                    from_line_ = from_val.As<Napi::Number>().Int32Value();
+                    cisv_parser_set_from_line(parser_, from_line_);
+                }
+            }
+
+            // Handle toLine option (stop parsing at specific line)
+            if (options.Has("toLine") || options.Has("to_line")) {
+                Napi::Value to_val = options.Has("toLine") ?
+                    options.Get("toLine") : options.Get("to_line");
+                if (to_val.IsNumber()) {
+                    to_line_ = to_val.As<Napi::Number>().Int32Value();
+                    cisv_parser_set_to_line(parser_, to_line_);
+                }
+            }
+
+            // Handle skipLinesWithError option
+            if (options.Has("skipLinesWithError")) {
+                Napi::Value skip_err_val = options.Get("skipLinesWithError");
+                if (skip_err_val.IsBoolean()) {
+                    skip_lines_with_error_ = skip_err_val.As<Napi::Boolean>().Value();
+                    cisv_parser_set_skip_lines_with_error(parser_, skip_lines_with_error_);
+                }
+            }
+
+            // Handle raw option (return raw unparsed lines)
+            if (options.Has("raw")) {
+                Napi::Value raw_val = options.Get("raw");
+                if (raw_val.IsBoolean()) {
+                    return_raw_ = raw_val.As<Napi::Boolean>().Value();
+                }
+            }
+
+            // Handle objectMode option (return objects instead of arrays)
+            if (options.Has("objectMode") || options.Has("objects")) {
+                Napi::Value obj_val = options.Has("objectMode") ?
+                    options.Get("objectMode") : options.Get("objects");
+                if (obj_val.IsBoolean()) {
+                    object_mode_ = obj_val.As<Napi::Boolean>().Value();
+                }
+            }
         }
     }
 
@@ -562,32 +783,113 @@ public:
     }
 
 private:
-    Napi::Value drainRows(Napi::Env env) {
-        if (!rc_) {
-            return Napi::Array::New(env, 0);
-        }
-
-        Napi::Array rows = Napi::Array::New(env, rc_->rows.size());
-
-        for (size_t i = 0; i < rc_->rows.size(); ++i) {
-            Napi::Array row = Napi::Array::New(env, rc_->rows[i].size());
-            for (size_t j = 0; j < rc_->rows[i].size(); ++j) {
-                row[j] = Napi::String::New(env, rc_->rows[i][j]);
-            }
-            rows[i] = row;
-        }
-
-        // Don't clear here if we want to keep data for multiple reads
-        // rc_->rows.clear();
-
-        return rows;
-    }
-
     cisv_parser *parser_;
     RowCollector *rc_;
     size_t total_bytes_;
     double parse_time_;
     bool is_destroyed_;
+
+    // Configuration options
+    bool has_headers_;
+    bool skip_empty_lines_;
+    bool headers_processed_;
+    bool skip_lines_with_error_;
+    bool return_raw_;
+    bool object_mode_;
+    int from_line_;
+    int to_line_;
+    std::string encoding_;
+    std::vector<std::string> headers_;
+    std::vector<std::string> columns_;
+
+    // Modified drainRows method to handle headers and object mode
+    Napi::Value drainRows(Napi::Env env) {
+        if (!rc_) {
+            return Napi::Array::New(env, 0);
+        }
+
+        // Handle headers if needed
+        size_t start_row = 0;
+        if (has_headers_ && !headers_processed_ && !rc_->rows.empty()) {
+            // First row contains headers
+            headers_ = rc_->rows[0];
+            headers_processed_ = true;
+            start_row = 1;  // Skip header row in output
+        }
+
+        // Return as objects if object_mode is enabled
+        if (object_mode_ && !headers_.empty()) {
+            Napi::Array result = Napi::Array::New(env, rc_->rows.size() - start_row);
+
+            for (size_t i = start_row; i < rc_->rows.size(); ++i) {
+                Napi::Object row_obj = Napi::Object::New(env);
+                const auto& row = rc_->rows[i];
+
+                for (size_t j = 0; j < row.size() && j < headers_.size(); ++j) {
+                    row_obj.Set(headers_[j], Napi::String::New(env, row[j]));
+                }
+
+                // Add any extra fields that don't have headers
+                for (size_t j = headers_.size(); j < row.size(); ++j) {
+                    row_obj.Set(std::to_string(j), Napi::String::New(env, row[j]));
+                }
+
+                result[i - start_row] = row_obj;
+            }
+
+            return result;
+        }
+
+        // Return as arrays (default)
+        Napi::Array rows = Napi::Array::New(env, rc_->rows.size() - start_row);
+
+        for (size_t i = start_row; i < rc_->rows.size(); ++i) {
+            Napi::Array row = Napi::Array::New(env, rc_->rows[i].size());
+            for (size_t j = 0; j < rc_->rows[i].size(); ++j) {
+                row[j] = Napi::String::New(env, rc_->rows[i][j]);
+            }
+            rows[i - start_row] = row;
+        }
+
+        return rows;
+    }
+
+    // Add method to get headers
+    Napi::Value GetHeaders(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (headers_.empty()) {
+            return env.Null();
+        }
+
+        Napi::Array headers = Napi::Array::New(env, headers_.size());
+        for (size_t i = 0; i < headers_.size(); i++) {
+            headers[i] = Napi::String::New(env, headers_[i]);
+        }
+
+        return headers;
+    }
+
+    // Add method to set headers manually
+    void SetHeaders(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (info.Length() != 1 || !info[0].IsArray()) {
+            throw Napi::TypeError::New(env, "Expected array of header names");
+        }
+
+        Napi::Array headers_array = info[0].As<Napi::Array>();
+        headers_.clear();
+
+        for (uint32_t i = 0; i < headers_array.Length(); i++) {
+            if (headers_array.Get(i).IsString()) {
+                headers_.push_back(headers_array.Get(i).As<Napi::String>().Utf8Value());
+            }
+        }
+
+        headers_processed_ = true;
+    }
+
 };
 
 // Initialize all exports

@@ -32,6 +32,22 @@ struct cisv_parser {
     cisv_row_cb rcb;             // row callback fired after the last field of each record
     void *user;
     const uint8_t *field_start;  // where the in-progress field began
+
+    // Configuration options
+    char delimiter;             // field delimiter character (default ',')
+    char quote;                 // quote character (default '"')
+    char escape;                // escape character (0 means use RFC4180-style "" escaping)
+    bool skip_empty_lines;      // whether to skip empty lines
+    char comment;               // comment character (0 means no comments)
+    bool trim;                  // whether to trim whitespace from fields
+    bool relaxed;               // whether to use relaxed parsing rules
+    size_t max_row_size;        // maximum allowed row size (0 = unlimited)
+    int from_line;              // start parsing from this line number (1-based)
+    int to_line;                // stop parsing at this line number (0 = until end)
+    bool skip_lines_with_error; // whether to skip lines that cause errors
+
+    // State tracking
+    int current_line;           // current line number being processed
 };
 // State constants for branchless operations
 #define S_UNQUOTED  0
@@ -100,6 +116,50 @@ static inline void yield_row(cisv_parser *parser) {
     if (parser->rcb) {
         parser->rcb(parser->user);
     }
+}
+
+void cisv_parser_set_delimiter(cisv_parser* parser, char delimiter) {
+    if (parser) parser->delimiter = delimiter;
+}
+
+void cisv_parser_set_quote(cisv_parser* parser, char quote) {
+    if (parser) parser->quote = quote;
+}
+
+void cisv_parser_set_escape(cisv_parser* parser, char escape) {
+    if (parser) parser->escape = escape;
+}
+
+void cisv_parser_set_skip_empty_lines(cisv_parser* parser, bool skip) {
+    if (parser) parser->skip_empty_lines = skip;
+}
+
+void cisv_parser_set_comment(cisv_parser* parser, char comment) {
+    if (parser) parser->comment = comment;
+}
+
+void cisv_parser_set_trim(cisv_parser* parser, bool trim) {
+    if (parser) parser->trim = trim;
+}
+
+void cisv_parser_set_relaxed(cisv_parser* parser, bool relaxed) {
+    if (parser) parser->relaxed = relaxed;
+}
+
+void cisv_parser_set_max_row_size(cisv_parser* parser, size_t max_size) {
+    if (parser) parser->max_row_size = max_size;
+}
+
+void cisv_parser_set_from_line(cisv_parser* parser, int from_line) {
+    if (parser) parser->from_line = from_line;
+}
+
+void cisv_parser_set_to_line(cisv_parser* parser, int to_line) {
+    if (parser) parser->to_line = to_line;
+}
+
+void cisv_parser_set_skip_lines_with_error(cisv_parser* parser, bool skip) {
+    if (parser) parser->skip_lines_with_error = skip;
 }
 
 #if defined(cisv_HAVE_AVX512) || defined(cisv_HAVE_AVX2)
