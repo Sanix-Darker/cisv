@@ -26,7 +26,7 @@ jobs:
           examples/
           types/
           index.d.ts
-        sparse-checkout-cone: false
+        sparse-checkout-cone-mode: false
 
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v3
@@ -56,7 +56,7 @@ jobs:
           package-lock.json
           binding.gyp
           Makefile
-        sparse-checkout-cone: false
+        sparse-checkout-cone-mode: false
 
     - name: Build CLI
       run: |
