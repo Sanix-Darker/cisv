@@ -133,17 +133,6 @@ parser
     .transform(0, val => val.substring(0, 10));
 ```
 
-### CONFIGURATION
-```javascript
-const customParser = new cisv.cisvParser({
-    delimiter: '|',
-    quote: "'",
-    escape: '\\',
-    headers: true,
-    skipEmptyLines: true
-});
-```
-
 ## CLI USAGE
 
 ### PARSING
