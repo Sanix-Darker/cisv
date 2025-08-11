@@ -811,7 +811,7 @@ int main(int argc, char *argv[]) {
                 return 0;
 
             case 'v':
-                printf("cisv version 0.0.1\n");
+                printf("cisv version v0.0.1-rc10\n");
                 free(ctx.current_row);
                 return 0;
 
