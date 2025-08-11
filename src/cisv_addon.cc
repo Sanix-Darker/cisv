@@ -265,10 +265,13 @@ public:
                     std::string comment = comment_val.As<Napi::String>();
                     if (!comment.empty()) {
                         cisv_parser_set_comment(parser_, comment[0]);
+                    } else {
+                        // Disable comments if empty string
+                        cisv_parser_set_comment(parser_, '\0');
                     }
-                } else if (comment_val.IsNumber()) {
-                    char comment = static_cast<char>(comment_val.As<Napi::Number>().Int32Value());
-                    cisv_parser_set_comment(parser_, comment);
+                } else if (comment_val.IsNull() || comment_val.IsUndefined()) {
+                    // Disable comments
+                    cisv_parser_set_comment(parser_, '\0');
                 }
             }
 

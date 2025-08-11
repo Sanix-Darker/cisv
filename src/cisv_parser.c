@@ -1,4 +1,9 @@
+#ifndef _POSIX_C_SOURCE
+    #define _POSIX_C_SOURCE 200809L  // For strdup
+#endif
+
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,7 +12,9 @@
 #include <errno.h>
 #include <time.h>
 // NOTE: not dealing with windows for now, too much issues
-#include <sys/mman.h>
+#ifdef __linux__
+    #include <sys/mman.h>
+#endif
 #include <fcntl.h>
 #include <unistd.h>
 #include <getopt.h>
@@ -48,6 +55,8 @@ struct cisv_parser {
 
     // State tracking
     int current_line;           // current line number being processed
+    bool in_comment;
+    int tables_initialized;
 };
 // State constants for branchless operations
 #define S_UNQUOTED  0
@@ -66,24 +75,28 @@ static uint8_t action_table[3][256];
 static int tables_initialized = 0;
 
 // Initialize lookup tables (called lazily)
-static void init_tables(void) {
+static void init_tables(cisv_parser *parser) {
     if (tables_initialized) return;
 
     // Initialize state transitions
     for (int c = 0; c < 256; c++) {
         // S_UNQUOTED transitions
-        state_table[S_UNQUOTED][c] = S_UNQUOTED;
-        if (c == '"') state_table[S_UNQUOTED][c] = S_QUOTED;
+        state_table[S_UNQUOTED][(unsigned char)c] = S_UNQUOTED;
+        if (c == parser->quote) {
+            state_table[S_UNQUOTED][(unsigned char)c] = S_QUOTED;
+        }
 
         // S_QUOTED transitions
-        state_table[S_QUOTED][c] = S_QUOTED;
-        if (c == '"') state_table[S_QUOTED][c] = S_QUOTE_ESC;
+        state_table[S_QUOTED][(unsigned char)c] = S_QUOTED;
+        if (c == parser->quote) {
+            state_table[S_QUOTED][(unsigned char)c] = S_QUOTE_ESC;
+        }
 
         // S_QUOTE_ESC transitions
-        if (c == '"') {
-            state_table[S_QUOTE_ESC][c] = S_QUOTED;
+        if (c == parser->quote) {
+            state_table[S_QUOTE_ESC][(unsigned char)c] = S_QUOTED;
         } else {
-            state_table[S_QUOTE_ESC][c] = S_UNQUOTED;
+            state_table[S_QUOTE_ESC][(unsigned char)c] = S_UNQUOTED;
         }
     }
 
@@ -91,13 +104,14 @@ static void init_tables(void) {
     memset(action_table, ACT_NONE, sizeof(action_table));
 
     // S_UNQUOTED actions
-    action_table[S_UNQUOTED][','] = ACT_FIELD;
+    action_table[S_UNQUOTED][(unsigned char)parser->delimiter] = ACT_FIELD;
     action_table[S_UNQUOTED]['\n'] = ACT_FIELD | ACT_ROW;
+    action_table[S_UNQUOTED]['\r'] = ACT_FIELD | ACT_ROW;  // Handle CR as row end
 
     // S_QUOTE_ESC actions
     for (int c = 0; c < 256; c++) {
-        if (c != '"') {
-            action_table[S_QUOTE_ESC][c] = ACT_REPROCESS;
+        if (c != parser->quote) {
+            action_table[S_QUOTE_ESC][(unsigned char)c] = ACT_REPROCESS;
         }
     }
 
@@ -105,6 +119,13 @@ static void init_tables(void) {
 }
 
 static inline void yield_field(cisv_parser *parser, const uint8_t *start, const uint8_t *end) {
+    if (parser->trim) {
+        // Trim leading whitespace
+        while (start < end && isspace(*start)) start++;
+
+        // Trim trailing whitespace
+        while (end > start && isspace(*(end-1))) end--;
+    }
     // Branchless check: multiply callback by validity flag
     size_t valid = (parser->fcb != NULL) & (start != NULL) & (end != NULL) & (end >= start);
     if (valid) {
@@ -166,7 +187,7 @@ void cisv_parser_set_skip_lines_with_error(cisv_parser* parser, bool skip) {
 
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     // Ensure tables are initialized
-    if (!tables_initialized) init_tables();
+    if (!tables_initialized) init_tables(parser);
 
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
@@ -274,7 +295,7 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 // ARM NEON optimized parsing
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     // Ensure tables are initialized
-    if (!tables_initialized) init_tables();
+    if (!tables_initialized) init_tables(parser);
 
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
@@ -356,7 +377,7 @@ scalar_fallback:
 // Non-SIMD fallback with branchless optimizations
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     // Ensure tables are initialized
-    if (!tables_initialized) init_tables();
+    if (!tables_initialized) init_tables(parser);
 
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
@@ -388,6 +409,23 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 
     // Handle remainder
     while (cur < end) {
+        // Handle comment lines
+        if (parser->comment && parser->st == S_UNQUOTED && *cur == parser->comment) {
+            // Skip until end of line
+            while (cur < end && *cur != '\n') {
+                cur++;
+            }
+            if (cur < end && *cur == '\n') {
+                parser->current_line++;
+            }
+            continue;
+        }
+
+        // Handle line skipping
+        if (parser->to_line > 0 && parser->current_line > parser->to_line) {
+            break;
+        }
+
         uint8_t c = *cur;
         uint8_t next_state = state_table[parser->st][c];
         uint8_t action = action_table[parser->st][c];
@@ -403,6 +441,10 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
         }
 
         cur += 1 - ((action & ACT_REPROCESS) >> 2);
+
+        if (*cur == '\n') {
+            parser->current_line++;
+        }
     }
 }
 #endif
@@ -410,6 +452,26 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     parser->field_start = buffer;
     parser->st = S_UNQUOTED;
+    parser->current_line = 1;
+    parser->in_comment = false;
+
+    // Handle from_line option
+    if (parser->from_line > 1) {
+        // Skip lines until we reach the starting line
+        for (size_t i = 0; i < len; i++) {
+            if (buffer[i] == '\n') {
+                parser->current_line++;
+                if (parser->current_line >= parser->from_line) {
+                    buffer += i + 1;
+                    len -= i + 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Initialize tables with current config
+    init_tables(parser);
 
     parse_simd_chunk(parser, buffer, len);
 
@@ -442,7 +504,9 @@ size_t cisv_parser_count_rows(const char *path) {
     }
 
     // Use madvise for sequential access
+#ifdef __linux__
     madvise(base, st.st_size, MADV_SEQUENTIAL);
+#endif
 
     size_t count = 0;
 
@@ -562,14 +626,14 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     if (parser->fd < 0) return -errno;
 
     // Platform-specific file hints
-    #ifdef HAS_POSIX_FADVISE
+#if defined(HAS_POSIX_FADVISE) && defined(POSIX_FADV_SEQUENTIAL)
         posix_fadvise(parser->fd, 0, 0, POSIX_FADV_SEQUENTIAL);
-    #elif defined(__APPLE__) && defined(HAS_RDADVISE)
+#elif defined(__APPLE__) && defined(HAS_RDADVISE)
         struct radvisory radv;
         radv.ra_offset = 0;
         radv.ra_count = 0;  // 0 means whole file
         fcntl(parser->fd, F_RDADVISE, &radv);
-    #endif
+#endif
 
     if (fstat(parser->fd, &st) < 0) {
         int err = errno;
@@ -588,9 +652,9 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
 
     // mmap with platform-specific flags
     int mmap_flags = MAP_PRIVATE;
-    #ifdef HAS_MAP_POPULATE
-        mmap_flags |= MAP_POPULATE;
-    #endif
+#ifdef MAP_POPULATE
+    mmap_flags |= MAP_POPULATE;
+#endif
 
     parser->base = mmap(NULL, parser->size, PROT_READ, mmap_flags, parser->fd, 0);
     if (parser->base == MAP_FAILED) {
@@ -601,7 +665,10 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     }
 
     // Advise kernel about access pattern
+#ifdef __linux__
     madvise(parser->base, parser->size, MADV_SEQUENTIAL);
+#endif
+
     #ifdef MADV_WILLNEED
         madvise(parser->base, parser->size < (1<<20) ? parser->size : (1<<20), MADV_WILLNEED);
     #endif
