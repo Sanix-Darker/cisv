@@ -34,7 +34,7 @@ jobs:
             README.md
             package.json
             binding.gyp
-          sparse-checkout-cone: false
+          sparse-checkout-cone-mode: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
