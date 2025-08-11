@@ -21,8 +21,6 @@ const fastCsv = require('fast-csv');
 const fs = require('fs');
 const { Suite } = require('benchmark');
 const stream = require('stream');
-
-const fs = require('fs');
 const path = require('path');
 
 // Initial file path from arguments or default to './fixtures/data.csv'
