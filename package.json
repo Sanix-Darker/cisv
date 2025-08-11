@@ -1,6 +1,6 @@
 {
   "name": "cisv",
-  "version": "v0.0.1",
+  "version": "v0.0.2",
   "description": "The fastest csv parser of the multiverse",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
@@ -20,13 +20,15 @@
     "test:coverage": "nyc mocha test/*.test.js",
     "test:perf": "node test/performance.test.js"
   },
+  "dependencies": {
+    "node-addon-api": "^5.0.0"
+  },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.19.9",
     "benchmark": "^2.1.4",
     "chai": "^4.3.6",
     "mocha": "^10.0.0",
-    "node-addon-api": "^5.0.0",
     "nyc": "^15.0.0",
     "ts-mocha": "^10.1.0",
     "typescript": "^5.8.3",
