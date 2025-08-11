@@ -2,7 +2,7 @@
 
 ![Performance](https://img.shields.io/badge/performance-blazing%20fast-red)
 ![SIMD](https://img.shields.io/badge/SIMD-AVX512%2FAVX2-green)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![License](https://img.shields.io/badge/license-GPL2-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 
 High-performance CSV parser and writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool.
