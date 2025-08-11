@@ -1,7 +1,7 @@
 'use strict';
 // direct node ./benchmark/benchmark.js
 // means you have to call from :../build/Release/cisv
-const { cisvParser } = require('../../build/Release/cisv');
+const { cisvParser } = require('../build/Release/cisv');
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');
@@ -112,8 +112,7 @@ async function runAllBenchmarks() {
             const parser = new cisvParser();
             parser.write(fileBuffer);
             parser.end();
-            const rows = parser.getRows();
-            const specificRow = rows[TARGET_ROW_INDEX];
+            const specificRow = parser[TARGET_ROW_INDEX];
           })
           .add('csv-parse (sync)', () => {
             const rows = csvParseSync(fileBuffer);
