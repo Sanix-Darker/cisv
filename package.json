@@ -1,6 +1,6 @@
 {
   "name": "cisv",
-  "version": "v0.0.3-rc1",
+  "version": "0.0.3",
   "description": "The fastest csv parser of the multiverse",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
