@@ -66,7 +66,7 @@ jobs:
         run: |
           npm run build
           # Package node addon
-          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${ARCH}.node"
+          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}${ARCH}.node"
           cp build/Release/cisv.node "$ADDON_OUTPUT"
           echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
 
@@ -151,9 +151,9 @@ jobs:
           node-version: '23.x'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Update package version
-        run: |
-          npm version ${VERSION#v} --no-git-tag-version
+          #- name: Update package version
+          #  run: |
+          #    npm version ${VERSION#v} --no-git-tag-version
 
       - name: Build and test
         run: |
