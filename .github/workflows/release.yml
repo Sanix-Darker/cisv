@@ -126,7 +126,7 @@ jobs:
         run: |
           # Create clean package structure
           mkdir -p pkg
-          cp -r cisv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
+          cp -r cisv benchmark LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
 
           # Update package version
           cd pkg
