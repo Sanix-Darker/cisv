@@ -101,7 +101,7 @@ jobs:
           test_select.sh
           test_transform.sh
           examples/
-        sparse-checkout-cone: false
+        sparse-checkout-cone-mode: false
 
     - name: Install memory checking tools
       run: |
