@@ -16,7 +16,6 @@ test_transform_leak_test.js
 test_transform.sh
 test/basic.test.js
 valgrind-node.supp
-
 node_modules
 *.csv
 npm-debug.log
