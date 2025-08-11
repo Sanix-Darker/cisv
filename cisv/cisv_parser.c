@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "win_getopt.h"
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
@@ -12,7 +11,6 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/time.h>
-#include "./cisv_simd.h"
 #include "cisv_parser.h"
 
 // #define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)

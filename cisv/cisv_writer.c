@@ -1,11 +1,8 @@
 #define _GNU_SOURCE
 #include "cisv_writer.h"
-#include "cisv_simd.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <errno.h>
-#include <ctype.h>
 
 #define DEFAULT_BUFFER_SIZE (1 << 20)  // 1MB
 #define MIN_BUFFER_SIZE (1 << 16)      // 64KB
