@@ -151,9 +151,9 @@ jobs:
           node-version: '23.x'
           registry-url: 'https://registry.npmjs.org'
 
-          #- name: Update package version
-          #  run: |
-          #    npm version ${VERSION#v} --no-git-tag-version
+      - name: Update package version
+        run: |
+          npm version ${VERSION#v} --no-git-tag-version
 
       - name: Build and test
         run: |
