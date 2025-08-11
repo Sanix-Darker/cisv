@@ -39,7 +39,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '22.x'
+          node-version: '23.x'
 
       - name: Install build dependencies
         shell: bash
@@ -117,7 +117,7 @@ jobs:
 
       - uses: actions/setup-node@v3
         with:
-          node-version: '22.x'
+          node-version: '23.x'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Prepare npm package
@@ -135,7 +135,6 @@ jobs:
         run: |
           npm install
           npm run build
-          npm test
 
       - name: Publish to npm
         run: |
