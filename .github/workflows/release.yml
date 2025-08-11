@@ -131,6 +131,12 @@ jobs:
           npm version ${VERSION#v} --no-git-tag-version
           cd ..
 
+      - name: Build and test
+        run: |
+          npm install
+          npm run build
+          npm test
+
       - name: Publish to npm
         run: |
           cd pkg
