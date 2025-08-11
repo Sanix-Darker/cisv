@@ -54,8 +54,10 @@ jobs:
           ARCH="${{ matrix.arch }}"
           EXT=""
 
-          # Build with version info
+          # Build cisv with version info
+          npm install -g node-gyp
           make clean
+          make build
           CFLAGS="-DCISV_VERSION=\"${VERSION}\" -O3 -march=native" make cli
 
           OUTPUT="cisv-${{ matrix.pkg_os }}-${ARCH}${EXT}"
@@ -111,7 +113,7 @@ jobs:
             binding.gyp
             index.d.ts
             types/
-          sparse-checkout-cone: false
+          sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@v3
         with:
