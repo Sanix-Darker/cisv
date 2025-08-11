@@ -115,6 +115,7 @@ jobs:
             index.d.ts
             types/
             benchmark/
+            fixtures/data.csv
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@v3
@@ -126,7 +127,7 @@ jobs:
         run: |
           # Create clean package structure
           mkdir -p pkg
-          cp -r cisv benchmark LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
+          cp -r cisv benchmark fixtures/data.csv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
 
           # Update package version
           cd pkg
