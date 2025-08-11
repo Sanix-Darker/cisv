@@ -4,10 +4,10 @@ LDFLAGS ?= -flto -s
 NODE_GYP ?= node-gyp
 
 # CLI binary name
-CLI_BIN = cisv
-# Include both parser and writer
-CLI_SRC = src/cisv_parser.c src/cisv_writer.c src/cisv_transformer.c
-CLI_OBJ = $(CLI_SRC:.c=.o)
+CLI_BIN = cisv_bin
+# Source files for CLI
+CLI_SRCS = cisv/cisv_parser.c cisv/cisv_writer.c cisv/cisv_transformer.c
+CLI_OBJ = $(CLI_SRCS:.c=.o)
 
 # Build targets
 all: build cli
@@ -20,23 +20,17 @@ build:
 	npm install
 	$(NODE_GYP) configure build CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
 
-# Build CLI tool (cisv_parser.c contains main when CISV_CLI is defined)
+# Build CLI tool
 cli: $(CLI_BIN)
 
 $(CLI_BIN): $(CLI_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Compile with CISV_CLI defined to include CLI code
-src/cisv_parser.o: src/cisv_parser.c
-	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_parser.o src/cisv_parser.c
+# Compile with CISV_CLI defined
+cisv/cisv_%.o: cisv/cisv_%.c
+	$(CC) $(CFLAGS) -DCISV_CLI -c -o $@ $<
 
-src/cisv_writer.o: src/cisv_writer.c
-	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_writer.o src/cisv_writer.c
-
-src/cisv_transformer.o: src/cisv_transformer.c
-	$(CC) $(CFLAGS) -DCISV_CLI -c -o src/cisv_transformer.o src/cisv_transformer.c
-
-# Install CLI tool to /usr/local/bin
+# Install CLI tool
 install-cli: cli
 	install -m 755 $(CLI_BIN) /usr/local/bin/$(CLI_BIN)
 
@@ -67,7 +61,7 @@ install-benchmark-deps:
 			cargo init --name csv-bench; \
 			echo 'csv = "1.3"' >> Cargo.toml; \
 		fi && \
-		echo 'use std::env;\nuse std::error::Error;\nuse csv::ReaderBuilder;\n\nfn main() -> Result<(), Box<dyn Error>> {\n    let args: Vec<String> = env::args().collect();\n    if args.len() < 2 { eprintln!("Usage: {} <file>", args[0]); std::process::exit(1); }\n    let mut rdr = ReaderBuilder::new().has_headers(true).from_path(&args[1])?;\n    let count = rdr.records().count();\n    println!("{}", count);\n    Ok(())\n}' > src/main.rs && \
+		echo 'use std::env;\nuse std::error::Error;\nuse csv::ReaderBuilder;\n\nfn main() -> Result<(), Box<dyn Error>> {\n    let args: Vec<String> = env::args().collect();\n    if args.len() < 2 { eprintln!("Usage: {} <file>", args[0]); std::process::exit(1); }\n    let mut rdr = ReaderBuilder::new().has_headers(true).from_path(&args[1])?;\n    let count = rdr.records().count();\n    println!("{}", count);\n    Ok(())\n}' > cisv/main.rs && \
 		cargo build --release
 	@# Fix csvkit Python 3.12 compatibility issue and install
 	@if command -v pip3 > /dev/null; then \
@@ -83,8 +77,8 @@ debug:
 clean:
 	$(NODE_GYP) clean
 	rm -rf build
-	rm -f $(CLI_BIN) $(CLI_OBJ)
-	rm -f src/cisv_cli.o  # Clean old object file if exists
+	rm -rf $(CLI_BIN) $(CLI_OBJ)
+	rm -rf cisv/cisv_cli.o  # Clean old object file if exists
 
 test: build
 	npm test

@@ -78,8 +78,11 @@ interface TransformInfo {
 ```
 
 ### BASIC PARSING
+
 ```javascript
-const parser = new cisv.cisvParser();
+import { cisvParser } from "cisv";
+
+const parser = new cisvParser();
 
 // Synchronous
 const rows = parser.parseSync('data.csv');
@@ -93,8 +96,11 @@ const stringRows = parser.parseString(csvString);
 ```
 
 ### STREAMING
+
 ```javascript
-const streamParser = new cisv.cisvParser();
+import { cisvParser } from "cisv";
+
+const streamParser = new cisvParser();
 const stream = fs.createReadStream('huge-file.csv');
 
 stream.on('data', chunk => streamParser.write(chunk));
