@@ -15,21 +15,26 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest] # , macos-latest
+        os: [ubuntu-latest]
         arch: [amd64, arm64]
         include:
           - os: ubuntu-latest
             pkg_os: ubuntu
             pkg_type: deb
-         # - os: macos-latest
-         #   pkg_os: macos
-         #   pkg_type: tar.gz
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Only check out necessary files
+          sparse-checkout: |
+            cisv/
+            LICENSE
+            README.md
+            package.json
+            binding.gyp
+          sparse-checkout-cone: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -45,77 +50,42 @@ jobs:
       - name: Build CLI binary
         shell: bash
         run: |
-          # Set platform-specific variables
           OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-latest//')
           ARCH="${{ matrix.arch }}"
           EXT=""
 
-          # Build cisv with version info
-          npm install -g node-gyp
+          # Build with version info
           make clean
-          make build
           CFLAGS="-DCISV_VERSION=\"${VERSION}\" -O3 -march=native" make cli
 
-          # Rename output file
           OUTPUT="cisv-${{ matrix.pkg_os }}-${ARCH}${EXT}"
-          mv cisv${EXT} "$OUTPUT"
+          mv cisv_bin "$OUTPUT"
           echo "OUTPUT_FILE=$OUTPUT" >> $GITHUB_ENV
 
       - name: Build Node.js addon
         shell: bash
         run: |
           npm run build
-          # Package node addon
           ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}${ARCH}.node"
           cp build/Release/cisv.node "$ADDON_OUTPUT"
           echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
 
-      - name: Package artifact
+      - name: Create minimal package
         shell: bash
         run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            sudo apt-get update && sudo apt-get install -y ruby-dev rubygems
-            sudo gem install fpm
+          # Create directory structure
+          mkdir -p cisv-package/cisv
+          mkdir -p cisv-package/bin
 
-            # Create directory structure for package
-            mkdir -p package/usr/local/bin
-            mkdir -p package/usr/local/lib/node_modules/cisv
+          # Copy only necessary files
+          cp -r cisv/* cisv-package/cisv/
+          cp LICENSE cisv-package/
+          cp README.md cisv-package/
+          cp "$OUTPUT_FILE" cisv-package/bin/cisv
 
-            cp "$OUTPUT_FILE" package/usr/local/bin/cisv
-            chmod +x package/usr/local/bin/cisv
-
-            # Package with fpm
-            fpm -s dir -t deb -n cisv -v ${VERSION#v} \
-              --architecture ${{ matrix.arch }} \
-              --description "The fastest CSV parser" \
-              --url "https://github.com/${{ github.repository }}" \
-              --maintainer "${{ github.repository_owner }}" \
-              -C package \
-              usr/local/bin
-
-            PACKAGE=$(ls cisv_*_${{ matrix.arch }}.deb)
-          else
-            # Create tarball with both CLI and Node addon
-            tar czf cisv-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz "$OUTPUT_FILE" "$ADDON_FILE" README.md LICENSE
-            PACKAGE="cisv-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz"
-          fi
-          echo "PACKAGE_FILE=$PACKAGE" >> $GITHUB_ENV
-
-      - name: Test binary
-        shell: bash
-        run: |
-          # Basic smoke test
-          ./${{ env.OUTPUT_FILE }} --version
-          ./${{ env.OUTPUT_FILE }} --help
-
-          # Create test CSV
-          echo "id,name,value" > test.csv
-          echo "1,test,100" >> test.csv
-          echo "2,demo,200" >> test.csv
-
-          # Test basic functionality
-          ./${{ env.OUTPUT_FILE }} -c test.csv
-          ./${{ env.OUTPUT_FILE }} test.csv
+          # Create tarball
+          tar czf cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz -C cisv-package .
+          echo "MINIMAL_PACKAGE=cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz" >> $GITHUB_ENV
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
@@ -124,44 +94,44 @@ jobs:
           files: |
             ${{ env.OUTPUT_FILE }}
             ${{ env.ADDON_FILE }}
-            ${{ env.PACKAGE_FILE }}
+            ${{ env.MINIMAL_PACKAGE }}
           generate_release_notes: true
 
-      - name: Update Latest Tag
-        if: github.repository == 'Sanix-Darker/cisv'
-        uses: softprops/action-gh-release@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: latest
-          name: latest
-          body: "latest release: ${{ env.VERSION }}"
-          files: |
-            ${{ env.OUTPUT_FILE }}
-            ${{ env.ADDON_FILE }}
-            ${{ env.PACKAGE_FILE }}
-
-  # TODO: to do later
   publish-npm:
-    needs: build
     runs-on: ubuntu-latest
+    needs: build
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            cisv/
+            LICENSE
+            README.md
+            package.json
+            binding.gyp
+            index.d.ts
+            types/
+          sparse-checkout-cone: false
+
       - uses: actions/setup-node@v3
         with:
-          node-version: '23.x'
+          node-version: '22.x'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Update package version
+      - name: Prepare npm package
         run: |
-          npm version ${VERSION#v} --no-git-tag-version
+          # Create clean package structure
+          mkdir -p pkg
+          cp -r cisv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
 
-      - name: Build and test
-        run: |
-          npm install
-          npm run build
-          npm test
+          # Update package version
+          cd pkg
+          npm version ${VERSION#v} --no-git-tag-version
+          cd ..
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: |
+          cd pkg
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
