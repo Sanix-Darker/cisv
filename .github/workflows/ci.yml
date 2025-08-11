@@ -101,6 +101,8 @@ jobs:
           test_select.sh
           test_transform.sh
           examples/
+          valgrind-node.supp
+          test_transform_leak_test.js
         sparse-checkout-cone-mode: false
 
     - name: Install memory checking tools
