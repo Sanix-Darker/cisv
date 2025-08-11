@@ -32,6 +32,7 @@ jobs:
             cisv/
             LICENSE
             README.md
+            Makefile
             package.json
             binding.gyp
           sparse-checkout-cone-mode: false
