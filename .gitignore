@@ -3,7 +3,7 @@ build
 *.csv
 npm-debug.log
 */*.o
-cisv
+cisv_bin
 valgrind_output.log
 benchmark/rust-csv-bench/
 valgrind_report.txt

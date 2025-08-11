@@ -42,11 +42,11 @@ csv = "1.3"
 
 [[bin]]
 name = "csv-bench"
-path = "src/main.rs"
+path = "cisv/main.rs"
 
 [[bin]]
 name = "csv-select"
-path = "src/select.rs"
+path = "cisv/select.rs"
 
 [profile.release]
 lto = true
@@ -55,7 +55,7 @@ EOF
 fi
 
 # Create count benchmark
-cat > src/main.rs << 'EOF'
+cat > cisv/main.rs << 'EOF'
 use std::env;
 use std::error::Error;
 use csv::ReaderBuilder;
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 EOF
 
 # Create select benchmark
-cat > src/select.rs << 'EOF'
+cat > cisv/select.rs << 'EOF'
 use std::env;
 use std::error::Error;
 use csv::{ReaderBuilder, WriterBuilder};

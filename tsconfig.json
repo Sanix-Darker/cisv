@@ -5,13 +5,13 @@
     "strict": true,
     "esModuleInterop": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./cisv",
     "baseUrl": ".",
     "paths": {
       "cisv": ["./build/Release/cisv"]
     },
     "typeRoots": ["./types", "./node_modules/@types"]
   },
-  "include": ["src/**/*"],
+  "include": ["cisv/**/*"],
   "exclude": ["node_modules"]
 }
