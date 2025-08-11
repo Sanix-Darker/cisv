@@ -1,19 +1,7 @@
 'use strict';
-let cisvParser;
-
-try {
-  // from calling benchmark from ./ root
-  cisvParser = require('../build/Release/cisv');
-} catch (error1) {
-  try {
-    // from calling on npm publish ../pkg/
-    cisvParser = require('../../build/Release/cisv');
-  } catch (error2) {
-    // Handle the error if both attempts fail
-    console.error("Failed to load module from either relative path:", error1, error2);
-    throw new Error("cisv module could not be found in '../build/Release' or '../../build/Release'");
-  }
-}
+// direct node ./benchmark/benchmark.js
+// means you have to call from :../build/Release/cisv
+const { cisvParser } = require('../../build/Release/cisv');
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');
