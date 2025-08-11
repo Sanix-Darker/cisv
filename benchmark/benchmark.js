@@ -22,7 +22,32 @@ const fs = require('fs');
 const { Suite } = require('benchmark');
 const stream = require('stream');
 
-const BENCH_FILE = process.argv[2] || './fixtures/data.csv';
+const fs = require('fs');
+const path = require('path');
+
+// Initial file path from arguments or default to './fixtures/data.csv'
+let benchFilePath = process.argv[2] || './fixtures/data.csv';
+
+try {
+  // Resolve to an absolute path
+  if (!fs.existsSync(benchFilePath)) {
+    // If the initial path doesn't exist, try '../fixtures/data.csv'
+    const alternativePath = '../fixtures/data.csv';
+    if (fs.existsSync(alternativePath)) {
+      benchFilePath = alternativePath;
+    } else {
+      // If none of the files exist, throw an error
+      throw new Error("File not found");
+    }
+  }
+} catch (error) {
+  console.error("Failed to locate benchmark file in either specified path or '../fixtures':", error);
+  throw error;
+}
+
+const BENCH_FILE = path.resolve(benchFilePath);
+console.log(">>> Using benchmark file:", BENCH_FILE);
+
 // We set a row to retrieve.
 // This ensures all parsers do the work to make data accessible.
 const TARGET_ROW_INDEX = 4;
