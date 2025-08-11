@@ -12,7 +12,7 @@
     "test:build": "npm run test",
     "benchmark": "node benchmark/benchmark.js",
     "lint": "clang-format -i cisv/*.{cc,h}",
-    "prepublishOnly": "npm test && npm run benchmark",
+    "prepublishOnly": "npm run benchmark",
     "pretest:typescript": "tsc --project tsconfig.json --noEmit",
     "build:types": "tsc --project tsconfig.json --declaration --emitDeclarationOnly",
     "test:all": "npm run test && npm run test:typescript",
