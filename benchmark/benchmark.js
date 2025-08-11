@@ -25,7 +25,7 @@ const stream = require('stream');
 const BENCH_FILE = process.argv[2] || './fixtures/data.csv';
 // We set a row to retrieve.
 // This ensures all parsers do the work to make data accessible.
-const TARGET_ROW_INDEX = 857010;
+const TARGET_ROW_INDEX = 4;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const results = { sync: [], sync_data: [], async: [], async_data: [] };
