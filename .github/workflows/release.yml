@@ -114,6 +114,7 @@ jobs:
             binding.gyp
             index.d.ts
             types/
+            benchmark/
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@v3
