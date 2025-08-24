@@ -372,6 +372,8 @@ Options:
 | csv-parse         | 15.48        | 34,471         | Partial              |
 | papaparse         | 25.67        | 57,147         | Partial              |
 
+(you can check more benchmarks details from release pipelines)
+
 ### RUNNING BENCHMARKS
 
 ```bash
@@ -412,35 +414,15 @@ cisv -b -d ';' -q "'" --trim european.csv
 - Linux/Unix support only (optimized for x86_64 CPU)
 - Windows support planned for future release
 
-## MIGRATION GUIDE
-
-### From v1.0.0 to v1.1.0
-
-The new version maintains backward compatibility while adding configuration support:
-
-```javascript
-// Old way (still works)
-const parser = new cisvParser();
-const rows = parser.parseSync('data.csv');
-
-// New way with configuration
-const parser = new cisvParser({
-    delimiter: '\t',
-    quote: "'",
-    trim: true
-});
-const rows = parser.parseSync('data.tsv');
-```
-
 ## CONTRIBUTING
 
 Areas of interest:
-- ARM NEON/SVE optimization improvements
-- Windows native support
-- Parallel parsing for multi-core systems
-- Custom memory allocators
-- Streaming compression support
-- Additional transform functions
+- [ ] ARM NEON/SVE optimization improvements (in progress)
+- [ ] Windows native support
+- [ ] Parallel parsing for multi-core systems
+- [ ] Custom memory allocators
+- [ ] Streaming compression support
+- [ ] Additional transform functions
 
 ## LICENSE
 

@@ -1172,7 +1172,7 @@ int main(int argc, char *argv[]) {
                 return 0;
 
             case 'v':
-                printf("cisv version v0.0.2-rc1\n");
+                printf("cisv version 0.0.7\n");
                 printf("Features: configurable parsing, SIMD optimizations\n");
                 free(ctx.current_row);
                 return 0;

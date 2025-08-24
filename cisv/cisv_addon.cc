@@ -649,7 +649,7 @@ public:
         auto deferred = Napi::Promise::Deferred::New(env);
 
         // For simplicity, we'll use sync parsing here
-        // In production, this should use worker threads
+        // FIXME: In production, this should use worker threads
         try {
             Napi::Value result = ParseSync(info);
             deferred.Resolve(result);
