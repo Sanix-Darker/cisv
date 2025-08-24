@@ -3,8 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <errno.h>
 #include <time.h>
+#include <stdbool.h>
+#include <ctype.h>
 // NOTE: not dealing with windows for now, too much issues
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -21,72 +22,172 @@ struct cisv_parser {
     uint8_t *base;              // pointer to the whole input, if memory-mapped
     size_t size;                // length of that mapping
     int fd;                     // the underlying file descriptor (-1 ⇒ none)
-    uint8_t *ring;              // malloc’ed circular buffer when not mmapped
+    uint8_t *ring;              // malloc'ed circular buffer when not mmapped
     size_t head;                // write head: next byte slot to fill
-    uint8_t st;
-    cisv_field_cb fcb;           // field callback fired whenever a full cell is ready
-                                 // (delimiter or row-ending newline encountered, consistent with RFC 4180 rules)
+    uint8_t st;                 // parser state
 
-    cisv_row_cb rcb;             // row callback fired after the last field of each record
-    void *user;
-    const uint8_t *field_start;  // where the in-progress field began
+    // Configuration options
+    char delimiter;             // field delimiter character (default ',')
+    char quote;                 // quote character (default '"')
+    char escape;                // escape character (0 means use RFC4180-style "" escaping)
+    bool skip_empty_lines;      // whether to skip empty lines
+    char comment;               // comment character (0 means no comments)
+    bool trim;                  // whether to trim whitespace from fields
+    bool relaxed;               // whether to use relaxed parsing rules
+    size_t max_row_size;        // maximum allowed row size (0 = unlimited)
+    int from_line;              // start parsing from this line number (1-based)
+    int to_line;                // stop parsing at this line number (0 = until end)
+    bool skip_lines_with_error; // whether to skip lines that cause errors
+
+    // State tracking
+    int current_line;           // current line number being processed
+    bool in_comment;            // whether we're currently in a comment
+    int tables_initialized;     // whether lookup tables are initialized
+
+    // Callbacks
+    cisv_field_cb fcb;          // field callback fired whenever a full cell is ready
+                                // (delimiter or row-ending newline encountered, consistent with RFC 4180 rules)
+    cisv_row_cb rcb;            // row callback fired after the last field of each record
+    cisv_error_cb ecb;          // error callback for handling parse errors
+    void *user;                 // user data for callbacks
+
+    const uint8_t *field_start; // where the in-progress field began
+    const uint8_t *row_start;   // where the current row began
+    size_t current_row_size;    // size of current row being processed
+
+    // Dynamic lookup tables for current configuration
+    uint8_t *state_table;       // state transition table
+    uint8_t *action_table;      // action table
 };
+
 // State constants for branchless operations
 #define S_UNQUOTED  0
 #define S_QUOTED    1
 #define S_QUOTE_ESC 2
+#define S_COMMENT   3
 
 // Action flags for each character in each state
 #define ACT_NONE       0
 #define ACT_FIELD      1
 #define ACT_ROW        2
 #define ACT_REPROCESS  4
+#define ACT_SKIP       8
 
-// Lookup tables for branchless state transitions - initialized at compile time
-static uint8_t state_table[3][256];
-static uint8_t action_table[3][256];
-static int tables_initialized = 0;
+// Initialize configuration with defaults
+void cisv_config_init(cisv_config *config) {
+    memset(config, 0, sizeof(*config));
+    config->delimiter = ',';
+    config->quote = '"';
+    config->escape = 0;  // Use RFC4180-style "" escaping by default
+    config->skip_empty_lines = false;
+    config->comment = 0;  // No comments by default
+    config->trim = false;
+    config->relaxed = false;
+    config->max_row_size = 0;  // Unlimited
+    config->from_line = 1;
+    config->to_line = 0;  // Until end
+    config->skip_lines_with_error = false;
+}
 
-// Initialize lookup tables (called lazily)
-static void init_tables(void) {
-    if (tables_initialized) return;
+// Initialize lookup tables for the parser's configuration
+static void init_tables(cisv_parser *parser) {
+    if (parser->tables_initialized) return;
+
+    // Allocate tables if not already allocated
+    if (!parser->state_table) {
+        parser->state_table = calloc(4 * 256, sizeof(uint8_t));
+        parser->action_table = calloc(4 * 256, sizeof(uint8_t));
+        if (!parser->state_table || !parser->action_table) {
+            return;  // Handle allocation failure gracefully
+        }
+    }
+
+    // Get table pointers for easier access
+    uint8_t (*state_table)[256] = (uint8_t (*)[256])parser->state_table;
+    uint8_t (*action_table)[256] = (uint8_t (*)[256])parser->action_table;
 
     // Initialize state transitions
     for (int c = 0; c < 256; c++) {
         // S_UNQUOTED transitions
         state_table[S_UNQUOTED][c] = S_UNQUOTED;
-        if (c == '"') state_table[S_UNQUOTED][c] = S_QUOTED;
+        if (c == parser->quote) {
+            state_table[S_UNQUOTED][c] = S_QUOTED;
+        } else if (parser->comment && c == parser->comment) {
+            state_table[S_UNQUOTED][c] = S_COMMENT;
+        }
 
         // S_QUOTED transitions
         state_table[S_QUOTED][c] = S_QUOTED;
-        if (c == '"') state_table[S_QUOTED][c] = S_QUOTE_ESC;
+        if (parser->escape && c == parser->escape) {
+            state_table[S_QUOTED][c] = S_QUOTE_ESC;
+        } else if (c == parser->quote) {
+            state_table[S_QUOTED][c] = S_QUOTE_ESC;
+        }
 
         // S_QUOTE_ESC transitions
-        if (c == '"') {
+        if (parser->escape) {
+            // With explicit escape character, always return to quoted state
             state_table[S_QUOTE_ESC][c] = S_QUOTED;
         } else {
-            state_table[S_QUOTE_ESC][c] = S_UNQUOTED;
+            // RFC4180-style: "" becomes a literal quote
+            if (c == parser->quote) {
+                state_table[S_QUOTE_ESC][c] = S_QUOTED;
+            } else {
+                state_table[S_QUOTE_ESC][c] = S_UNQUOTED;
+            }
+        }
+
+        // S_COMMENT transitions - stay in comment until newline
+        state_table[S_COMMENT][c] = S_COMMENT;
+        if (c == '\n') {
+            state_table[S_COMMENT][c] = S_UNQUOTED;
         }
     }
 
     // Initialize action table
-    memset(action_table, ACT_NONE, sizeof(action_table));
+    memset(action_table, ACT_NONE, 4 * 256);
 
     // S_UNQUOTED actions
-    action_table[S_UNQUOTED][','] = ACT_FIELD;
+    action_table[S_UNQUOTED][(uint8_t)parser->delimiter] = ACT_FIELD;
     action_table[S_UNQUOTED]['\n'] = ACT_FIELD | ACT_ROW;
+    action_table[S_UNQUOTED]['\r'] = ACT_FIELD;  // Handle CRLF
 
     // S_QUOTE_ESC actions
-    for (int c = 0; c < 256; c++) {
-        if (c != '"') {
-            action_table[S_QUOTE_ESC][c] = ACT_REPROCESS;
+    if (!parser->escape) {
+        // RFC4180-style: reprocess non-quote characters
+        for (int c = 0; c < 256; c++) {
+            if (c != parser->quote) {
+                action_table[S_QUOTE_ESC][c] = ACT_REPROCESS;
+            }
         }
     }
 
-    tables_initialized = 1;
+    // S_COMMENT actions - skip everything except newline
+    for (int c = 0; c < 256; c++) {
+        action_table[S_COMMENT][c] = ACT_SKIP;
+    }
+    action_table[S_COMMENT]['\n'] = ACT_ROW;
+
+    parser->tables_initialized = 1;
+}
+
+static inline const uint8_t* trim_start(const uint8_t *start, const uint8_t *end) {
+    while (start < end && isspace(*start)) start++;
+    return start;
+}
+
+static inline const uint8_t* trim_end(const uint8_t *start, const uint8_t *end) {
+    while (end > start && isspace(*(end - 1))) end--;
+    return end;
 }
 
 static inline void yield_field(cisv_parser *parser, const uint8_t *start, const uint8_t *end) {
+    // Apply trimming if configured
+    if (parser->trim) {
+        start = trim_start(start, end);
+        end = trim_end(start, end);
+    }
+
     // Branchless check: multiply callback by validity flag
     size_t valid = (parser->fcb != NULL) & (start != NULL) & (end != NULL) & (end >= start);
     if (valid) {
@@ -95,50 +196,112 @@ static inline void yield_field(cisv_parser *parser, const uint8_t *start, const 
 }
 
 static inline void yield_row(cisv_parser *parser) {
+    // Check if we should skip empty lines
+    if (parser->skip_empty_lines && parser->field_start == parser->row_start) {
+        parser->row_start = parser->field_start;
+        return;
+    }
+
+    // Check line range
+    if (parser->current_line < parser->from_line) {
+        parser->current_line++;
+        parser->row_start = parser->field_start;
+        return;
+    }
+
+    if (parser->to_line > 0 && parser->current_line > parser->to_line) {
+        return;
+    }
+
     if (parser->rcb) {
         parser->rcb(parser->user);
     }
+
+    parser->current_line++;
+    parser->row_start = parser->field_start;
+    parser->current_row_size = 0;
 }
 
+static inline void handle_error(cisv_parser *parser, const char *msg) {
+    if (parser->ecb) {
+        parser->ecb(parser->user, parser->current_line, msg);
+    }
+
+    if (!parser->skip_lines_with_error) {
+        // Could set an error flag here to stop parsing
+    }
+}
+
+// SIMD implementations with configuration support
 #if defined(cisv_HAVE_AVX512) || defined(cisv_HAVE_AVX2)
 
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     // Ensure tables are initialized
-    if (!tables_initialized) init_tables();
+    if (!parser->tables_initialized) init_tables(parser);
 
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
 
+    // Get table pointers
+    uint8_t (*state_table)[256] = (uint8_t (*)[256])parser->state_table;
+    uint8_t (*action_table)[256] = (uint8_t (*)[256])parser->action_table;
+
     // SIMD constants - create them on stack to avoid segfault
-    uint8_t comma_bytes[64];
+    uint8_t delim_bytes[64];
     uint8_t quote_bytes[64];
     uint8_t newline_bytes[64];
-    memset(comma_bytes, ',', 64);
-    memset(quote_bytes, '"', 64);
-    memset(newline_bytes, '\n', 64);
+    uint8_t comment_bytes[64];
 
-    const cisv_vec comma_vec = cisv_LOAD(comma_bytes);
+    memset(delim_bytes, parser->delimiter, 64);
+    memset(quote_bytes, parser->quote, 64);
+    memset(newline_bytes, '\n', 64);
+    if (parser->comment) {
+        memset(comment_bytes, parser->comment, 64);
+    }
+
+    const cisv_vec delim_vec = cisv_LOAD(delim_bytes);
     const cisv_vec quote_vec = cisv_LOAD(quote_bytes);
     const cisv_vec newline_vec = cisv_LOAD(newline_bytes);
+    const cisv_vec comment_vec = parser->comment ? cisv_LOAD(comment_bytes) : delim_vec;
 
     while (cur + cisv_VEC_BYTES <= end) {
+        // Check max row size if configured
+        if (parser->max_row_size > 0) {
+            parser->current_row_size += cisv_VEC_BYTES;
+            if (parser->current_row_size > parser->max_row_size) {
+                handle_error(parser, "Row exceeds maximum size");
+                // Skip to next line
+                while (cur < end && *cur != '\n') cur++;
+                if (cur < end) cur++;
+                parser->current_row_size = 0;
+                parser->row_start = cur;
+                parser->field_start = cur;
+                continue;
+            }
+        }
+
         // Prefetch next chunk
         __builtin_prefetch(cur + PREFETCH_DISTANCE, 0, 1);
 
         // Fast path for unquoted state
-        if (parser->st == S_UNQUOTED) {
+        if (parser->st == S_UNQUOTED && !parser->in_comment) {
             cisv_vec chunk = cisv_LOAD(cur);
 
             #ifdef cisv_HAVE_AVX512
-                uint64_t comma_mask = cisv_CMP_EQ(chunk, comma_vec);
+                uint64_t delim_mask = cisv_CMP_EQ(chunk, delim_vec);
                 uint64_t quote_mask = cisv_CMP_EQ(chunk, quote_vec);
                 uint64_t newline_mask = cisv_CMP_EQ(chunk, newline_vec);
-                uint64_t combined = comma_mask | quote_mask | newline_mask;
+                uint64_t comment_mask = parser->comment ? cisv_CMP_EQ(chunk, comment_vec) : 0;
+                uint64_t combined = delim_mask | quote_mask | newline_mask | comment_mask;
             #else
-                cisv_vec comma_cmp = cisv_CMP_EQ(chunk, comma_vec);
+                cisv_vec delim_cmp = cisv_CMP_EQ(chunk, delim_vec);
                 cisv_vec quote_cmp = cisv_CMP_EQ(chunk, quote_vec);
                 cisv_vec newline_cmp = cisv_CMP_EQ(chunk, newline_vec);
-                cisv_vec combined_vec = cisv_OR_MASK(cisv_OR_MASK(comma_cmp, quote_cmp), newline_cmp);
+                cisv_vec combined_vec = cisv_OR_MASK(cisv_OR_MASK(delim_cmp, quote_cmp), newline_cmp);
+                if (parser->comment) {
+                    cisv_vec comment_cmp = cisv_CMP_EQ(chunk, comment_vec);
+                    combined_vec = cisv_OR_MASK(combined_vec, comment_cmp);
+                }
                 uint32_t combined = cisv_MOVEMASK(combined_vec);
             #endif
 
@@ -155,12 +318,13 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
                 uint8_t c = *special_pos;
 
                 // Branchless field/row handling
-                uint8_t is_comma = (c == ',');
+                uint8_t is_delim = (c == parser->delimiter);
                 uint8_t is_newline = (c == '\n');
-                uint8_t is_quote = (c == '"');
+                uint8_t is_quote = (c == parser->quote);
+                uint8_t is_comment = parser->comment && (c == parser->comment);
 
                 // Process field before special char
-                if (special_pos > parser->field_start && (is_comma | is_newline)) {
+                if (special_pos > parser->field_start && (is_delim | is_newline)) {
                     yield_field(parser, parser->field_start, special_pos);
                     parser->field_start = special_pos + 1;
                 }
@@ -172,6 +336,7 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 
                 // Update state branchlessly
                 parser->st = (parser->st & ~is_quote) | (S_QUOTED & -is_quote);
+                parser->in_comment = parser->in_comment | is_comment;
 
                 // Clear processed bit
                 combined &= combined - 1;
@@ -179,7 +344,7 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 
             cur += cisv_VEC_BYTES;
         } else {
-            // In quoted state - need scalar processing
+            // In quoted/comment state - need scalar processing
             break;
         }
     }
@@ -187,6 +352,17 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
     // Handle remainder with scalar code
     while (cur < end) {
         uint8_t c = *cur;
+
+        // Handle comment state
+        if (parser->in_comment) {
+            if (c == '\n') {
+                parser->in_comment = false;
+                yield_row(parser);
+            }
+            cur++;
+            continue;
+        }
+
         uint8_t next_state = state_table[parser->st][c];
         uint8_t action = action_table[parser->st][c];
 
@@ -212,17 +388,37 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 // ARM NEON optimized parsing
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     // Ensure tables are initialized
-    if (!tables_initialized) init_tables();
+    if (!parser->tables_initialized) init_tables(parser);
 
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
 
-    // NEON constants
-    uint8x16_t comma_vec = vdupq_n_u8(',');
-    uint8x16_t quote_vec = vdupq_n_u8('"');
-    uint8x16_t newline_vec = vdupq_n_u8('\n');
+    // Get table pointers
+    uint8_t (*state_table)[256] = (uint8_t (*)[256])parser->state_table;
+    uint8_t (*action_table)[256] = (uint8_t (*)[256])parser->action_table;
 
-    while (cur + 16 <= end && parser->st == S_UNQUOTED) {
+    // NEON constants
+    uint8x16_t delim_vec = vdupq_n_u8(parser->delimiter);
+    uint8x16_t quote_vec = vdupq_n_u8(parser->quote);
+    uint8x16_t newline_vec = vdupq_n_u8('\n');
+    uint8x16_t comment_vec = parser->comment ? vdupq_n_u8(parser->comment) : delim_vec;
+
+    while (cur + 16 <= end && parser->st == S_UNQUOTED && !parser->in_comment) {
+        // Check max row size if configured
+        if (parser->max_row_size > 0) {
+            parser->current_row_size += 16;
+            if (parser->current_row_size > parser->max_row_size) {
+                handle_error(parser, "Row exceeds maximum size");
+                // Skip to next line
+                while (cur < end && *cur != '\n') cur++;
+                if (cur < end) cur++;
+                parser->current_row_size = 0;
+                parser->row_start = cur;
+                parser->field_start = cur;
+                continue;
+            }
+        }
+
         // Prefetch next chunk
         __builtin_prefetch(cur + 64, 0, 1);
 
@@ -230,12 +426,16 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
         uint8x16_t chunk = vld1q_u8(cur);
 
         // Compare with special characters
-        uint8x16_t comma_cmp = vceqq_u8(chunk, comma_vec);
+        uint8x16_t delim_cmp = vceqq_u8(chunk, delim_vec);
         uint8x16_t quote_cmp = vceqq_u8(chunk, quote_vec);
         uint8x16_t newline_cmp = vceqq_u8(chunk, newline_vec);
 
         // Combine masks
-        uint8x16_t combined = vorrq_u8(vorrq_u8(comma_cmp, quote_cmp), newline_cmp);
+        uint8x16_t combined = vorrq_u8(vorrq_u8(delim_cmp, quote_cmp), newline_cmp);
+        if (parser->comment) {
+            uint8x16_t comment_cmp = vceqq_u8(chunk, comment_vec);
+            combined = vorrq_u8(combined, comment_cmp);
+        }
 
         // Check if any special char found
         uint64_t mask_low = vgetq_lane_u64(vreinterpretq_u64_u8(combined), 0);
@@ -250,8 +450,9 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
         // Process special characters byte by byte
         for (int i = 0; i < 16 && cur + i < end; i++) {
             uint8_t c = cur[i];
-            if (c == ',' || c == '\n' || c == '"') {
-                if (c == ',' || c == '\n') {
+            if (c == parser->delimiter || c == '\n' || c == parser->quote ||
+                (parser->comment && c == parser->comment)) {
+                if (c == parser->delimiter || c == '\n') {
                     if (cur + i > parser->field_start) {
                         yield_field(parser, parser->field_start, cur + i);
                         parser->field_start = cur + i + 1;
@@ -259,8 +460,12 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
                     if (c == '\n') {
                         yield_row(parser);
                     }
-                } else if (c == '"') {
+                } else if (c == parser->quote) {
                     parser->st = S_QUOTED;
+                    cur += i + 1;
+                    goto scalar_fallback;
+                } else if (parser->comment && c == parser->comment) {
+                    parser->in_comment = true;
                     cur += i + 1;
                     goto scalar_fallback;
                 }
@@ -273,6 +478,17 @@ scalar_fallback:
     // Handle remainder with scalar code
     while (cur < end) {
         uint8_t c = *cur;
+
+        // Handle comment state
+        if (parser->in_comment) {
+            if (c == '\n') {
+                parser->in_comment = false;
+                yield_row(parser);
+            }
+            cur++;
+            continue;
+        }
+
         uint8_t next_state = state_table[parser->st][c];
         uint8_t action = action_table[parser->st][c];
 
@@ -294,21 +510,56 @@ scalar_fallback:
 // Non-SIMD fallback with branchless optimizations
 static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     // Ensure tables are initialized
-    if (!tables_initialized) init_tables();
+    if (!parser->tables_initialized) init_tables(parser);
 
     const uint8_t *cur = buffer;
     const uint8_t *end = buffer + len;
 
+    // Get table pointers
+    uint8_t (*state_table)[256] = (uint8_t (*)[256])parser->state_table;
+    uint8_t (*action_table)[256] = (uint8_t (*)[256])parser->action_table;
+
     // Unroll loop by 8 for better performance
     while (cur + 8 <= end) {
+        // Check max row size if configured
+        if (parser->max_row_size > 0 && parser->current_row_size > parser->max_row_size) {
+            handle_error(parser, "Row exceeds maximum size");
+            // Skip to next line
+            while (cur < end && *cur != '\n') cur++;
+            if (cur < end) {
+                cur++;
+                parser->current_row_size = 0;
+                parser->row_start = cur;
+                parser->field_start = cur;
+            }
+            continue;
+        }
+
         __builtin_prefetch(cur + 64, 0, 1);
 
         for (int i = 0; i < 8; i++) {
             uint8_t c = cur[i];
+
+            // Handle comment state
+            if (parser->in_comment) {
+                if (c == '\n') {
+                    parser->in_comment = false;
+                    yield_row(parser);
+                }
+                continue;
+            }
+
+            // Check for comment start
+            if (parser->comment && parser->st == S_UNQUOTED && c == parser->comment) {
+                parser->in_comment = true;
+                continue;
+            }
+
             uint8_t next_state = state_table[parser->st][c];
             uint8_t action = action_table[parser->st][c];
 
             parser->st = next_state;
+            parser->current_row_size++;
 
             if (action & ACT_FIELD) {
                 yield_field(parser, parser->field_start, cur + i);
@@ -316,6 +567,7 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
             }
             if (action & ACT_ROW) {
                 yield_row(parser);
+                parser->current_row_size = 0;
             }
             if (action & ACT_REPROCESS) {
                 i--;
@@ -327,6 +579,39 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
     // Handle remainder
     while (cur < end) {
         uint8_t c = *cur;
+
+        // Handle comment state
+        if (parser->in_comment) {
+            if (c == '\n') {
+                parser->in_comment = false;
+                yield_row(parser);
+                parser->current_row_size = 0;
+            }
+            cur++;
+            continue;
+        }
+
+        // Check for comment start
+        if (parser->comment && parser->st == S_UNQUOTED && c == parser->comment) {
+            parser->in_comment = true;
+            cur++;
+            continue;
+        }
+
+        // Check max row size
+        if (parser->max_row_size > 0 && ++parser->current_row_size > parser->max_row_size) {
+            handle_error(parser, "Row exceeds maximum size");
+            // Skip to next line
+            while (cur < end && *cur != '\n') cur++;
+            if (cur < end) {
+                cur++;
+                parser->current_row_size = 0;
+                parser->row_start = cur;
+                parser->field_start = cur;
+            }
+            continue;
+        }
+
         uint8_t next_state = state_table[parser->st][c];
         uint8_t action = action_table[parser->st][c];
 
@@ -338,147 +623,79 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
         }
         if (action & ACT_ROW) {
             yield_row(parser);
+            parser->current_row_size = 0;
         }
 
         cur += 1 - ((action & ACT_REPROCESS) >> 2);
     }
 }
-#endif
 
 static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     parser->field_start = buffer;
+    parser->row_start = buffer;
     parser->st = S_UNQUOTED;
+    parser->in_comment = false;
+    parser->current_row_size = 0;
 
     parse_simd_chunk(parser, buffer, len);
 
-    // Handle final field if needed
+    // Handle final field if not terminated
     if (parser->field_start < buffer + len) {
         yield_field(parser, parser->field_start, buffer + len);
+        parser->field_start = buffer + len;
     }
+
+    // Handle final row if not terminated by newline
+    if (parser->row_start < buffer + len) {
+        yield_row(parser);
+    }
+
     return 0;
 }
 
-size_t cisv_parser_count_rows(const char *path) {
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return 0;
-
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-        close(fd);
-        return 0;
-    }
-
-    if (st.st_size == 0) {
-        close(fd);
-        return 0;
-    }
-
-    uint8_t *base = (uint8_t *)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (base == MAP_FAILED) {
-        close(fd);
-        return 0;
-    }
-
-    // Use madvise for sequential access
-    madvise(base, st.st_size, MADV_SEQUENTIAL);
-
-    size_t count = 0;
-
-#if defined(cisv_HAVE_AVX512) || defined(cisv_HAVE_AVX2)
-    // x86 SIMD path
-    uint8_t newline_bytes[64];
-    memset(newline_bytes, '\n', 64);
-    const cisv_vec newline_vec = cisv_LOAD(newline_bytes);
-
-    size_t i = 0;
-    for (; i + cisv_VEC_BYTES <= (size_t)st.st_size; i += cisv_VEC_BYTES) {
-        cisv_vec chunk = cisv_LOAD(base + i);
-        #ifdef cisv_HAVE_AVX512
-            uint64_t mask = cisv_CMP_EQ(chunk, newline_vec);
-            count += __builtin_popcountll(mask);
-        #else
-            uint32_t mask = cisv_MOVEMASK(cisv_CMP_EQ(chunk, newline_vec));
-            count += __builtin_popcount(mask);
-        #endif
-    }
-
-    // Handle remainder
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#elif defined(HAS_NEON)
-    // ARM NEON path
-    uint8x16_t newline_vec = vdupq_n_u8('\n');
-    size_t i = 0;
-
-    // Process 64 bytes at a time using 4 NEON registers
-    for (; i + 64 <= (size_t)st.st_size; i += 64) {
-        uint8x16_t data0 = vld1q_u8(base + i);
-        uint8x16_t data1 = vld1q_u8(base + i + 16);
-        uint8x16_t data2 = vld1q_u8(base + i + 32);
-        uint8x16_t data3 = vld1q_u8(base + i + 48);
-
-        uint8x16_t cmp0 = vceqq_u8(data0, newline_vec);
-        uint8x16_t cmp1 = vceqq_u8(data1, newline_vec);
-        uint8x16_t cmp2 = vceqq_u8(data2, newline_vec);
-        uint8x16_t cmp3 = vceqq_u8(data3, newline_vec);
-
-        // Count set bits in comparison results
-        count += vaddvq_u8(vandq_u8(cmp0, vdupq_n_u8(1)));
-        count += vaddvq_u8(vandq_u8(cmp1, vdupq_n_u8(1)));
-        count += vaddvq_u8(vandq_u8(cmp2, vdupq_n_u8(1)));
-        count += vaddvq_u8(vandq_u8(cmp3, vdupq_n_u8(1)));
-    }
-
-    // Process 16 bytes at a time
-    for (; i + 16 <= (size_t)st.st_size; i += 16) {
-        uint8x16_t data = vld1q_u8(base + i);
-        uint8x16_t cmp = vceqq_u8(data, newline_vec);
-        count += vaddvq_u8(vandq_u8(cmp, vdupq_n_u8(1)));
-    }
-
-    // Handle remainder
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#else
-    // Unrolled scalar version
-    size_t i = 0;
-    for (; i + 8 <= (size_t)st.st_size; i += 8) {
-        count += (base[i] == '\n');
-        count += (base[i+1] == '\n');
-        count += (base[i+2] == '\n');
-        count += (base[i+3] == '\n');
-        count += (base[i+4] == '\n');
-        count += (base[i+5] == '\n');
-        count += (base[i+6] == '\n');
-        count += (base[i+7] == '\n');
-    }
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#endif
-
-    munmap(base, st.st_size);
-    close(fd);
-    return count;
-}
-
-cisv_parser *cisv_parser_create(cisv_field_cb fcb, cisv_row_cb rcb, void *user) {
+cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     cisv_parser *parser = calloc(1, sizeof(*parser));
     if (!parser) return NULL;
 
-    // Align ring buffer to cache line
+    // Copy configuration
+    parser->delimiter = config->delimiter;
+    parser->quote = config->quote;
+    parser->escape = config->escape;
+    parser->skip_empty_lines = config->skip_empty_lines;
+    parser->comment = config->comment;
+    parser->trim = config->trim;
+    parser->relaxed = config->relaxed;
+    parser->max_row_size = config->max_row_size;
+    parser->from_line = config->from_line;
+    parser->to_line = config->to_line;
+    parser->skip_lines_with_error = config->skip_lines_with_error;
+
+    parser->fcb = config->field_cb;
+    parser->rcb = config->row_cb;
+    parser->ecb = config->error_cb;
+    parser->user = config->user;
+
+    parser->current_line = 1;
+    parser->in_comment = false;
+    parser->tables_initialized = 0;
+
+    // Allocate ring buffer for streaming
     if (posix_memalign((void**)&parser->ring, 64, RINGBUF_SIZE + 64) != 0) {
         free(parser);
         return NULL;
     }
 
     parser->fd = -1;
-    parser->fcb = fcb;
-    parser->rcb = rcb;
-    parser->user = user;
     return parser;
+}
+
+cisv_parser *cisv_parser_create(cisv_field_cb fcb, cisv_row_cb rcb, void *user) {
+    cisv_config config;
+    cisv_config_init(&config);
+    config.field_cb = fcb;
+    config.row_cb = rcb;
+    config.user = user;
+    return cisv_parser_create_with_config(&config);
 }
 
 void cisv_parser_destroy(cisv_parser *parser) {
@@ -491,6 +708,8 @@ void cisv_parser_destroy(cisv_parser *parser) {
         close(parser->fd);
     }
     free(parser->ring);
+    free(parser->state_table);
+    free(parser->action_table);
     free(parser);
 }
 
@@ -547,12 +766,34 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     return parse_memory(parser, parser->base, parser->size);
 }
 
+size_t cisv_parser_count_rows(const char *path) {
+    cisv_config config;
+    cisv_config_init(&config);
+    return cisv_parser_count_rows_with_config(path, &config);
+}
+
+size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *config) {
+    size_t count = 0;
+    cisv_config local_config = *config;
+    local_config.field_cb = NULL;
+    local_config.row_cb = [](void *user) { (*((size_t*)user))++; };
+    local_config.user = &count;
+    local_config.error_cb = NULL;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&local_config);
+    if (!parser) return 0;
+
+    int ret = cisv_parser_parse_file(parser, path);
+    cisv_parser_destroy(parser);
+
+    return (ret < 0) ? 0 : count;
+}
+
 int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len) {
     if (!parser || !chunk || len >= RINGBUF_SIZE) return -EINVAL;
 
-    // Branchless overflow handling
-    size_t overflow = (parser->head + len > RINGBUF_SIZE);
-    if (overflow) {
+    // Handle buffer overflow
+    if (parser->head + len > RINGBUF_SIZE) {
         parse_memory(parser, parser->ring, parser->head);
         parser->head = 0;
     }
@@ -560,10 +801,8 @@ int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len) {
     memcpy(parser->ring + parser->head, chunk, len);
     parser->head += len;
 
-    // Check for newline or buffer threshold
-    uint8_t has_newline = (memchr(chunk, '\n', len) != NULL);
-    uint8_t threshold = (parser->head > (RINGBUF_SIZE / 2));
-    if (has_newline | threshold) {
+    // Parse if buffer reaches threshold or contains newline
+    if (parser->head > (RINGBUF_SIZE / 2) || memchr(chunk, '\n', len)) {
         parse_memory(parser, parser->ring, parser->head);
         parser->head = 0;
     }
@@ -576,411 +815,6 @@ void cisv_parser_end(cisv_parser *parser) {
     parser->head = 0;
 }
 
-#ifdef CISV_CLI
-
-#include "cisv_writer.h"
-
-// Forward declaration for writer
-int cisv_writer_main(int argc, char *argv[]);
-
-typedef struct {
-    size_t row_count;
-    size_t field_count;
-    int count_only;
-    int head;
-    int tail;
-    char delimiter;
-    int *select_cols;
-    int select_count;
-    FILE *output;
-
-    char ***tail_buffer;
-    size_t *tail_field_counts;
-    size_t tail_pos;
-
-    char **current_row;
-    size_t current_field_count;
-    size_t current_field_capacity;
-    size_t current_row_num;
-    int in_header;
-} cli_context;
-
-static void field_callback(void *user, const char *data, size_t len) {
-    cli_context *ctx = (cli_context *)user;
-
-    // Ensure we have space for the field
-    if (ctx->current_field_count >= ctx->current_field_capacity) {
-        size_t new_capacity = ctx->current_field_capacity * 2;
-        if (new_capacity < 16) new_capacity = 16;
-
-        char **new_row = realloc(ctx->current_row, new_capacity * sizeof(char *));
-        if (!new_row) {
-            fprintf(stderr, "Failed to allocate memory for fields\n");
-            exit(1);
-        }
-        ctx->current_row = new_row;
-        ctx->current_field_capacity = new_capacity;
-    }
-
-    // Allocate and copy field data
-    ctx->current_row[ctx->current_field_count] = malloc(len + 1);
-    if (!ctx->current_row[ctx->current_field_count]) {
-        fprintf(stderr, "Failed to allocate memory for field data\n");
-        exit(1);
-    }
-
-    memcpy(ctx->current_row[ctx->current_field_count], data, len);
-    ctx->current_row[ctx->current_field_count][len] = '\0';
-    ctx->current_field_count++;
+int cisv_parser_get_line_number(const cisv_parser *parser) {
+    return parser ? parser->current_line : 0;
 }
-
-static void row_callback(void *user) {
-    cli_context *ctx = (cli_context *)user;
-
-    // Skip row if we're past head limit
-    if (ctx->head > 0 && ctx->current_row_num >= (size_t)ctx->head) {
-        for (size_t i = 0; i < ctx->current_field_count; i++) {
-            free(ctx->current_row[i]);
-        }
-        ctx->current_field_count = 0;
-        ctx->current_row_num++;
-        return;
-    }
-
-    // Handle tail buffering
-    if (ctx->tail > 0) {
-        // Free old row if buffer is full
-        if (ctx->tail_buffer[ctx->tail_pos]) {
-            for (size_t i = 0; i < ctx->tail_field_counts[ctx->tail_pos]; i++) {
-                free(ctx->tail_buffer[ctx->tail_pos][i]);
-            }
-            free(ctx->tail_buffer[ctx->tail_pos]);
-        }
-
-        // Store current row in circular buffer
-        ctx->tail_buffer[ctx->tail_pos] = ctx->current_row;
-        ctx->tail_field_counts[ctx->tail_pos] = ctx->current_field_count;
-        ctx->tail_pos = (ctx->tail_pos + 1) % ctx->tail;
-
-        // Allocate new row
-        ctx->current_row = calloc(ctx->current_field_capacity, sizeof(char *));
-        if (!ctx->current_row) {
-            fprintf(stderr, "Failed to allocate memory for new row\n");
-            exit(1);
-        }
-        ctx->current_field_count = 0;
-    } else {
-        // Output row immediately
-        int first = 1;
-        for (size_t i = 0; i < ctx->current_field_count; i++) {
-            int should_output = 1;
-
-            if (ctx->select_cols && ctx->select_count > 0) {
-                should_output = 0;
-                for (int j = 0; j < ctx->select_count; j++) {
-                    if (ctx->select_cols[j] == (int)i) {
-                        should_output = 1;
-                        break;
-                    }
-                }
-            }
-
-            if (should_output) {
-                if (!first) fprintf(ctx->output, "%c", ctx->delimiter);
-                fprintf(ctx->output, "%s", ctx->current_row[i]);
-                first = 0;
-            }
-
-            free(ctx->current_row[i]);
-        }
-        fprintf(ctx->output, "\n");
-        ctx->current_field_count = 0;
-    }
-
-    ctx->row_count++;
-    ctx->current_row_num++;
-}
-
-static void print_help(const char *prog) {
-    printf("cisv - The fastest CSV parser of the multiverse\n\n");
-    printf("Usage: %s [COMMAND] [OPTIONS] [FILE]\n\n", prog);
-    printf("Commands:\n");
-    printf("  parse    Parse CSV file (default if no command given)\n");
-    printf("  write    Write/generate CSV files\n\n");
-    printf("\n");
-    printf("Options:\n");
-    printf("  -h, --help              Show this help message\n");
-    printf("  -v, --version           Show version information\n");
-    printf("  -d, --delimiter DELIM   Field delimiter (default: ,)\n");
-    printf("  -s, --select COLS       Select columns (comma-separated indices)\n");
-    printf("  -c, --count             Show only row count\n");
-    printf("  --head N                Show first N rows\n");
-    printf("  --tail N                Show last N rows\n");
-    printf("  -o, --output FILE       Write to FILE instead of stdout\n");
-    printf("  -b, --benchmark         Run benchmark mode\n");
-    printf("\n----------\nExamples:\n");
-    printf("  %s data.csv                    # Parse and display CSV\n", prog);
-    printf("  %s -c data.csv                 # Count rows\n", prog);
-    printf("  %s -s 0,2,3 data.csv           # Select columns 0, 2, and 3\n", prog);
-    printf("  %s --head 10 data.csv          # Show first 10 rows\n", prog);
-    printf("  %s -d ';' data.csv             # Use semicolon as delimiter\n", prog);
-    printf("\nFor write options, use: %s write --help\n", prog);
-}
-
-static double get_time_ms() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
-}
-
-static void benchmark_file(const char *filename) {
-    FILE *f = fopen(filename, "rb");
-    if (!f) {
-        perror("fopen");
-        return;
-    }
-
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fclose(f);
-
-    double size_mb = size / (1024.0 * 1024.0);
-    printf("Benchmarking file: %s\n", filename);
-    printf("File size: %.2f MB\n\n", size_mb);
-
-    const int iterations = 5;
-    for (int i = 0; i < iterations; i++) {
-        double start = get_time_ms();
-        size_t count = cisv_parser_count_rows(filename);
-        double end = get_time_ms();
-
-        printf("Run %d: %.2f ms, %zu rows\n", i + 1, end - start, count);
-    }
-}
-
-int main(int argc, char *argv[]) {
-    // Check for write command
-    if (argc > 1 && strcmp(argv[1], "write") == 0) {
-        // Shift arguments and call writer main
-        return cisv_writer_main(argc - 1, argv + 1);
-    }
-
-    // If first arg is "parse", skip it
-    if (argc > 1 && strcmp(argv[1], "parse") == 0) {
-        argc--;
-        argv++;
-    }
-
-    static struct option long_options[] = {
-        {"help", no_argument, 0, 'h'},
-        {"version", no_argument, 0, 'v'},
-        {"delimiter", required_argument, 0, 'd'},
-        {"select", required_argument, 0, 's'},
-        {"count", no_argument, 0, 'c'},
-        {"head", required_argument, 0, 1},
-        {"tail", required_argument, 0, 2},
-        {"output", required_argument, 0, 'o'},
-        {"benchmark", no_argument, 0, 'b'},
-        {0, 0, 0, 0}
-    };
-
-    // Initialize context
-    cli_context ctx = {0};
-    ctx.delimiter = ',';
-    ctx.output = stdout;
-    ctx.current_field_capacity = 16;
-    ctx.current_row = calloc(ctx.current_field_capacity, sizeof(char *));
-    if (!ctx.current_row) {
-        fprintf(stderr, "Failed to allocate initial row buffer\n");
-        return 1;
-    }
-
-    int opt;
-    int option_index = 0;
-    const char *filename = NULL;
-    const char *output_file = NULL;
-    int benchmark = 0;
-
-    while ((opt = getopt_long(argc, argv, "hvd:s:co:b", long_options, &option_index)) != -1) {
-        switch (opt) {
-            case 'h':
-                print_help(argv[0]);
-                free(ctx.current_row);
-                return 0;
-
-            case 'v':
-                printf("cisv version v0.0.1-rc10\n");
-                free(ctx.current_row);
-                return 0;
-
-            case 'd':
-                ctx.delimiter = optarg[0];
-                break;
-
-            case 's': {
-                // Parse column selection
-                char *cols_copy = strdup(optarg);
-                if (!cols_copy) {
-                    fprintf(stderr, "Memory allocation failed\n");
-                    free(ctx.current_row);
-                    return 1;
-                }
-
-                // Count columns
-                int count = 1;
-                for (char *p = cols_copy; *p; p++) {
-                    if (*p == ',') count++;
-                }
-
-                ctx.select_cols = calloc(count, sizeof(int));
-                if (!ctx.select_cols) {
-                    fprintf(stderr, "Memory allocation failed\n");
-                    free(cols_copy);
-                    free(ctx.current_row);
-                    return 1;
-                }
-
-                // Parse column numbers
-                char *tok = strtok(cols_copy, ",");
-                int i = 0;
-                while (tok && i < count) {
-                    ctx.select_cols[i++] = atoi(tok);
-                    tok = strtok(NULL, ",");
-                }
-                ctx.select_count = i;
-
-                free(cols_copy);
-                break;
-            }
-
-            case 'c':
-                ctx.count_only = 1;
-                break;
-
-            case 'o':
-                output_file = optarg;
-                break;
-
-            case 'b':
-                benchmark = 1;
-                break;
-
-            case 1: // --head
-                ctx.head = atoi(optarg);
-                break;
-
-            case 2: // --tail
-                ctx.tail = atoi(optarg);
-                ctx.tail_buffer = calloc(ctx.tail, sizeof(char **));
-                ctx.tail_field_counts = calloc(ctx.tail, sizeof(size_t));
-                if (!ctx.tail_buffer || !ctx.tail_field_counts) {
-                    fprintf(stderr, "Memory allocation failed\n");
-                    free(ctx.current_row);
-                    free(ctx.select_cols);
-                    return 1;
-                }
-                break;
-
-            default:
-                fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
-                free(ctx.current_row);
-                free(ctx.select_cols);
-                return 1;
-        }
-    }
-
-    if (optind < argc) {
-        filename = argv[optind];
-    }
-
-    if (!filename) {
-        fprintf(stderr, "Error: No input file specified\n");
-        print_help(argv[0]);
-        free(ctx.current_row);
-        free(ctx.select_cols);
-        return 1;
-    }
-
-    if (benchmark) {
-        benchmark_file(filename);
-        free(ctx.current_row);
-        free(ctx.select_cols);
-        return 0;
-    }
-
-    if (ctx.count_only) {
-        size_t count = cisv_parser_count_rows(filename);
-        printf("%zu\n", count);
-        free(ctx.current_row);
-        free(ctx.select_cols);
-        return 0;
-    }
-
-    if (output_file) {
-        ctx.output = fopen(output_file, "w");
-        if (!ctx.output) {
-            perror("fopen");
-            free(ctx.current_row);
-            free(ctx.select_cols);
-            free(ctx.tail_buffer);
-            free(ctx.tail_field_counts);
-            return 1;
-        }
-    }
-
-    cisv_parser *parser = cisv_parser_create(field_callback, row_callback, &ctx);
-    if (!parser) {
-        fprintf(stderr, "Failed to create parser\n");
-        free(ctx.current_row);
-        free(ctx.select_cols);
-        free(ctx.tail_buffer);
-        free(ctx.tail_field_counts);
-        if (ctx.output != stdout) fclose(ctx.output);
-        return 1;
-    }
-
-    int result = cisv_parser_parse_file(parser, filename);
-    if (result < 0) {
-        fprintf(stderr, "Parse error: %s\n", strerror(-result));
-        cisv_parser_destroy(parser);
-        free(ctx.current_row);
-        free(ctx.select_cols);
-        free(ctx.tail_buffer);
-        free(ctx.tail_field_counts);
-        if (ctx.output != stdout) fclose(ctx.output);
-        return 1;
-    }
-
-    // Output tail buffer if used
-    if (ctx.tail > 0 && ctx.tail_buffer) {
-        size_t start = ctx.tail_pos;
-        for (int i = 0; i < ctx.tail; i++) {
-            size_t idx = (start + i) % ctx.tail;
-            if (!ctx.tail_buffer[idx]) continue;
-
-            int first = 1;
-            for (size_t j = 0; j < ctx.tail_field_counts[idx]; j++) {
-                if (!first) fprintf(ctx.output, "%c", ctx.delimiter);
-                fprintf(ctx.output, "%s", ctx.tail_buffer[idx][j]);
-                free(ctx.tail_buffer[idx][j]);
-                first = 0;
-            }
-            fprintf(ctx.output, "\n");
-            free(ctx.tail_buffer[idx]);
-        }
-        free(ctx.tail_buffer);
-        free(ctx.tail_field_counts);
-    }
-
-    cisv_parser_destroy(parser);
-    free(ctx.current_row);
-    free(ctx.select_cols);
-
-    if (ctx.output != stdout) {
-        fclose(ctx.output);
-    }
-
-    return 0;
-}
-
-#endif // CISV_CLI
