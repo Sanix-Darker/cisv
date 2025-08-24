@@ -26,6 +26,8 @@ jobs:
           examples/
           types/
           index.d.ts
+          test_transform.sh
+          test_transform_leak_test.js
         sparse-checkout-cone-mode: false
 
     - name: Use Node.js ${{ matrix.node-version }}
