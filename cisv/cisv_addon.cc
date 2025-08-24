@@ -127,6 +127,11 @@ static void row_cb(void *user) {
     rc->current_field_index = 0;  // Reset field index for next row
 }
 
+static void error_cb(void *user, int line, const char *msg) {
+    // Log errors to stderr for now
+    fprintf(stderr, "CSV Parse Error at line %d: %s\n", line, msg);
+}
+
 } // namespace
 
 class CisvParser : public Napi::ObjectWrap<CisvParser> {
@@ -145,8 +150,11 @@ public:
             InstanceMethod("clearTransforms", &CisvParser::ClearTransforms),
             InstanceMethod("getStats", &CisvParser::GetStats),
             InstanceMethod("getTransformInfo", &CisvParser::GetTransformInfo),
-            InstanceMethod("destroy", &CisvParser::Destroy),  // Add explicit destroy
-            StaticMethod("countRows", &CisvParser::CountRows)
+            InstanceMethod("destroy", &CisvParser::Destroy),
+            InstanceMethod("setConfig", &CisvParser::SetConfig),
+            InstanceMethod("getConfig", &CisvParser::GetConfig),
+            StaticMethod("countRows", &CisvParser::CountRows),
+            StaticMethod("countRowsWithConfig", &CisvParser::CountRowsWithConfig)
         });
 
         exports.Set("cisvParser", func);
@@ -155,21 +163,178 @@ public:
 
     CisvParser(const Napi::CallbackInfo &info) : Napi::ObjectWrap<CisvParser>(info) {
         rc_ = new RowCollector();
-        parser_ = cisv_parser_create(field_cb, row_cb, rc_);
         parse_time_ = 0;
         total_bytes_ = 0;
         is_destroyed_ = false;
 
+        // Initialize configuration with defaults
+        cisv_config_init(&config_);
+
         // Handle constructor options if provided
         if (info.Length() > 0 && info[0].IsObject()) {
             Napi::Object options = info[0].As<Napi::Object>();
-
-            // Handle options...
+            ApplyConfigFromObject(options);
         }
+
+        // Set callbacks
+        config_.field_cb = field_cb;
+        config_.row_cb = row_cb;
+        config_.error_cb = error_cb;
+        config_.user = rc_;
+
+        // Create parser with configuration
+        parser_ = cisv_parser_create_with_config(&config_);
     }
 
     ~CisvParser() {
         Cleanup();
+    }
+
+    // Apply configuration from JavaScript object
+    void ApplyConfigFromObject(Napi::Object options) {
+        // Delimiter
+        if (options.Has("delimiter")) {
+            Napi::Value delim = options.Get("delimiter");
+            if (delim.IsString()) {
+                std::string delim_str = delim.As<Napi::String>();
+                if (!delim_str.empty()) {
+                    config_.delimiter = delim_str[0];
+                }
+            }
+        }
+
+        // Quote character
+        if (options.Has("quote")) {
+            Napi::Value quote = options.Get("quote");
+            if (quote.IsString()) {
+                std::string quote_str = quote.As<Napi::String>();
+                if (!quote_str.empty()) {
+                    config_.quote = quote_str[0];
+                }
+            }
+        }
+
+        // Escape character
+        if (options.Has("escape")) {
+            Napi::Value escape = options.Get("escape");
+            if (escape.IsString()) {
+                std::string escape_str = escape.As<Napi::String>();
+                if (!escape_str.empty()) {
+                    config_.escape = escape_str[0];
+                }
+            } else if (escape.IsNull() || escape.IsUndefined()) {
+                config_.escape = 0; // RFC4180 style
+            }
+        }
+
+        // Comment character
+        if (options.Has("comment")) {
+            Napi::Value comment = options.Get("comment");
+            if (comment.IsString()) {
+                std::string comment_str = comment.As<Napi::String>();
+                if (!comment_str.empty()) {
+                    config_.comment = comment_str[0];
+                }
+            }
+        }
+
+        // Boolean options
+        if (options.Has("skipEmptyLines")) {
+            config_.skip_empty_lines = options.Get("skipEmptyLines").As<Napi::Boolean>();
+        }
+
+        if (options.Has("trim")) {
+            config_.trim = options.Get("trim").As<Napi::Boolean>();
+        }
+
+        if (options.Has("relaxed")) {
+            config_.relaxed = options.Get("relaxed").As<Napi::Boolean>();
+        }
+
+        if (options.Has("skipLinesWithError")) {
+            config_.skip_lines_with_error = options.Get("skipLinesWithError").As<Napi::Boolean>();
+        }
+
+        // Numeric options
+        if (options.Has("maxRowSize")) {
+            config_.max_row_size = options.Get("maxRowSize").As<Napi::Number>().Uint32Value();
+        }
+
+        if (options.Has("fromLine")) {
+            config_.from_line = options.Get("fromLine").As<Napi::Number>().Int32Value();
+        }
+
+        if (options.Has("toLine")) {
+            config_.to_line = options.Get("toLine").As<Napi::Number>().Int32Value();
+        }
+    }
+
+    // Set configuration after creation
+    void SetConfig(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
+        if (info.Length() != 1 || !info[0].IsObject()) {
+            throw Napi::TypeError::New(env, "Expected configuration object");
+        }
+
+        Napi::Object options = info[0].As<Napi::Object>();
+        ApplyConfigFromObject(options);
+
+        // Recreate parser with new configuration
+        if (parser_) {
+            cisv_parser_destroy(parser_);
+        }
+
+        config_.field_cb = field_cb;
+        config_.row_cb = row_cb;
+        config_.error_cb = error_cb;
+        config_.user = rc_;
+
+        parser_ = cisv_parser_create_with_config(&config_);
+    }
+
+    // Get current configuration
+    Napi::Value GetConfig(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
+        Napi::Object config = Napi::Object::New(env);
+
+        // Character configurations
+        config.Set("delimiter", Napi::String::New(env, std::string(1, config_.delimiter)));
+        config.Set("quote", Napi::String::New(env, std::string(1, config_.quote)));
+
+        if (config_.escape) {
+            config.Set("escape", Napi::String::New(env, std::string(1, config_.escape)));
+        } else {
+            config.Set("escape", env.Null());
+        }
+
+        if (config_.comment) {
+            config.Set("comment", Napi::String::New(env, std::string(1, config_.comment)));
+        } else {
+            config.Set("comment", env.Null());
+        }
+
+        // Boolean options
+        config.Set("skipEmptyLines", Napi::Boolean::New(env, config_.skip_empty_lines));
+        config.Set("trim", Napi::Boolean::New(env, config_.trim));
+        config.Set("relaxed", Napi::Boolean::New(env, config_.relaxed));
+        config.Set("skipLinesWithError", Napi::Boolean::New(env, config_.skip_lines_with_error));
+
+        // Numeric options
+        config.Set("maxRowSize", Napi::Number::New(env, config_.max_row_size));
+        config.Set("fromLine", Napi::Number::New(env, config_.from_line));
+        config.Set("toLine", Napi::Number::New(env, config_.to_line));
+
+        return config;
     }
 
     // Explicit cleanup method
@@ -404,8 +569,8 @@ public:
             if (cisv_transform_pipeline_add(rc_->pipeline, field_index, type, ctx) < 0) {
                 // Clean up context if adding failed
                 if (ctx) {
-                    if (ctx->key) free(ctx->key);
-                    if (ctx->iv) free(ctx->iv);
+                    if (ctx->key) free((void*)ctx->key);
+                    if (ctx->iv) free((void*)ctx->iv);
                     if (ctx->extra) free(ctx->extra);
                     free(ctx);
                 }
@@ -543,6 +708,8 @@ public:
             (rc_ && !rc_->rows.empty()) ? rc_->rows[0].size() : 0));
         stats.Set("totalBytes", Napi::Number::New(env, total_bytes_));
         stats.Set("parseTime", Napi::Number::New(env, parse_time_));
+        stats.Set("currentLine", Napi::Number::New(env,
+            parser_ ? cisv_parser_get_line_number(parser_) : 0));
 
         return stats;
     }
@@ -557,6 +724,57 @@ public:
 
         std::string path = info[0].As<Napi::String>();
         size_t count = cisv_parser_count_rows(path.c_str());
+
+        return Napi::Number::New(env, count);
+    }
+
+    // Static method to count rows with configuration
+    static Napi::Value CountRowsWithConfig(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (info.Length() < 1 || !info[0].IsString()) {
+            throw Napi::TypeError::New(env, "Expected file path string");
+        }
+
+        std::string path = info[0].As<Napi::String>();
+
+        cisv_config config;
+        cisv_config_init(&config);
+
+        // Apply configuration if provided
+        if (info.Length() > 1 && info[1].IsObject()) {
+            Napi::Object options = info[1].As<Napi::Object>();
+
+            // Apply same configuration parsing logic
+            if (options.Has("delimiter")) {
+                std::string delim = options.Get("delimiter").As<Napi::String>();
+                if (!delim.empty()) config.delimiter = delim[0];
+            }
+
+            if (options.Has("quote")) {
+                std::string quote = options.Get("quote").As<Napi::String>();
+                if (!quote.empty()) config.quote = quote[0];
+            }
+
+            if (options.Has("comment")) {
+                std::string comment = options.Get("comment").As<Napi::String>();
+                if (!comment.empty()) config.comment = comment[0];
+            }
+
+            if (options.Has("skipEmptyLines")) {
+                config.skip_empty_lines = options.Get("skipEmptyLines").As<Napi::Boolean>();
+            }
+
+            if (options.Has("fromLine")) {
+                config.from_line = options.Get("fromLine").As<Napi::Number>().Int32Value();
+            }
+
+            if (options.Has("toLine")) {
+                config.to_line = options.Get("toLine").As<Napi::Number>().Int32Value();
+            }
+        }
+
+        size_t count = cisv_parser_count_rows_with_config(path.c_str(), &config);
 
         return Napi::Number::New(env, count);
     }
@@ -584,6 +802,7 @@ private:
     }
 
     cisv_parser *parser_;
+    cisv_config config_;
     RowCollector *rc_;
     size_t total_bytes_;
     double parse_time_;
@@ -595,7 +814,7 @@ Napi::Object InitAll(Napi::Env env, Napi::Object exports) {
     CisvParser::Init(env, exports);
 
     // Add version info
-    exports.Set("version", Napi::String::New(env, "1.0.0"));
+    exports.Set("version", Napi::String::New(env, "1.1.0"));
 
     // Add transform type constants
     Napi::Object transformTypes = Napi::Object::New(env);
