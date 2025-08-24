@@ -5,7 +5,9 @@
 ![License](https://img.shields.io/badge/license-GPL2-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 
-High-performance CSV parser and writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
+High-performance CSV parser/writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
+
+I wrote about basics in a blog post, you can read here :https://sanixdk.xyz/blogs/how-i-accidentally-created-the-fastest-csv-parser-ever-made.
 
 ## PERFORMANCE
 
@@ -14,6 +16,45 @@ High-performance CSV parser and writer leveraging SIMD instructions and zero-cop
 - Zero-copy memory-mapped I/O with kernel optimizations
 - SIMD accelerated with AVX-512/AVX2 auto-detection
 - Dynamic lookup tables for configurable parsing
+
+## BENCHMARKS
+
+Benchmarks comparison with existing popular tools,
+cf pipeline you can check : (https://github.com/Sanix-Darker/cisv/actions/runs/17194915214/job/48775516036)
+
+### SYNCHRONOUS RESULTS
+
+| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------|--------------|---------------|----------------|
+| cisv (sync)        | 30.04        | 0.02          | 64936          |
+| csv-parse (sync)   | 13.35        | 0.03          | 28870          |
+| papaparse (sync)   | 25.16        | 0.02          | 54406          |
+
+### SYNCHRONOUS RESULTS (WITH DATA ACCESS)
+
+| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------|--------------|---------------|----------------|
+| cisv (sync)        | 31.24        | 0.01          | 67543          |
+| csv-parse (sync)   | 15.42        | 0.03          | 33335          |
+| papaparse (sync)   | 25.49        | 0.02          | 55107          |
+
+
+### ASYNCHRONOUS RESULTS
+
+| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------------|--------------|---------------|----------------|
+| cisv (async/stream)      | 61.31        | 0.01          | 132561         |
+| papaparse (async/stream) | 19.24        | 0.02          | 41603          |
+| neat-csv (async/promise) | 9.09         | 0.05          | 19655          |
+
+
+### ASYNCHRONOUS RESULTS (WITH DATA ACCESS)
+
+| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
+|--------------------------|--------------|---------------|----------------|
+| cisv (async/stream)      | 24.59        | 0.02          | 53160          |
+| papaparse (async/stream) | 21.86        | 0.02          | 47260          |
+| neat-csv (async/promise) | 9.38         | 0.05          | 20283          |
 
 ## INSTALLATION
 
