@@ -23,7 +23,24 @@ declare module 'cisv' {
   }
 
   /**
-   * Options for CSV parsing
+   * Extended configuration for CSV parsing
+   */
+  export interface CisvConfig {
+    delimiter?: string;
+    quote?: string;
+    escape?: string | null;
+    comment?: string | null;
+    trim?: boolean;
+    skipEmptyLines?: boolean;
+    relaxed?: boolean;
+    skipLinesWithError?: boolean;
+    maxRowSize?: number;
+    fromLine?: number;
+    toLine?: number;
+  }
+
+  /**
+   * Options for CSV parsing (legacy alias for CisvConfig)
    */
   export interface ParseOptions {
     delimiter?: string;
@@ -49,13 +66,34 @@ declare module 'cisv' {
   /**
    * Transform function type for custom transformations
    */
-  export type TransformFunction = (value: string, rowIndex: number, fieldIndex: number) => string;
+  export type TransformFunction = (
+    value: string,
+    rowIndex: number,
+    fieldIndex: number
+  ) => string;
+
+  /**
+   * Information about applied transformations
+   */
+  export interface TransformInfo {
+    [fieldIndex: number]: TransformType | TransformFunction;
+  }
+
+  /**
+   * Statistics from CSV parsing
+   */
+  export interface ParseStats {
+    rowCount: number;
+    fieldCount: number;
+    totalBytes: number;
+    parseTime: number;
+  }
 
   /**
    * Main CSV parser class with transformation pipeline support
    */
   export class cisvParser {
-    constructor(options?: ParseOptions);
+    constructor(options?: CisvConfig);
 
     /**
      * Parse CSV file synchronously
@@ -99,6 +137,18 @@ declare module 'cisv' {
      * Clear all parsed rows
      */
     clear(): void;
+
+    /**
+     * Update parser configuration
+     * @param config New configuration
+     */
+    setConfig(config: CisvConfig): void;
+
+    /**
+     * Get current parser configuration
+     * @returns Parser configuration
+     */
+    getConfig(): CisvConfig;
 
     /**
      * Add a transformation to a specific field
@@ -158,12 +208,18 @@ declare module 'cisv' {
      * Get statistics about parsed CSV
      * @returns Object with row count, field count, etc.
      */
-    getStats(): {
-      rowCount: number;
-      fieldCount: number;
-      totalBytes: number;
-      parseTime: number;
-    };
+    getStats(): ParseStats;
+
+    /**
+     * Get information about applied transformations
+     * @returns Map of field indices to transformation info
+     */
+    getTransformInfo(): TransformInfo;
+
+    /**
+     * Destroy the parser and release resources
+     */
+    destroy(): void;
 
     /**
      * Count rows in a CSV file without fully parsing
@@ -173,11 +229,19 @@ declare module 'cisv' {
     static countRows(path: string): number;
 
     /**
+     * Count rows with custom configuration
+     * @param path Path to CSV file
+     * @param config Optional parser configuration
+     * @returns Number of rows
+     */
+    static countRowsWithConfig(path: string, config?: CisvConfig): number;
+
+    /**
      * Create a new parser instance with transforms
      * @param options Parse options
      * @returns New parser instance
      */
-    static create(options?: ParseOptions): cisvParser;
+    static create(options?: CisvConfig): cisvParser;
   }
 
   /**

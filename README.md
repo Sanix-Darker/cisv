@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-GPL2-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 
-High-performance CSV parser and writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool.
+High-performance CSV parser and writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
 
 ## PERFORMANCE
 
@@ -13,6 +13,7 @@ High-performance CSV parser and writer leveraging SIMD instructions and zero-cop
 - **10-100x faster** than popular CSV parsers
 - Zero-copy memory-mapped I/O with kernel optimizations
 - SIMD accelerated with AVX-512/AVX2 auto-detection
+- Dynamic lookup tables for configurable parsing
 
 ## INSTALLATION
 
@@ -41,39 +42,144 @@ make build
 ```javascript
 const { cisvParser } = require('cisv');
 
+// Basic usage
 const parser = new cisvParser();
 const rows = parser.parseSync('./data.csv');
-console.log(`Parsed ${rows.length} rows`);
+
+// With configuration (optional)
+const tsv_parser = new cisvParser({
+    delimiter: '\t',
+    quote: "'",
+    trim: true
+});
+const tsv_rows = tsv_parser.parseSync('./data.tsv');
 ```
 
 ### CLI
-
 ```bash
-# Count rows
-cisv -c large_file.csv
+# Basic parsing
+cisv data.csv
 
-# Select columns
-cisv -s 0,2,5 data.csv
+# Parse TSV file
+cisv -d $'\t' data.tsv
 
-# First 100 rows
-cisv --head 100 data.csv
+# Parse with custom quote and trim
+cisv -q "'" -t data.csv
+
+# Skip comment lines
+cisv -m '#' config.csv
+```
+
+## CONFIGURATION OPTIONS
+
+### Parser Configuration
+
+```javascript
+const parser = new cisvParser({
+    // Field delimiter character (default: ',')
+    delimiter: ',',
+
+    // Quote character (default: '"')
+    quote: '"',
+
+    // Escape character (null for RFC4180 "" style, default: null)
+    escape: null,
+
+    // Comment character to skip lines (default: null)
+    comment: '#',
+
+    // Trim whitespace from fields (default: false)
+    trim: true,
+
+    // Skip empty lines (default: false)
+    skipEmptyLines: true,
+
+    // Use relaxed parsing rules (default: false)
+    relaxed: false,
+
+    // Skip lines with parse errors (default: false)
+    skipLinesWithError: true,
+
+    // Maximum row size in bytes (0 = unlimited, default: 0)
+    maxRowSize: 1048576,
+
+    // Start parsing from line N (1-based, default: 1)
+    fromLine: 10,
+
+    // Stop parsing at line N (0 = until end, default: 0)
+    toLine: 1000
+});
+```
+
+### Dynamic Configuration
+
+```javascript
+// Set configuration after creation
+parser.setConfig({
+    delimiter: ';',
+    quote: "'",
+    trim: true
+});
+
+// Get current configuration
+const config = parser.getConfig();
+console.log(config);
 ```
 
 ## API REFERENCE
 
 ### TYPESCRIPT DEFINITIONS
 ```typescript
-interface ParsedRow extends Array<string> {}
-interface ParseStats {
-   rowCount: number;
-   fieldCount: number;
-   totalBytes: number;
-   parseTime: number;
+interface CisvConfig {
+    delimiter?: string;
+    quote?: string;
+    escape?: string | null;
+    comment?: string | null;
+    trim?: boolean;
+    skipEmptyLines?: boolean;
+    relaxed?: boolean;
+    skipLinesWithError?: boolean;
+    maxRowSize?: number;
+    fromLine?: number;
+    toLine?: number;
 }
+
+interface ParsedRow extends Array<string> {}
+
+interface ParseStats {
+    rowCount: number;
+    fieldCount: number;
+    totalBytes: number;
+    parseTime: number;
+    currentLine: number;
+}
+
 interface TransformInfo {
-   cTransformCount: number;
-   jsTransformCount: number;
-   fieldIndices: number[];
+    cTransformCount: number;
+    jsTransformCount: number;
+    fieldIndices: number[];
+}
+
+class cisvParser {
+    constructor(config?: CisvConfig);
+    parseSync(path: string): ParsedRow[];
+    parse(path: string): Promise<ParsedRow[]>;
+    parseString(csv: string): ParsedRow[];
+    write(chunk: string | Buffer): void;
+    end(): void;
+    getRows(): ParsedRow[];
+    clear(): void;
+    setConfig(config: CisvConfig): void;
+    getConfig(): CisvConfig;
+    transform(fieldIndex: number, type: string | Function): this;
+    removeTransform(fieldIndex: number): this;
+    clearTransforms(): this;
+    getStats(): ParseStats;
+    getTransformInfo(): TransformInfo;
+    destroy(): void;
+
+    static countRows(path: string): number;
+    static countRowsWithConfig(path: string, config?: CisvConfig): number;
 }
 ```
 
@@ -82,38 +188,60 @@ interface TransformInfo {
 ```javascript
 import { cisvParser } from "cisv";
 
+// Default configuration (standard CSV)
 const parser = new cisvParser();
-
-// Synchronous
 const rows = parser.parseSync('data.csv');
 
-// Asynchronous
-const asyncRows = await parser.parse('large-file.csv');
+// Custom configuration (TSV with single quotes)
+const tsvParser = new cisvParser({
+    delimiter: '\t',
+    quote: "'"
+});
+const tsvRows = tsvParser.parseSync('data.tsv');
 
-// From string
-const csvString = 'name,age,city\nJohn,30,NYC\nJane,25,LA';
-const stringRows = parser.parseString(csvString);
+// Parse specific line range
+const rangeParser = new cisvParser({
+    fromLine: 100,
+    toLine: 1000
+});
+const subset = rangeParser.parseSync('large.csv');
+
+// Skip comments and empty lines
+const cleanParser = new cisvParser({
+    comment: '#',
+    skipEmptyLines: true,
+    trim: true
+});
+const cleanData = cleanParser.parseSync('config.csv');
 ```
 
 ### STREAMING
 
 ```javascript
 import { cisvParser } from "cisv";
+import fs from 'fs';
 
-const streamParser = new cisvParser();
+const streamParser = new cisvParser({
+    delimiter: ',',
+    trim: true
+});
+
 const stream = fs.createReadStream('huge-file.csv');
 
 stream.on('data', chunk => streamParser.write(chunk));
 stream.on('end', () => {
     streamParser.end();
     const results = streamParser.getRows();
+    console.log(`Parsed ${results.length} rows`);
 });
 ```
 
 ### DATA TRANSFORMATION
 
-Built-in C transforms (optimized):
 ```javascript
+const parser = new cisvParser();
+
+// Built-in C transforms (optimized)
 parser
     .transform(0, 'uppercase')      // Column 0 to uppercase
     .transform(1, 'lowercase')       // Column 1 to lowercase
@@ -122,39 +250,92 @@ parser
     .transform(4, 'to_float')       // Column 4 to float
     .transform(5, 'base64_encode')  // Column 5 to base64
     .transform(6, 'hash_sha256');   // Column 6 to SHA256
-```
 
-Custom JavaScript transforms:
-```javascript
-// Single field
+// Custom JavaScript transforms
 parser.transform(7, value => new Date(value).toISOString());
 
-// All fields
+// Apply to all fields
 parser.transform(-1, value => value.replace(/[^\w\s]/gi, ''));
 
-// Chain transforms
-parser
-    .transform(0, 'trim')
-    .transform(0, 'uppercase')
-    .transform(0, val => val.substring(0, 10));
+const transformed = parser.parseSync('data.csv');
+```
+
+### ROW COUNTING
+
+```javascript
+import { cisvParser } from "cisv";
+
+// Fast row counting without parsing
+const count = cisvParser.countRows('large.csv');
+
+// Count with specific configuration
+const tsvCount = cisvParser.countRowsWithConfig('data.tsv', {
+    delimiter: '\t',
+    skipEmptyLines: true,
+    fromLine: 10,
+    toLine: 1000
+});
 ```
 
 ## CLI USAGE
 
-### PARSING
+### PARSING OPTIONS
+
 ```bash
 cisv [OPTIONS] [FILE]
 
-Options:
+General Options:
   -h, --help              Show help message
   -v, --version           Show version
+  -o, --output FILE       Write to FILE instead of stdout
+  -b, --benchmark         Run benchmark mode
+
+Configuration Options:
   -d, --delimiter DELIM   Field delimiter (default: ,)
+  -q, --quote CHAR        Quote character (default: ")
+  -e, --escape CHAR       Escape character (default: RFC4180 style)
+  -m, --comment CHAR      Comment character (default: none)
+  -t, --trim              Trim whitespace from fields
+  -r, --relaxed           Use relaxed parsing rules
+  --skip-empty            Skip empty lines
+  --skip-errors           Skip lines with parse errors
+  --max-row SIZE          Maximum row size in bytes
+  --from-line N           Start from line N (1-based)
+  --to-line N             Stop at line N
+
+Processing Options:
   -s, --select COLS       Select columns (comma-separated indices)
-  -c, --count            Show only row count
-  --head N               Show first N rows
-  --tail N               Show last N rows
-  -o, --output FILE      Write to FILE instead of stdout
-  -b, --benchmark        Run benchmark mode
+  -c, --count             Show only row count
+  --head N                Show first N rows
+  --tail N                Show last N rows
+```
+
+### EXAMPLES
+
+```bash
+# Parse TSV file
+cisv -d $'\t' data.tsv
+
+# Parse CSV with semicolon delimiter and single quotes
+cisv -d ';' -q "'" european.csv
+
+# Skip comment lines starting with #
+cisv -m '#' config.csv
+
+# Trim whitespace and skip empty lines
+cisv -t --skip-empty messy.csv
+
+# Parse lines 100-1000 only
+cisv --from-line 100 --to-line 1000 large.csv
+
+# Select specific columns
+cisv -s 0,2,5,7 data.csv
+
+# Count rows with specific configuration
+cisv -c -d $'\t' --skip-empty data.tsv
+
+# Benchmark with custom delimiter
+cisv -b -d ';' european.csv
 ```
 
 ### WRITING
@@ -185,21 +366,13 @@ Options:
 
 ### NODE.JS LIBRARY BENCHMARKS
 
-- **Synchronous with Data Access:**
+| Library            | Speed (MB/s) | Operations/sec | Configuration Support |
+|--------------------|--------------|----------------|----------------------|
+| cisv              | 61.24        | 136,343        | Full                 |
+| csv-parse         | 15.48        | 34,471         | Partial              |
+| papaparse         | 25.67        | 57,147         | Partial              |
 
-| Library            | Speed (MB/s) | Operations/sec |
-|--------------------|--------------|----------------|
-| cisv              | 61.24        | 136,343        |
-| csv-parse         | 15.48        | 34,471         |
-| papaparse         | 25.67        | 57,147         |
-
-- **Asynchronous Streaming:**
-
-| Library            | Speed (MB/s) | Operations/sec |
-|--------------------|--------------|----------------|
-| cisv              | 76.94        | 171,287        |
-| papaparse         | 16.54        | 36,815         |
-| neat-csv          | 8.11         | 18,055         |
+(you can check more benchmarks details from release pipelines)
 
 ### RUNNING BENCHMARKS
 
@@ -210,38 +383,46 @@ make clean && make cli && make benchmark-cli
 # Node.js benchmarks
 npm run benchmark
 
-# Docker isolated benchmarks
-docker build -t cisv-benchmark .
-docker run --rm --cpus="2.0" --memory="4g" cisv-benchmark
+# Benchmark with custom configuration
+cisv -b -d ';' -q "'" --trim european.csv
 ```
 
 ## TECHNICAL ARCHITECTURE
 
 - **SIMD Processing**: AVX-512 (64-byte vectors) or AVX2 (32-byte vectors) for parallel processing
+- **Dynamic Lookup Tables**: Generated per-configuration for optimal state transitions
 - **Memory Mapping**: Direct kernel-to-userspace zero-copy with `mmap()`
 - **Optimized Buffering**: 1MB ring buffer sized for L3 cache efficiency
 - **Compiler Optimizations**: LTO and architecture-specific tuning with `-march=native`
+- **Configurable Parsing**: RFC 4180 compliant with extensive customization options
 
 ## FEATURES (PROS)
 
-- RFC 4180 compliant
+- RFC 4180 compliant with configurable extensions
 - Handles quoted fields with embedded delimiters
+- Support for multiple CSV dialects (TSV, PSV, etc.)
+- Comment line support
+- Field trimming and empty line handling
+- Line range parsing for large files
 - Streaming API for unlimited file sizes
 - Safe fallback for non-x86 architectures
 - High-performance CSV writer with SIMD optimization
+- Row counting without full parsing
 
-## CONS
+## LIMITATIONS
 
-- Only Linux support for now (really good on x86_64 CPU)
+- Linux/Unix support only (optimized for x86_64 CPU)
+- Windows support planned for future release
 
 ## CONTRIBUTING
 
 Areas of interest:
-- ARM NEON/SVE support
-- Windows native support
-- Parallel parsing for multi-core systems
-- Custom memory allocators
-- Streaming compression support
+- [ ] ARM NEON/SVE optimization improvements (in progress)
+- [ ] Windows native support
+- [ ] Parallel parsing for multi-core systems
+- [ ] Custom memory allocators
+- [ ] Streaming compression support
+- [ ] Additional transform functions
 
 ## LICENSE
 

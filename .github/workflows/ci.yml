@@ -8,7 +8,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest] # macos-latest, windows-latest # skipped for now
-        node-version: [23.x, 24.x]
+        node-version: [23.x] # , 24.x (not at 22 LTS, but bearly at the latest)
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -26,6 +26,8 @@ jobs:
           examples/
           types/
           index.d.ts
+          test_transform.sh
+          test_transform_leak_test.js
         sparse-checkout-cone-mode: false
 
     - name: Use Node.js ${{ matrix.node-version }}
