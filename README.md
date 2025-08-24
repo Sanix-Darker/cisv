@@ -5,7 +5,8 @@
 ![License](https://img.shields.io/badge/license-GPL2-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 
-High-performance CSV parser/writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
+Cisv is a csv parser on steroids... literally.
+It's a high-performance CSV parser/writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
 
 I wrote about basics in a blog post, you can read here :https://sanixdk.xyz/blogs/how-i-accidentally-created-the-fastest-csv-parser-ever-made.
 
@@ -454,16 +455,6 @@ cisv -b -d ';' -q "'" --trim european.csv
 
 - Linux/Unix support only (optimized for x86_64 CPU)
 - Windows support planned for future release
-
-## CONTRIBUTING
-
-Areas of interest:
-- [ ] ARM NEON/SVE optimization improvements (in progress)
-- [ ] Windows native support
-- [ ] Parallel parsing for multi-core systems
-- [ ] Custom memory allocators
-- [ ] Streaming compression support
-- [ ] Additional transform functions
 
 ## LICENSE
 
