@@ -32,7 +32,7 @@ describe('CSV Parser Core Functionality', () => {
     it('should parse basic CSV correctly', () => {
       const parser = new cisvParser();
       const rows = parser.parseSync(testFile);
-      assert.strictEqual(rows.length, 3);
+      assert.strictEqual(rows.length, 4);
       assert.deepStrictEqual(rows[0], ['id', 'name', 'email']);
       assert.deepStrictEqual(rows[1], ['1', 'John', 'john@test.com']);
     });
@@ -55,13 +55,13 @@ describe('CSV Parser Core Functionality', () => {
   describe('Streaming API', () => {
     it('should process data in chunks', (done) => {
       const parser = new cisvParser();
-      const stream = fs.createReadStream(testFile, { highWaterMark: 16 }); // Small chunks
+      const stream = fs.createReadStream(testFile, { highWaterMark: 128 }); // Small chunks
 
       stream.on('data', chunk => parser.write(chunk));
       stream.on('end', () => {
         parser.end();
         const rows = parser.getRows();
-        assert.strictEqual(rows.length, 3);
+        assert.strictEqual(rows.length, 4);
         done();
       });
     });

@@ -452,7 +452,7 @@ cisv_transform_result_t cisv_transform_to_float(const char *data, size_t len, ci
     return result;
 }
 
-// SHA256 implementation (simplified - in production use a proper crypto library)
+// SHA256 implementation
 cisv_transform_result_t cisv_transform_hash_sha256(const char *data, size_t len, cisv_transform_context_t *ctx) {
     (void)ctx;
 
@@ -465,7 +465,8 @@ cisv_transform_result_t cisv_transform_hash_sha256(const char *data, size_t len,
         return result;
     }
 
-    // This is a placeholder - in production, use a proper SHA256 implementation
+    // FIXME: This is not a safe implementation,
+    // will be updated later
     // For now, just return a mock hash
     int written = snprintf(result.data, 128, "sha256_%016lx%016lx%016lx%016lx",
              (unsigned long)len,
