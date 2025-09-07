@@ -293,6 +293,14 @@ parser
     .transform(5, 'base64_encode')  // Column 5 to base64
     .transform(6, 'hash_sha256');   // Column 6 to SHA256
 
+// Custom fieldname transform :
+parser
+    .transform('name', 'uppercase');
+
+// Custom row transform :
+parser
+    .transformRow((row, rowObj) => {console.log(row}});
+
 // Custom JavaScript transforms
 parser.transform(7, value => new Date(value).toISOString());
 
@@ -458,7 +466,7 @@ cisv -b -d ';' -q "'" --trim european.csv
 
 ## LICENSE
 
-GPL2 © [sanix-darker](https://github.com/sanix-darker)
+MIT © [sanix-darker](https://github.com/sanix-darker)
 
 ## ACKNOWLEDGMENTS
 
