@@ -173,6 +173,90 @@ int cisv_transform_pipeline_add_js(
     return 0;
 }
 
+// Set header fields for name-based transforms
+int cisv_transform_pipeline_set_header(
+    cisv_transform_pipeline_t *pipeline,
+    const char **field_names,
+    size_t field_count
+) {
+    if (!pipeline || !field_names || field_count == 0) return -1;
+
+    // Free existing header fields if any
+    if (pipeline->header_fields) {
+        for (size_t i = 0; i < pipeline->header_count; i++) {
+            free(pipeline->header_fields[i]);
+        }
+        free(pipeline->header_fields);
+    }
+
+    // Allocate new header fields array
+    pipeline->header_fields = malloc(field_count * sizeof(char *));
+    if (!pipeline->header_fields) return -1;
+
+    // Copy each field name
+    for (size_t i = 0; i < field_count; i++) {
+        pipeline->header_fields[i] = strdup(field_names[i]);
+        if (!pipeline->header_fields[i]) {
+            // Cleanup on failure
+            for (size_t j = 0; j < i; j++) {
+                free(pipeline->header_fields[j]);
+            }
+            free(pipeline->header_fields);
+            pipeline->header_fields = NULL;
+            return -1;
+        }
+    }
+
+    pipeline->header_count = field_count;
+    return 0;
+}
+
+// Add JavaScript callback transform by field name
+int cisv_transform_pipeline_add_js_by_name(
+    cisv_transform_pipeline_t *pipeline,
+    const char *field_name,
+    void *js_callback
+) {
+    if (!pipeline || !field_name || !js_callback || !pipeline->header_fields) return -1;
+
+    // Find field index by name
+    int field_index = -1;
+    for (size_t i = 0; i < pipeline->header_count; i++) {
+        if (strcmp(pipeline->header_fields[i], field_name) == 0) {
+            field_index = (int)i;
+            break;
+        }
+    }
+
+    if (field_index == -1) return -1; // Field not found
+
+    return cisv_transform_pipeline_add_js(pipeline, field_index, js_callback);
+}
+
+// Add transform by field name
+int cisv_transform_pipeline_add_by_name(
+    cisv_transform_pipeline_t *pipeline,
+    const char *field_name,
+    cisv_transform_type_t type,
+    cisv_transform_context_t *ctx
+) {
+    if (!pipeline || !field_name || !pipeline->header_fields) return -1;
+
+    // Find field index by name
+    int field_index = -1;
+    for (size_t i = 0; i < pipeline->header_count; i++) {
+        if (strcmp(pipeline->header_fields[i], field_name) == 0) {
+            field_index = (int)i;
+            break;
+        }
+    }
+
+    if (field_index == -1) return -1; // Field not found
+
+    return cisv_transform_pipeline_add(pipeline, field_index, type, ctx);
+}
+
+
 // Apply transforms for a field
 cisv_transform_result_t cisv_transform_apply(
     cisv_transform_pipeline_t *pipeline,
