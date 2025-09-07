@@ -153,6 +153,10 @@ public:
             InstanceMethod("destroy", &CisvParser::Destroy),
             InstanceMethod("setConfig", &CisvParser::SetConfig),
             InstanceMethod("getConfig", &CisvParser::GetConfig),
+            InstanceMethod("transformByName", &CisvParser::TransformByName),
+            InstanceMethod("setHeaderFields", &CisvParser::SetHeaderFields),
+            InstanceMethod("removeTransformByName", &CisvParser::RemoveTransformByName),
+
             StaticMethod("countRows", &CisvParser::CountRows),
             StaticMethod("countRowsWithConfig", &CisvParser::CountRowsWithConfig)
         });
@@ -590,6 +594,187 @@ public:
 
         return info.This();  // Return this for chaining
     }
+
+Napi::Value TransformByName(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    if (is_destroyed_) {
+        throw Napi::Error::New(env, "Parser has been destroyed");
+    }
+
+    if (info.Length() < 2) {
+        throw Napi::TypeError::New(env, "Expected field name and transform type/function");
+    }
+
+    if (!info[0].IsString()) {
+        throw Napi::TypeError::New(env, "Field name must be a string");
+    }
+
+    std::string field_name = info[0].As<Napi::String>();
+
+    // Ensure pipeline exists (lazy initialization)
+    rc_->ensurePipeline();
+
+    // Store the environment
+    rc_->env = env;
+
+    // Handle string transform types - using the actual C transformer
+    if (info[1].IsString()) {
+        std::string transform_type = info[1].As<Napi::String>();
+        cisv_transform_type_t type;
+
+        // Map string to C enum
+        if (transform_type == "uppercase") {
+            type = TRANSFORM_UPPERCASE;
+        } else if (transform_type == "lowercase") {
+            type = TRANSFORM_LOWERCASE;
+        } else if (transform_type == "trim") {
+            type = TRANSFORM_TRIM;
+        } else if (transform_type == "to_int" || transform_type == "int") {
+            type = TRANSFORM_TO_INT;
+        } else if (transform_type == "to_float" || transform_type == "float") {
+            type = TRANSFORM_TO_FLOAT;
+        } else if (transform_type == "hash_sha256" || transform_type == "sha256") {
+            type = TRANSFORM_HASH_SHA256;
+        } else if (transform_type == "base64_encode" || transform_type == "base64") {
+            type = TRANSFORM_BASE64_ENCODE;
+        } else {
+            throw Napi::Error::New(env, "Unknown transform type: " + transform_type);
+        }
+
+        // Create context if provided
+        cisv_transform_context_t* ctx = nullptr;
+        if (info.Length() >= 3 && info[2].IsObject()) {
+            Napi::Object context_obj = info[2].As<Napi::Object>();
+            ctx = (cisv_transform_context_t*)calloc(1, sizeof(cisv_transform_context_t));
+
+            // Extract context properties if they exist
+            if (context_obj.Has("key")) {
+                Napi::Value key_val = context_obj.Get("key");
+                if (key_val.IsString()) {
+                    std::string key = key_val.As<Napi::String>();
+                    ctx->key = strdup(key.c_str());
+                    ctx->key_len = key.length();
+                }
+            }
+
+            if (context_obj.Has("iv")) {
+                Napi::Value iv_val = context_obj.Get("iv");
+                if (iv_val.IsString()) {
+                    std::string iv = iv_val.As<Napi::String>();
+                    ctx->iv = strdup(iv.c_str());
+                    ctx->iv_len = iv.length();
+                }
+            }
+        }
+
+        // Add to the C transform pipeline by name
+        if (cisv_transform_pipeline_add_by_name(rc_->pipeline, field_name.c_str(), type, ctx) < 0) {
+            // Clean up context if adding failed
+            if (ctx) {
+                if (ctx->key) free((void*)ctx->key);
+                if (ctx->iv) free((void*)ctx->iv);
+                if (ctx->extra) free(ctx->extra);
+                free(ctx);
+            }
+            throw Napi::Error::New(env, "Failed to add transform for field: " + field_name);
+        }
+
+    } else if (info[1].IsFunction()) {
+        // Handle JavaScript function transforms by name
+        Napi::Function func = info[1].As<Napi::Function>();
+
+        // Add to the C transform pipeline by name
+        if (cisv_transform_pipeline_add_js_by_name(rc_->pipeline, field_name.c_str(), &func) < 0) {
+            throw Napi::Error::New(env, "Failed to add JS transform for field: " + field_name);
+        }
+
+    } else {
+        throw Napi::TypeError::New(env, "Transform must be a string type or function");
+    }
+
+    return info.This();  // Return this for chaining
+}
+
+void SetHeaderFields(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    if (is_destroyed_) {
+        throw Napi::Error::New(env, "Parser has been destroyed");
+    }
+
+    if (info.Length() != 1 || !info[0].IsArray()) {
+        throw Napi::TypeError::New(env, "Expected array of field names");
+    }
+
+    Napi::Array field_names = info[0].As<Napi::Array>();
+    size_t field_count = field_names.Length();
+
+    // Convert to C array of strings
+    const char** c_field_names = (const char**)malloc(field_count * sizeof(char*));
+    if (!c_field_names) {
+        throw Napi::Error::New(env, "Memory allocation failed");
+    }
+
+    for (size_t i = 0; i < field_count; i++) {
+        Napi::Value field_val = field_names[i];
+        if (!field_val.IsString()) {
+            free(c_field_names);
+            throw Napi::TypeError::New(env, "Field names must be strings");
+        }
+        std::string field_str = field_val.As<Napi::String>();
+        c_field_names[i] = strdup(field_str.c_str());
+    }
+
+    // Ensure pipeline exists
+    rc_->ensurePipeline();
+
+    // Set header fields in the pipeline
+    if (cisv_transform_pipeline_set_header(rc_->pipeline, c_field_names, field_count) < 0) {
+        // Clean up
+        for (size_t i = 0; i < field_count; i++) {
+            free((void*)c_field_names[i]);
+        }
+        free(c_field_names);
+        throw Napi::Error::New(env, "Failed to set header fields");
+    }
+
+    // Clean up temporary array (the pipeline makes copies)
+    for (size_t i = 0; i < field_count; i++) {
+        free((void*)c_field_names[i]);
+    }
+    free(c_field_names);
+}
+
+// Add this method to remove transforms by field name
+Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+
+    if (is_destroyed_) {
+        throw Napi::Error::New(env, "Parser has been destroyed");
+    }
+
+    if (info.Length() != 1 || !info[0].IsString()) {
+        throw Napi::TypeError::New(env, "Expected field name");
+    }
+
+    std::string field_name = info[0].As<Napi::String>();
+
+    // Remove from JavaScript transforms by finding the field index
+    if (rc_->pipeline && rc_->pipeline->header_fields) {
+        for (size_t i = 0; i < rc_->pipeline->header_count; i++) {
+            if (strcmp(rc_->pipeline->header_fields[i], field_name.c_str()) == 0) {
+                rc_->js_transforms.erase(i);
+                break;
+            }
+        }
+    }
+
+    // TODO: Implement removal of C transforms by name in cisv_transformer.c
+    // For now, this only removes JS transforms
+
+    return info.This();
+}
 
     Napi::Value RemoveTransform(const Napi::CallbackInfo &info) {
         Napi::Env env = info.Env();

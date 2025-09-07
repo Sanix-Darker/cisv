@@ -107,6 +107,9 @@ const parser7 = new cisvParser();
 parser7.transform(0, 'uppercase')
        .transform(1, 'to_int');
 
+const parser7_5 = new cisvParser();
+
+
 const rows7 = parser7.parseString(csvString);
 console.log('Parsed string:', rows7);
 

@@ -71,6 +71,7 @@ typedef struct {
     cisv_transform_fn fn;
     cisv_transform_context_t *ctx;
     int field_index;  // -1 for all fields
+    const char *field_name;  // Field name to match (alternative to index)
     void *js_callback;  // For JS callbacks (napi_ref)
 } cisv_transform_t;
 
@@ -87,6 +88,9 @@ typedef struct {
 
     // SIMD alignment
     size_t alignment;
+    // Header field names for mapping
+    char **header_fields;
+    size_t header_count;
 } cisv_transform_pipeline_t;
 
 typedef struct cisv_js_callback {
@@ -98,6 +102,13 @@ typedef struct cisv_js_callback {
 // Create/destroy pipeline
 cisv_transform_pipeline_t *cisv_transform_pipeline_create(size_t initial_capacity);
 void cisv_transform_pipeline_destroy(cisv_transform_pipeline_t *pipeline);
+
+// Set header fields for name-based transforms
+int cisv_transform_pipeline_set_header(
+    cisv_transform_pipeline_t *pipeline,
+    const char **field_names,
+    size_t field_count
+);
 
 // Add transforms to pipeline
 int cisv_transform_pipeline_add(
@@ -111,6 +122,21 @@ int cisv_transform_pipeline_add_js(
     cisv_transform_pipeline_t *pipeline,
     int field_index,
     void *js_callback
+);
+
+// Add JavaScript callback transform by field name
+int cisv_transform_pipeline_add_js_by_name(
+    cisv_transform_pipeline_t *pipeline,
+    const char *field_name,
+    void *js_callback
+);
+
+// Add transform by field name
+int cisv_transform_pipeline_add_by_name(
+    cisv_transform_pipeline_t *pipeline,
+    const char *field_name,
+    cisv_transform_type_t type,
+    cisv_transform_context_t *ctx
 );
 
 // Apply transforms
