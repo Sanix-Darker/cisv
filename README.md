@@ -1,10 +1,9 @@
 # CISV
 
-![Performance](https://img.shields.io/badge/performance-blazing%20fast-red)
-![SIMD](https://img.shields.io/badge/SIMD-AVX512%2FAVX2-green)
-![License](https://img.shields.io/badge/license-GPL2-blue)
+![License](https://img.shields.io/badge/license-MIT-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 ![Size](https://deno.bundlejs.com/badge?q=spring-easing)
+![Downloads](https://badgen.net/npm/dw/cisv)
 
 
 Cisv is a csv parser on steroids... literally.
