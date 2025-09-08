@@ -4,6 +4,8 @@
 ![SIMD](https://img.shields.io/badge/SIMD-AVX512%2FAVX2-green)
 ![License](https://img.shields.io/badge/license-GPL2-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
+![Size](https://deno.bundlejs.com/badge?q=spring-easing)
+
 
 Cisv is a csv parser on steroids... literally.
 It's a high-performance CSV parser/writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.

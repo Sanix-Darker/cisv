@@ -114,6 +114,7 @@ jobs:
             binding.gyp
             index.d.ts
             types/
+            build/Release/cisv.node
             benchmark/
             fixtures/data.csv
           sparse-checkout-cone-mode: false
