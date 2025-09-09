@@ -227,7 +227,7 @@ for size_name in small medium large xlarge; do
 
     # CISV writer
     benchmark_write "cisv write" \
-        "./cisv write -g $rows -o bench_cisv.csv -b" \
+        "./cisv_bin write -g $rows -o bench_cisv.csv -b" \
         "bench_cisv.csv" \
         "$rows"
 

@@ -19,6 +19,25 @@ I wrote about basics in a blog post, you can read here :https://sanixdk.xyz/blog
 - SIMD accelerated with AVX-512/AVX2 auto-detection
 - Dynamic lookup tables for configurable parsing
 
+## CLI BENCHMARKS WITH DOCKER
+
+```bash
+$ docker build -t cisv-benchmark .
+```
+
+To run them... choosing some specs for the container to size resources, you can :
+
+```bash
+$ docker run --rm      \
+    --cpus="2.0"       \
+    --memory="4g"      \
+    --memory-swap="4g" \
+    --cpu-shares=1024  \
+    --security-opt     \
+    seccomp=unconfined \
+    cisv-benchmark
+```
+
 ## BENCHMARKS
 
 Benchmarks comparison with existing popular tools,
