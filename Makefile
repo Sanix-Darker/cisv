@@ -43,16 +43,16 @@ install-benchmark-deps:
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; \
 		. $$HOME/.cargo/env; \
 	fi
-	#@# Install xsv
-	#@if ! command -v xsv > /dev/null; then \
-	#	echo "Installing xsv..."; \
-	#	cargo install xsv; \
-	#fi
+	@# Install xsv
+	@if ! command -v xsv > /dev/null; then \
+		echo "Installing xsv..."; \
+		cargo install xsv; \
+	fi
 	@# Install qsv (faster fork of xsv)
-	#@if ! command -v qsv > /dev/null; then \
-	#	echo "Installing qsv..."; \
-	#	cargo install qsv; \
-	#fi
+	@if ! command -v qsv > /dev/null; then \
+		echo "Installing qsv..."; \
+		cargo install qsv; \
+	fi
 	@# Build rust-csv example
 	@echo "Building rust-csv benchmark tool..."
 	@mkdir -p benchmark/rust-csv-bench
@@ -61,7 +61,7 @@ install-benchmark-deps:
 			cargo init --name csv-bench; \
 			echo 'csv = "1.3"' >> Cargo.toml; \
 		fi && \
-		echo 'use std::env;\nuse std::error::Error;\nuse csv::ReaderBuilder;\n\nfn main() -> Result<(), Box<dyn Error>> {\n    let args: Vec<String> = env::args().collect();\n    if args.len() < 2 { eprintln!("Usage: {} <file>", args[0]); std::process::exit(1); }\n    let mut rdr = ReaderBuilder::new().has_headers(true).from_path(&args[1])?;\n    let count = rdr.records().count();\n    println!("{}", count);\n    Ok(())\n}' > cisv/main.rs && \
+		echo 'use std::env;\nuse std::error::Error;\nuse csv::ReaderBuilder;\n\nfn main() -> Result<(), Box<dyn Error>> {\n    let args: Vec<String> = env::args().collect();\n    if args.len() < 2 { eprintln!("Usage: {} <file>", args[0]); std::process::exit(1); }\n    let mut rdr = ReaderBuilder::new().has_headers(true).from_path(&args[1])?;\n    let count = rdr.records().count();\n    println!("{}", count);\n    Ok(())\n}' > ./main.rs && \
 		cargo build --release
 	@# Fix csvkit Python 3.12 compatibility issue and install
 	@if command -v pip3 > /dev/null; then \
