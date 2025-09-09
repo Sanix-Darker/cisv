@@ -179,7 +179,7 @@ for size in "small" "medium" "large"; do  # Skip xlarge for all tools
     # Count rows test
     echo -e "${YELLOW}Row counting test:${NC}\n"
 
-    benchmark "cisv" "./cisv -c" "$size.csv"
+    benchmark "cisv" "./cisv_bin -c" "$size.csv"
     benchmark "wc -l (baseline)" "wc -l" "$size.csv"
 
     if [ -f "./benchmark/rust-csv-bench/target/release/csv-bench" ]; then
@@ -194,7 +194,7 @@ for size in "small" "medium" "large"; do  # Skip xlarge for all tools
     # Select columns test
     echo -e "${YELLOW}\n---\nColumn selection test (columns 0,2,3):${NC}\n"
 
-    benchmark "cisv" "./cisv -s 0,2,3" "$size.csv"
+    benchmark "cisv" "./cisv_bin -s 0,2,3" "$size.csv"
 
     if [ -f "./benchmark/rust-csv-bench/target/release/csv-select" ]; then
         benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select $size.csv 0,2,3" ""
@@ -213,11 +213,11 @@ done
 echo -e "${GREEN}=== Testing with xlarge.csv (limited tools) ===${NC}\n"
 
 echo -e "${YELLOW}Row counting test:${NC}\n"
-benchmark "cisv" "./cisv -c" "xlarge.csv"
+benchmark "cisv" "./cisv_bin -c" "xlarge.csv"
 benchmark "wc -l (baseline)" "wc -l" "xlarge.csv"
 
 echo -e "${YELLOW}Column selection test (columns 0,2,3):${NC}\n"
-benchmark "cisv" "./cisv -s 0,2,3" "xlarge.csv"
+benchmark "cisv" "./cisv_bin -s 0,2,3" "xlarge.csv"
 
 echo -e "${BLUE}==================================================${NC}\n"
 
@@ -225,7 +225,7 @@ echo -e "${BLUE}==================================================${NC}\n"
 echo -e "${GREEN}=== CISV Benchmark Mode ===${NC}\n"
 for size in "small" "medium" "large" "xlarge"; do
     echo -e "${YELLOW}$size.csv:${NC}"
-    ./cisv -b "$size.csv"
+    ./cisv_bin -b "$size.csv"
     echo ""
 done
 

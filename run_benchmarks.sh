@@ -28,9 +28,9 @@ case "${1:-all}" in
         echo "id,name,value" > test.csv
         echo "1,test,100" >> test.csv
         echo "2,demo,200" >> test.csv
-        valgrind --leak-check=full --show-leak-kinds=all ./cisv --version
-        valgrind --leak-check=full ./cisv -c test.csv
-        valgrind --leak-check=full ./cisv write -g 100 -o test_write.csv
+        valgrind --leak-check=full --show-leak-kinds=all ./cisv_bin --version
+        valgrind --leak-check=full ./cisv_bin -c test.csv
+        valgrind --leak-check=full ./cisv_bin write -g 100 -o test_write.csv
         rm -f test.csv test_write.csv
         ;;
     all|*)
