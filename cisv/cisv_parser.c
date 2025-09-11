@@ -13,12 +13,17 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/time.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <sched.h>
 #include "cisv_parser.h"
 #include "cisv_simd.h"
+
 
 #define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)
 // #define RINGBUF_SIZE (1 << 16) // 64kb (for memory safe reasons)
 #define PREFETCH_DISTANCE 256
+#define WORK_STEAL_SEGMENT_SIZE (1 << 21)  // 2MB
 
 struct cisv_parser {
     uint8_t *base;              // pointer to the whole input, if memory-mapped
@@ -60,7 +65,21 @@ struct cisv_parser {
     // Dynamic lookup tables for current configuration
     uint8_t *state_table;       // state transition table
     uint8_t *action_table;      // action table
+
+    // Work stealing support
+    atomic_size_t work_cursor;         // Global cursor for work stealing
+    int num_worker_threads;            // Number of worker threads
+    pthread_t *worker_threads;         // Worker thread handles
+    pthread_mutex_t work_mutex;        // Mutex for thread coordination
+    const uint8_t *work_start;         // Start of data to process
+    const uint8_t *work_end;           // End of data to process
+    atomic_int workers_done;           // Count of completed workers
 };
+
+typedef struct {
+    cisv_parser *parser;
+    int thread_id;
+} worker_context_t;
 
 // State constants for branchless operations
 #define S_UNQUOTED  0
@@ -633,6 +652,72 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 }
 #endif
 
+static void* work_stealing_thread(void *arg) {
+    worker_context_t *ctx = (worker_context_t*)arg;
+    cisv_parser *parser = ctx->parser;
+
+    // Pin thread to CPU core for better cache locality
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(ctx->thread_id % sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+
+    while (1) {
+        // Atomically steal next chunk
+        size_t chunk_start = atomic_fetch_add(&parser->work_cursor, WORK_STEAL_SEGMENT_SIZE);
+
+        // Check if we've processed everything
+        if (chunk_start >= (size_t)(parser->work_end - parser->work_start)) {
+            break;
+        }
+
+        const uint8_t *segment_start = parser->work_start + chunk_start;
+        const uint8_t *segment_end = segment_start + WORK_STEAL_SEGMENT_SIZE;
+
+        // Adjust segment boundaries to align with row boundaries
+        if (segment_start > parser->work_start) {
+            // Find next newline to start at row boundary
+            while (segment_start < parser->work_end && *(segment_start - 1) != '\n') {
+                segment_start++;
+            }
+        }
+
+        if (segment_end < parser->work_end) {
+            // Find next newline to end at row boundary
+            while (segment_end < parser->work_end && *segment_end != '\n') {
+                segment_end++;
+            }
+            if (segment_end < parser->work_end) segment_end++; // Include the newline
+        } else {
+            segment_end = parser->work_end;
+        }
+
+        // Process this chunk
+        if (segment_end > segment_start) {
+            // Create temporary parser state for this chunk
+            cisv_parser temp_parser = *parser;
+            temp_parser.field_start = segment_start;
+            temp_parser.row_start = segment_start;
+            temp_parser.st = S_UNQUOTED;
+            temp_parser.current_row_size = 0;
+            temp_parser.in_comment = false;
+
+            parse_simd_chunk(&temp_parser, segment_start, segment_end - segment_start);
+
+            // Handle final field if needed
+            if (temp_parser.field_start < segment_end && !temp_parser.in_comment) {
+                yield_field(&temp_parser, temp_parser.field_start, segment_end);
+                if (temp_parser.field_start > temp_parser.row_start || !temp_parser.skip_empty_lines) {
+                    yield_row(&temp_parser);
+                }
+            }
+        }
+    }
+
+    atomic_fetch_add(&parser->workers_done, 1);
+    return NULL;
+}
+
 static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) {
     parser->field_start = buffer;
     parser->row_start = buffer;
@@ -650,6 +735,56 @@ static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) 
             yield_row(parser);
         }
     }
+    return 0;
+}
+
+static int parse_memory_parallel(cisv_parser *parser, const uint8_t *buffer, size_t len) {
+    // Use parallel processing only for large files
+    const size_t MIN_PARALLEL_SIZE = 10 * 1024 * 1024; // 10MB threshold
+
+    if (len < MIN_PARALLEL_SIZE) {
+        // Too small, use single-threaded parsing
+        return parse_memory(parser, buffer, len);
+    }
+
+    // Initialize work stealing
+    atomic_init(&parser->work_cursor, 0);
+    atomic_init(&parser->workers_done, 0);
+    parser->work_start = buffer;
+    parser->work_end = buffer + len;
+
+    // Determine number of threads
+    int num_threads = sysconf(_SC_NPROCESSORS_ONLN);
+    if (num_threads > 8) num_threads = 8; // Cap at 8 threads
+    parser->num_worker_threads = num_threads;
+
+    // Allocate thread handles
+    parser->worker_threads = calloc(num_threads, sizeof(pthread_t));
+    worker_context_t *contexts = calloc(num_threads, sizeof(worker_context_t));
+
+    if (!parser->worker_threads || !contexts) {
+        free(parser->worker_threads);
+        free(contexts);
+        return parse_memory(parser, buffer, len); // Fallback to single-threaded
+    }
+
+    // Launch worker threads
+    for (int i = 0; i < num_threads; i++) {
+        contexts[i].parser = parser;
+        contexts[i].thread_id = i;
+        pthread_create(&parser->worker_threads[i], NULL, work_stealing_thread, &contexts[i]);
+    }
+
+    // Wait for all workers to complete
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(parser->worker_threads[i], NULL);
+    }
+
+    // Cleanup
+    free(parser->worker_threads);
+    free(contexts);
+    parser->worker_threads = NULL;
+
     return 0;
 }
 
@@ -765,6 +900,11 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     parser->in_comment = false;
     parser->tables_initialized = 0;
 
+    // Initialize work stealing fields
+    parser->num_worker_threads = 0;
+    parser->worker_threads = NULL;
+    pthread_mutex_init(&parser->work_mutex, NULL);
+
     // Allocate and initialize lookup tables
     parser->state_table = calloc(4 * 256, sizeof(uint8_t));
     parser->action_table = calloc(4 * 256, sizeof(uint8_t));
@@ -804,6 +944,7 @@ void cisv_parser_destroy(cisv_parser *parser) {
     free(parser->ring);
     free(parser->state_table);
     free(parser->action_table);
+    pthread_mutex_destroy(&parser->work_mutex);
     free(parser);
 }
 
@@ -861,7 +1002,7 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
     parser->current_line = 1;
     parser->in_comment = false;
 
-    return parse_memory(parser, parser->base, parser->size);
+    return parse_memory_parallel(parser, parser->base, parser->size);
 }
 
 int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len) {
