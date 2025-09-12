@@ -79,6 +79,7 @@ struct cisv_parser {
 typedef struct {
     cisv_parser *parser;
     int thread_id;
+    pthread_mutex_t *callback_mutex;
 } worker_context_t;
 
 // State constants for branchless operations
@@ -202,6 +203,29 @@ static inline const uint8_t* trim_end(const uint8_t *start, const uint8_t *end) 
     return end;
 }
 
+static inline void yield_field_threadsafe(cisv_parser *parser, const uint8_t *start,
+                                         const uint8_t *end, pthread_mutex_t *mutex) {
+    if (parser->trim) {
+        start = trim_start(start, end);
+        end = trim_end(start, end);
+    }
+
+    if (parser->fcb && start && end && end >= start) {
+        pthread_mutex_lock(mutex);
+        parser->fcb(parser->user, (const char *)start, (size_t)(end - start));
+        pthread_mutex_unlock(mutex);
+    }
+}
+
+static inline void yield_row_threadsafe(cisv_parser *parser, pthread_mutex_t *mutex) {
+    if (parser->rcb) {
+        pthread_mutex_lock(mutex);
+        parser->rcb(parser->user);
+        pthread_mutex_unlock(mutex);
+    }
+}
+
+// deprecated
 static inline void yield_field(cisv_parser *parser, const uint8_t *start, const uint8_t *end) {
     // Apply trimming if configured
     if (parser->trim) {
@@ -215,7 +239,7 @@ static inline void yield_field(cisv_parser *parser, const uint8_t *start, const 
         parser->fcb(parser->user, (const char *)start, (size_t)(end - start));
     }
 }
-
+// deprecated
 static inline void yield_row(cisv_parser *parser) {
     // Check if we should skip empty lines
     if (parser->skip_empty_lines && parser->field_start == parser->row_start) {
@@ -652,9 +676,59 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
 }
 #endif
 
+static void process_chunk_safe(cisv_parser *parser, const uint8_t *buffer,
+                              size_t len, pthread_mutex_t *mutex) {
+    // Create thread-local parser state
+    cisv_parser local_parser = {0};
+
+    // Copy configuration but not state
+    local_parser.delimiter = parser->delimiter;
+    local_parser.quote = parser->quote;
+    local_parser.escape = parser->escape;
+    local_parser.skip_empty_lines = parser->skip_empty_lines;
+    local_parser.comment = parser->comment;
+    local_parser.trim = parser->trim;
+    local_parser.relaxed = parser->relaxed;
+    local_parser.max_row_size = parser->max_row_size;
+
+    // Use shared callbacks with mutex protection
+    local_parser.fcb = parser->fcb;
+    local_parser.rcb = parser->rcb;
+    local_parser.ecb = parser->ecb;
+    local_parser.user = parser->user;
+
+    // Use shared lookup tables (read-only, so thread-safe)
+    local_parser.state_table = parser->state_table;
+    local_parser.action_table = parser->action_table;
+    local_parser.tables_initialized = parser->tables_initialized;
+
+    // Initialize local state
+    local_parser.field_start = buffer;
+    local_parser.row_start = buffer;
+    local_parser.st = S_UNQUOTED;
+    local_parser.current_row_size = 0;
+    local_parser.in_comment = false;
+    local_parser.current_line = 1;  // Each thread tracks its own lines
+
+    // Process with mutex-protected callbacks
+    const uint8_t *cur = buffer;
+    const uint8_t *end = buffer + len;
+
+    parse_simd_chunk(&local_parser, cur, end - cur);
+
+    // Handle final field if needed
+    if (local_parser.field_start < end && !local_parser.in_comment) {
+        yield_field_threadsafe(&local_parser, local_parser.field_start, end, mutex);
+        if (local_parser.field_start > local_parser.row_start || !local_parser.skip_empty_lines) {
+            yield_row_threadsafe(&local_parser, mutex);
+        }
+    }
+}
+
 static void* work_stealing_thread(void *arg) {
     worker_context_t *ctx = (worker_context_t*)arg;
     cisv_parser *parser = ctx->parser;
+    pthread_mutex_t callback_mutex = PTHREAD_MUTEX_INITIALIZER;
 
     // Pin thread to CPU core for better cache locality
     cpu_set_t cpuset;
@@ -674,46 +748,54 @@ static void* work_stealing_thread(void *arg) {
         const uint8_t *segment_start = parser->work_start + chunk_start;
         const uint8_t *segment_end = segment_start + WORK_STEAL_SEGMENT_SIZE;
 
-        // Adjust segment boundaries to align with row boundaries
+        // safes guards
+        if (segment_end > parser->work_end) {
+            segment_end = parser->work_end;
+        }
+        if (segment_start >= parser->work_end) {
+            break;
+        }
+
         if (segment_start > parser->work_start) {
-            // Find next newline to start at row boundary
-            while (segment_start < parser->work_end && *(segment_start - 1) != '\n') {
-                segment_start++;
+            // Search backwards for newline, but with limit
+            const uint8_t *search_start = segment_start - 1;
+            int search_count = 0;
+            while (search_start > parser->work_start &&
+                   *search_start != '\n' &&
+                   search_count < 1000) {  // Prevent infinite loop
+                search_start--;
+                search_count++;
+            }
+            if (*search_start == '\n') {
+                segment_start = search_start + 1;
             }
         }
 
         if (segment_end < parser->work_end) {
-            // Find next newline to end at row boundary
-            while (segment_end < parser->work_end && *segment_end != '\n') {
-                segment_end++;
+            // Search forward for newline, with limit
+            const uint8_t *search_end = segment_end;
+            int search_count = 0;
+            while (search_end < parser->work_end &&
+                   *search_end != '\n' &&
+                   search_count < 1000) {  // Prevent infinite loop
+                search_end++;
+                search_count++;
             }
-            if (segment_end < parser->work_end) segment_end++; // Include the newline
-        } else {
-            segment_end = parser->work_end;
-        }
-
-        // Process this chunk
-        if (segment_end > segment_start) {
-            // Create temporary parser state for this chunk
-            cisv_parser temp_parser = *parser;
-            temp_parser.field_start = segment_start;
-            temp_parser.row_start = segment_start;
-            temp_parser.st = S_UNQUOTED;
-            temp_parser.current_row_size = 0;
-            temp_parser.in_comment = false;
-
-            parse_simd_chunk(&temp_parser, segment_start, segment_end - segment_start);
-
-            // Handle final field if needed
-            if (temp_parser.field_start < segment_end && !temp_parser.in_comment) {
-                yield_field(&temp_parser, temp_parser.field_start, segment_end);
-                if (temp_parser.field_start > temp_parser.row_start || !temp_parser.skip_empty_lines) {
-                    yield_row(&temp_parser);
-                }
+            if (search_end < parser->work_end && *search_end == '\n') {
+                segment_end = search_end + 1;
             }
         }
+
+        // Skip empty or invalid segments
+        if (segment_end <= segment_start) {
+            continue;
+        }
+
+        // Process chunk with thread-safe callbacks
+        process_chunk_safe(parser, segment_start, segment_end - segment_start, &callback_mutex);
     }
 
+    pthread_mutex_destroy(&callback_mutex);
     atomic_fetch_add(&parser->workers_done, 1);
     return NULL;
 }
@@ -739,8 +821,22 @@ static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) 
 }
 
 static int parse_memory_parallel(cisv_parser *parser, const uint8_t *buffer, size_t len) {
-    // Use parallel processing only for large files
+    // Validate inputs
+    if (!parser || !buffer || len == 0) {
+        return -EINVAL;
+    }
+
+    // Check for reasonable file size
+    const size_t MAX_FILE_SIZE = 10ULL * 1024 * 1024 * 1024; // 10GB max
+    if (len > MAX_FILE_SIZE) {
+        fprintf(stderr, "File too large for parallel processing: %zu bytes\n", len);
+        return -E2BIG;
+    }
+
     const size_t MIN_PARALLEL_SIZE = 10 * 1024 * 1024; // 10MB threshold
+    if (len < MIN_PARALLEL_SIZE) {
+        return parse_memory(parser, buffer, len);
+    }
 
     if (len < MIN_PARALLEL_SIZE) {
         // Too small, use single-threaded parsing
