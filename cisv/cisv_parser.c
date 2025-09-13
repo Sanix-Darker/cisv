@@ -173,12 +173,86 @@ static void init_tables(cisv_parser *parser) {
 }
 
 static inline const uint8_t* trim_start(const uint8_t *start, const uint8_t *end) {
-    while (start < end && isspace(*start)) start++;
+    #ifdef __AVX2__
+    if (end - start >= 32) {
+        __m256i space = _mm256_set1_epi8(' ');
+        __m256i tab = _mm256_set1_epi8('\t');
+        __m256i nl = _mm256_set1_epi8('\n');
+        __m256i cr = _mm256_set1_epi8('\r');
+
+        while (end - start >= 32) {
+            __m256i chunk = _mm256_loadu_si256((__m256i*)start);
+            __m256i is_space = _mm256_cmpeq_epi8(chunk, space);
+            __m256i is_tab = _mm256_cmpeq_epi8(chunk, tab);
+            __m256i is_nl = _mm256_cmpeq_epi8(chunk, nl);
+            __m256i is_cr = _mm256_cmpeq_epi8(chunk, cr);
+
+            __m256i is_ws = _mm256_or_si256(_mm256_or_si256(is_space, is_tab),
+                                           _mm256_or_si256(is_nl, is_cr));
+
+            uint32_t mask = _mm256_movemask_epi8(is_ws);
+            if (mask != 0xFFFFFFFF) {
+                int pos = __builtin_ctz(~mask);
+                return start + pos;
+            }
+            start += 32;
+        }
+    }
+    #endif
+
+    // Unroll remainder
+    while (start < end - 3) {
+        uint32_t v = *(uint32_t*)start;
+        if ((v & 0xFF) > ' ') return start;
+        if (((v >> 8) & 0xFF) > ' ') return start + 1;
+        if (((v >> 16) & 0xFF) > ' ') return start + 2;
+        if (((v >> 24) & 0xFF) > ' ') return start + 3;
+        start += 4;
+    }
+
+    while (start < end && *start <= ' ') start++;
     return start;
 }
 
 static inline const uint8_t* trim_end(const uint8_t *start, const uint8_t *end) {
-    while (end > start && isspace(*(end - 1))) end--;
+    #ifdef __AVX2__
+    if (end - start >= 32) {
+        __m256i space = _mm256_set1_epi8(' ');
+        __m256i tab = _mm256_set1_epi8('\t');
+        __m256i nl = _mm256_set1_epi8('\n');
+        __m256i cr = _mm256_set1_epi8('\r');
+
+        while (end - start >= 32) {
+            end -= 32;
+            __m256i chunk = _mm256_loadu_si256((__m256i*)end);
+            __m256i is_space = _mm256_cmpeq_epi8(chunk, space);
+            __m256i is_tab = _mm256_cmpeq_epi8(chunk, tab);
+            __m256i is_nl = _mm256_cmpeq_epi8(chunk, nl);
+            __m256i is_cr = _mm256_cmpeq_epi8(chunk, cr);
+
+            __m256i is_ws = _mm256_or_si256(_mm256_or_si256(is_space, is_tab),
+                                           _mm256_or_si256(is_nl, is_cr));
+
+            uint32_t mask = _mm256_movemask_epi8(is_ws);
+            if (mask != 0xFFFFFFFF) {
+                int pos = 31 - __builtin_clz(~mask);
+                return end + pos + 1;
+            }
+        }
+    }
+    #endif
+
+    // Unroll remainder
+    while (end - start > 3) {
+        uint32_t v = *(uint32_t*)(end - 4);
+        if (((v >> 24) & 0xFF) > ' ') return end;
+        if (((v >> 16) & 0xFF) > ' ') return end - 1;
+        if (((v >> 8) & 0xFF) > ' ') return end - 2;
+        if ((v & 0xFF) > ' ') return end - 3;
+        end -= 4;
+    }
+
+    while (end > start && *(end - 1) <= ' ') end--;
     return end;
 }
 
