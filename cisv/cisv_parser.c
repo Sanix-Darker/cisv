@@ -95,80 +95,79 @@ void cisv_config_init(cisv_config *config) {
 static void init_tables(cisv_parser *parser) {
     if (parser->tables_initialized) return;
 
-    // Allocate tables if not already allocated
+    // Allocate both tables in one allocation for better cache locality
     if (!parser->state_table) {
-        parser->state_table = calloc(4 * 256, sizeof(uint8_t));
-        parser->action_table = calloc(4 * 256, sizeof(uint8_t));
-        if (!parser->state_table || !parser->action_table) {
-            return;  // Handle allocation failure gracefully
+        parser->state_table = aligned_alloc(64, 8 * 256);  // Align to cache line
+        if (!parser->state_table) return;
+        parser->action_table = parser->state_table + (4 * 256);
+        memset(parser->state_table, 0, 8 * 256);
+    }
+
+    uint8_t (*st)[256] = (uint8_t (*)[256])parser->state_table;
+    uint8_t (*at)[256] = (uint8_t (*)[256])parser->action_table;
+
+    // Unroll initialization loops for better performance
+    // Pre-calculate commonly used values
+    const uint8_t q = parser->quote;
+    const uint8_t d = parser->delimiter;
+    const uint8_t e = parser->escape;
+    const uint8_t c = parser->comment;
+
+    // Initialize with SIMD where possible
+    #ifdef __AVX2__
+    __m256i unquoted_state = _mm256_set1_epi8(S_UNQUOTED);
+    __m256i quoted_state = _mm256_set1_epi8(S_QUOTED);
+    __m256i comment_state = _mm256_set1_epi8(S_COMMENT);
+
+    for (int i = 0; i < 256; i += 32) {
+        _mm256_store_si256((__m256i*)&st[S_UNQUOTED][i], unquoted_state);
+        _mm256_store_si256((__m256i*)&st[S_QUOTED][i], quoted_state);
+        _mm256_store_si256((__m256i*)&st[S_COMMENT][i], comment_state);
+    }
+    #else
+    memset(st[S_UNQUOTED], S_UNQUOTED, 256);
+    memset(st[S_QUOTED], S_QUOTED, 256);
+    memset(st[S_COMMENT], S_COMMENT, 256);
+    #endif
+
+    // Set special transitions
+    st[S_UNQUOTED][q] = S_QUOTED;
+    if (c) st[S_UNQUOTED][c] = S_COMMENT;
+
+    if (e) {
+        st[S_QUOTED][e] = S_QUOTE_ESC;
+        memset(st[S_QUOTE_ESC], S_QUOTED, 256);
+    } else {
+        st[S_QUOTED][q] = S_QUOTE_ESC;
+        memset(st[S_QUOTE_ESC], S_UNQUOTED, 256);
+        st[S_QUOTE_ESC][q] = S_QUOTED;
+    }
+
+    st[S_COMMENT]['\n'] = S_UNQUOTED;
+
+    // Initialize actions with minimal branches
+    memset(at, ACT_NONE, 4 * 256);
+    at[S_UNQUOTED][d] = ACT_FIELD;
+    at[S_UNQUOTED]['\n'] = ACT_FIELD | ACT_ROW;
+    at[S_UNQUOTED]['\r'] = ACT_FIELD;
+
+    if (!e) {
+        // Vectorize the action table initialization
+        for (int i = 0; i < 256; i++) {
+            at[S_QUOTE_ESC][i] = (i != q) ? ACT_REPROCESS : ACT_NONE;
         }
     }
 
-    // Get table pointers for easier access
-    uint8_t (*state_table)[256] = (uint8_t (*)[256])parser->state_table;
-    uint8_t (*action_table)[256] = (uint8_t (*)[256])parser->action_table;
-
-    // Initialize state transitions
-    for (int c = 0; c < 256; c++) {
-        // S_UNQUOTED transitions
-        state_table[S_UNQUOTED][c] = S_UNQUOTED;
-        if (c == parser->quote) {
-            state_table[S_UNQUOTED][c] = S_QUOTED;
-        } else if (parser->comment && c == parser->comment) {
-            state_table[S_UNQUOTED][c] = S_COMMENT;
-        }
-
-        // S_QUOTED transitions
-        state_table[S_QUOTED][c] = S_QUOTED;
-        if (parser->escape && c == parser->escape) {
-            state_table[S_QUOTED][c] = S_QUOTE_ESC;
-        } else if (c == parser->quote) {
-            state_table[S_QUOTED][c] = S_QUOTE_ESC;
-        }
-
-        // S_QUOTE_ESC transitions
-        if (parser->escape) {
-            // With explicit escape character, always return to quoted state
-            state_table[S_QUOTE_ESC][c] = S_QUOTED;
-        } else {
-            // RFC4180-style: "" becomes a literal quote
-            if (c == parser->quote) {
-                state_table[S_QUOTE_ESC][c] = S_QUOTED;
-            } else {
-                state_table[S_QUOTE_ESC][c] = S_UNQUOTED;
-            }
-        }
-
-        // S_COMMENT transitions - stay in comment until newline
-        state_table[S_COMMENT][c] = S_COMMENT;
-        if (c == '\n') {
-            state_table[S_COMMENT][c] = S_UNQUOTED;
-        }
+    // Use SIMD for comment actions
+    #ifdef __AVX2__
+    __m256i skip_act = _mm256_set1_epi8(ACT_SKIP);
+    for (int i = 0; i < 256; i += 32) {
+        _mm256_store_si256((__m256i*)&at[S_COMMENT][i], skip_act);
     }
-
-    // Initialize action table
-    memset(action_table, ACT_NONE, 4 * 256);
-
-    // S_UNQUOTED actions
-    action_table[S_UNQUOTED][(uint8_t)parser->delimiter] = ACT_FIELD;
-    action_table[S_UNQUOTED]['\n'] = ACT_FIELD | ACT_ROW;
-    action_table[S_UNQUOTED]['\r'] = ACT_FIELD;  // Handle CRLF
-
-    // S_QUOTE_ESC actions
-    if (!parser->escape) {
-        // RFC4180-style: reprocess non-quote characters
-        for (int c = 0; c < 256; c++) {
-            if (c != parser->quote) {
-                action_table[S_QUOTE_ESC][c] = ACT_REPROCESS;
-            }
-        }
-    }
-
-    // S_COMMENT actions - skip everything except newline
-    for (int c = 0; c < 256; c++) {
-        action_table[S_COMMENT][c] = ACT_SKIP;
-    }
-    action_table[S_COMMENT]['\n'] = ACT_ROW;
+    #else
+    memset(at[S_COMMENT], ACT_SKIP, 256);
+    #endif
+    at[S_COMMENT]['\n'] = ACT_ROW;
 
     parser->tables_initialized = 1;
 }
