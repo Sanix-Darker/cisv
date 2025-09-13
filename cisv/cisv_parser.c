@@ -16,6 +16,14 @@
 #include "cisv_parser.h"
 #include "cisv_simd.h"
 
+#ifdef __AVX512F__
+#include <immintrin.h>
+#endif
+
+#ifdef __AVX2__
+#include <immintrin.h>
+#endif
+
 #define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)
 // #define RINGBUF_SIZE (1 << 16) // 64kb (for memory safe reasons)
 #define PREFETCH_DISTANCE 256
@@ -172,55 +180,208 @@ static void init_tables(cisv_parser *parser) {
     parser->tables_initialized = 1;
 }
 
+// SIMD-optimized whitespace detection lookup table
+// Ultra-fast trimming with AVX512/AVX2
 static inline const uint8_t* trim_start(const uint8_t *start, const uint8_t *end) {
-    while (start < end && isspace(*start)) start++;
-    return start;
-}
+    size_t len = end - start;
 
-static inline const uint8_t* trim_end(const uint8_t *start, const uint8_t *end) {
-    while (end > start && isspace(*(end - 1))) end--;
+#ifdef __AVX512F__
+    if (len >= 64) {
+        const __m512i max_ws = _mm512_set1_epi8(32);
+
+        while (len >= 64) {
+            __m512i chunk = _mm512_loadu_si512(start);
+            __mmask64 is_ws = _mm512_cmple_epu8_mask(chunk, max_ws);
+
+            if (is_ws != 0xFFFFFFFFFFFFFFFFULL) {
+                return start + __builtin_ctzll(~is_ws);
+            }
+            start += 64;
+            len -= 64;
+        }
+    }
+#elif defined(__AVX2__)
+    if (len >= 32) {
+        const __m256i max_ws = _mm256_set1_epi8(32);
+
+        while (len >= 32) {
+            __m256i chunk = _mm256_loadu_si256((__m256i*)start);
+            __m256i cmp = _mm256_cmpgt_epi8(chunk, max_ws);
+            uint32_t mask = _mm256_movemask_epi8(cmp);
+
+            if (mask) {
+                return start + __builtin_ctz(mask);
+            }
+            start += 32;
+            len -= 32;
+        }
+    }
+#endif
+
+    // Unrolled 8-byte processing
+    while (len >= 8) {
+        uint64_t v = *(uint64_t*)start;
+        uint64_t has_non_ws = ((v & 0xE0E0E0E0E0E0E0E0ULL) != 0) |
+                              ((v & 0x1F1F1F1F1F1F1F1FULL) > 0x0D0D0D0D0D0D0D0DULL);
+        if (has_non_ws) {
+            for (int i = 0; i < 8; i++) {
+                if ((uint8_t)(v >> (i*8)) > 32) return start + i;
+            }
+        }
+        start += 8;
+        len -= 8;
+    }
+
+    // 4-byte processing
+    if (len >= 4) {
+        uint32_t v = *(uint32_t*)start;
+        for (int i = 0; i < 4; i++) {
+            uint8_t c = (v >> (i*8)) & 0xFF;
+            if (c > 32) return start + i;
+        }
+        start += 4;
+        len -= 4;
+    }
+
+    // Remainder
+    switch(len) {
+        case 3: if (*start > 32) return start; start++;
+                /* fallthrough */
+        case 2: if (*start > 32) return start; start++;
+                /* fallthrough */
+        case 1: if (*start > 32) return start; start++;
+    }
+
     return end;
 }
 
-static inline void yield_field(cisv_parser *parser, const uint8_t *start, const uint8_t *end) {
-    // Apply trimming if configured
-    if (parser->trim) {
-        start = trim_start(start, end);
-        end = trim_end(start, end);
+static inline const uint8_t* trim_end(const uint8_t *start, const uint8_t *end) {
+    size_t len = end - start;
+
+#ifdef __AVX512F__
+    while (len >= 64) {
+        const uint8_t *check = end - 64;
+        __m512i chunk = _mm512_loadu_si512(check);
+        const __m512i max_ws = _mm512_set1_epi8(32);
+        __mmask64 is_non_ws = _mm512_cmpgt_epu8_mask(chunk, max_ws);
+
+        if (is_non_ws) {
+            int last_non_ws = 63 - __builtin_clzll(is_non_ws);
+            return check + last_non_ws + 1;
+        }
+        end -= 64;
+        len -= 64;
+    }
+#elif defined(__AVX2__)
+    while (len >= 32) {
+        const uint8_t *check = end - 32;
+        __m256i chunk = _mm256_loadu_si256((__m256i*)check);
+        const __m256i max_ws = _mm256_set1_epi8(32);
+        __m256i cmp = _mm256_cmpgt_epi8(chunk, max_ws);
+        uint32_t mask = _mm256_movemask_epi8(cmp);
+
+        if (mask) {
+            int last_non_ws = 31 - __builtin_clz(mask);
+            return check + last_non_ws + 1;
+        }
+        end -= 32;
+        len -= 32;
+    }
+#endif
+
+    // Unrolled 8-byte processing
+    while (len >= 8) {
+        const uint8_t *check = end - 8;
+        uint64_t v = *(uint64_t*)check;
+
+        for (int i = 7; i >= 0; i--) {
+            if ((uint8_t)(v >> (i*8)) > 32) return check + i + 1;
+        }
+        end -= 8;
+        len -= 8;
     }
 
-    // Branchless check: multiply callback by validity flag
-    size_t valid = (parser->fcb != NULL) & (start != NULL) & (end != NULL) & (end >= start);
-    if (valid) {
-        parser->fcb(parser->user, (const char *)start, (size_t)(end - start));
+    // 4-byte processing
+    if (len >= 4) {
+        const uint8_t *check = end - 4;
+        uint32_t v = *(uint32_t*)check;
+        for (int i = 3; i >= 0; i--) {
+            if ((uint8_t)(v >> (i*8)) > 32) return check + i + 1;
+        }
+        end -= 4;
+        len -= 4;
+    }
+
+    // Remainder
+    while (len-- > 0) {
+        if (*(--end) > 32) return end + 1;
+    }
+
+    return start;
+}
+
+// yield_field with prefetching and branchless code
+static inline void yield_field(cisv_parser *parser, const uint8_t *start, const uint8_t *end) {
+    // Prefetch parser structure for next access
+    __builtin_prefetch(parser, 0, 3);
+
+    // Branchless trimming using conditional move
+    const uint8_t *s = start;
+    const uint8_t *e = end;
+
+    // Use conditional assignment instead of branch
+    const uint8_t *trimmed_s = trim_start(s, e);
+    const uint8_t *trimmed_e = trim_end(trimmed_s, e);
+
+    // Branchless selection: if trim is 0, use original, if 1, use trimmed
+    uintptr_t mask = -(uintptr_t)parser->trim;
+    s = (const uint8_t*)(((uintptr_t)trimmed_s & mask) | ((uintptr_t)s & ~mask));
+    e = (const uint8_t*)(((uintptr_t)trimmed_e & mask) | ((uintptr_t)e & ~mask));
+
+    // Combine all conditions into single branch
+    uintptr_t fcb_addr = (uintptr_t)parser->fcb;
+    uintptr_t valid_mask = -(fcb_addr != 0);
+    valid_mask &= -(s != 0);
+    valid_mask &= -(e != 0);
+    valid_mask &= -(e >= s);
+
+    // Single branch for callback execution
+    if (valid_mask) {
+        // Prefetch user data for callback
+        __builtin_prefetch(parser->user, 0, 1);
+        parser->fcb(parser->user, (const char *)s, (size_t)(e - s));
     }
 }
 
+// yield_row with reduced branches
 static inline void yield_row(cisv_parser *parser) {
-    // Check if we should skip empty lines
-    if (parser->skip_empty_lines && parser->field_start == parser->row_start) {
-        parser->row_start = parser->field_start;
-        return;
-    }
+    // Prefetch frequently accessed memory
+    __builtin_prefetch(&parser->current_line, 1, 3);
+    __builtin_prefetch(&parser->row_start, 1, 3);
 
-    // Check line range
-    if (parser->current_line < parser->from_line) {
-        parser->current_line++;
-        parser->row_start = parser->field_start;
-        return;
-    }
+    // Compute all conditions upfront
+    int is_empty_line = (parser->field_start == parser->row_start);
+    int skip_empty = parser->skip_empty_lines & is_empty_line;
+    int before_range = (parser->current_line < parser->from_line);
+    int after_range = (parser->to_line > 0) & (parser->current_line > parser->to_line);
+    int in_range = !before_range & !after_range;
 
-    if (parser->to_line > 0 && parser->current_line > parser->to_line) {
-        return;
-    }
+    // Branchless increment of current_line (always happens except when after range)
+    parser->current_line += !after_range;
 
-    if (parser->rcb) {
+    // Branchless update of row_start (happens except when after range)
+    uintptr_t new_row_start = (uintptr_t)parser->field_start;
+    uintptr_t old_row_start = (uintptr_t)parser->row_start;
+    parser->row_start = (uint8_t*)((old_row_start & -after_range) | (new_row_start & ~(-after_range)));
+
+    // Branchless reset of row_size
+    parser->current_row_size &= after_range;
+
+    // Single branch for callback (most common case last for better prediction)
+    if ((!skip_empty) & in_range & (parser->rcb != NULL)) {
+        __builtin_prefetch(parser->user, 0, 1);
         parser->rcb(parser->user);
     }
-
-    parser->current_line++;
-    parser->row_start = parser->field_start;
-    parser->current_row_size = 0;
 }
 
 static inline void handle_error(cisv_parser *parser, const char *msg) {
