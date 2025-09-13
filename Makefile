@@ -1,5 +1,5 @@
 CC ?= gcc
-CFLAGS ?= -O3 -march=native -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops
+CFLAGS ?= -O3 -march=native -mavx2 -mtune=native -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops
 LDFLAGS ?= -flto -s
 NODE_GYP ?= node-gyp
 
