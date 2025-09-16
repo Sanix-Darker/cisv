@@ -1,7 +1,7 @@
 'use strict';
 // direct node ./benchmark/benchmark.js
 // means you have to call from :../build/Release/cisv
-const { cisvParser } = require('../../build/Release/cisv');
+const { cisvParser } = require('../build/Release/cisv');
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');

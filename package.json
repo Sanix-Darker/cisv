@@ -42,7 +42,8 @@
     "parser",
     "fast",
     "simd",
-    "native"
+    "native",
+    "performance"
   ],
   "license": "MIT"
 }
