@@ -1,4 +1,4 @@
-name: release
+name: Release
 
 on:
   push:
@@ -11,138 +11,109 @@ permissions:
 env:
   VERSION: ${{ github.ref_name }}
 jobs:
-  build:
+  release:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest]
-        arch: [amd64, arm64]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            pkg_os: ubuntu
-            pkg_type: deb
+            asset_name: linux
+          - os: macos-latest
+            asset_name: macos
+          - os: windows-latest
+            asset_name: windows
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          # Only check out necessary files
-          sparse-checkout: |
-            cisv/
-            LICENSE
-            README.md
-            Makefile
-            package.json
-            binding.gyp
-          sparse-checkout-cone-mode: false
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '23.x'
+    - name: Build CLI
+      run: |
+        make cli
 
-      - name: Install build dependencies
-        shell: bash
-        run: |
-          npm install -g node-gyp node-addon-api
-          npm install
+    - name: Package CLI
+      run: |
+        mkdir -p dist
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          mv bin/cisv dist/cisv-${{ matrix.asset_name }}.exe
+        else
+          mv bin/cisv dist/cisv-${{ matrix.asset_name }}
+        fi
 
-      - name: Build CLI binary
-        shell: bash
-        run: |
-          OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-latest//')
-          ARCH="${{ matrix.arch }}"
-          EXT=""
-
-          # Build cisv with version info
-          npm install -g node-gyp
-          make clean
-          make build
-          CFLAGS="-DCISV_VERSION=\"${VERSION}\" -O3 -march=native" make cli
-
-          OUTPUT="cisv-${{ matrix.pkg_os }}-${ARCH}${EXT}"
-          mv cisv_bin "$OUTPUT"
-          echo "OUTPUT_FILE=$OUTPUT" >> $GITHUB_ENV
-
-      - name: Build Node.js addon
-        shell: bash
-        run: |
-          npm run build
-          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}${ARCH}.node"
-          cp build/Release/cisv.node "$ADDON_OUTPUT"
-          echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
-
-      - name: Create minimal package
-        shell: bash
-        run: |
-          # Create directory structure
-          mkdir -p cisv-package/cisv
-          mkdir -p cisv-package/bin
-
-          # Copy only necessary files
-          cp -r cisv/* cisv-package/cisv/
-          cp LICENSE cisv-package/
-          cp README.md cisv-package/
-          cp "$OUTPUT_FILE" cisv-package/bin/cisv
-
-          # Create tarball
-          tar czf cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz -C cisv-package .
-          echo "MINIMAL_PACKAGE=cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz" >> $GITHUB_ENV
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          files: |
-            ${{ env.OUTPUT_FILE }}
-            ${{ env.ADDON_FILE }}
-            ${{ env.MINIMAL_PACKAGE }}
-          generate_release_notes: true
+    - name: Upload Release Asset
+      uses: actions/upload-artifact@v4
+      with:
+        name: cisv-${{ matrix.asset_name }}
+        path: dist/cisv-${{ matrix.asset_name }}*
 
   publish-npm:
     runs-on: ubuntu-latest
-    needs: build
+    needs: release
     steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            cisv/
-            LICENSE
-            README.md
-            package.json
-            binding.gyp
-            index.d.ts
-            types/
-            build/Release/cisv.node
-            benchmark/
-            fixtures/data.csv
-          sparse-checkout-cone-mode: false
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '23.x'
-          registry-url: 'https://registry.npmjs.org'
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '23.x'
+        registry-url: 'https://registry.npmjs.org'
 
-      - name: Prepare npm package
-        run: |
-          # Create clean package structure
-          mkdir -p pkg
-          cp -r cisv benchmark fixtures/data.csv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
+    - name: Publish to npm
+      run: |
+        cd bindings/node
+        npm publish --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-          # Update package version
-          cd pkg
-          npm version ${VERSION#v} --no-git-tag-version
-          cd ..
+  publish-pypi:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Build and test
-        run: |
-          npm install
-          npm run build
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
 
-      - name: Publish to npm
-        run: |
-          cd pkg
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    - name: Publish to PyPI
+      run: |
+        cd bindings/python
+        python -m pip install --upgrade build twine
+        python -m build
+        python -m twine upload dist/*
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+  publish-php:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.3'
+
+    - name: Package PHP extension
+      run: |
+        cd bindings/php
+        phpize
+        ./configure
+        make
+        mkdir -p package
+        cp modules/cisv.so package/
+        cp LICENSE package/
+        tar -czf cisv-php.tar.gz package/
+
+    - name: Upload PHP extension
+      uses: actions/upload-artifact@v4
+      with:
+        name: cisv-php
+        path: bindings/php/cisv-php.tar.gz
