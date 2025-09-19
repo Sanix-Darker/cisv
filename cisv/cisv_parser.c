@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <time.h>
 #include <stdbool.h>
-#include <ctype.h>
 // NOTE: not dealing with windows for now, too much issues
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -14,7 +13,6 @@
 #include <getopt.h>
 #include <sys/time.h>
 #include "cisv_parser.h"
-#include "cisv_simd.h"
 
 #ifdef __AVX512F__
 #include <immintrin.h>
@@ -24,8 +22,7 @@
 #include <immintrin.h>
 #endif
 
-#define RINGBUF_SIZE (1 << 20) // 1 MiB (we may adjust according to needs)
-// #define RINGBUF_SIZE (1 << 16) // 64kb (for memory safe reasons)
+#define RINGBUF_SIZE (1 << 20) // 1 MiB
 #define PREFETCH_DISTANCE 256
 
 struct cisv_parser {
