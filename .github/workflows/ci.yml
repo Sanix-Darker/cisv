@@ -30,15 +30,20 @@ jobs:
           test_transform_leak_test.js
         sparse-checkout-cone-mode: false
 
+  npm-tests:
+    name: Npm Js Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
-    - run: npm install
-    - run: npm test
-    - name: Build
+    - name: Build And test
       run: |
-        npm run build
+        npm install
+        npm test
         npm run test:build
 
   c-tests:
