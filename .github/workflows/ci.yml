@@ -1,228 +1,349 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+
+env:
+  NODE_VERSION: '23.x'
+  CACHE_KEY_PREFIX: 'cisv-v1'
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest] # macos-latest, windows-latest # skipped for now
-        node-version: [23.x] # , 24.x (not at 22 LTS, but bearly at the latest)
+  # NOTE: reusable setup job for common dependencies
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache-keys.outputs.node }}
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        sparse-checkout: |
-          cisv/
-          LICENSE
-          README.md
-          package.json
-          package-lock.json
-          binding.gyp
-          tsconfig.json
-          tests/
-          fixtures/
-          examples/
-          types/
-          index.d.ts
-          test_transform.sh
-          test_transform_leak_test.js
-        sparse-checkout-cone-mode: false
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate cache keys
+        id: cache-keys
+        run: |
+          echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache node_modules
+        uses: actions/cache/save@v4
+        with:
+          path: node_modules
+          key: ${{ steps.cache-keys.outputs.node }}
 
   npm-tests:
-    name: Npm Js Tests
+    name: Node.js Tests
     runs-on: ubuntu-latest
+    needs: setup
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
-    - name: Build And test
-      run: |
-        npm install
-        npm test
-        npm run test:build
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Restore dependencies
+        uses: actions/cache/restore@v4
+        with:
+          path: node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Build and test
+        run: |
+          npm test
+          npm run test:build
 
   c-tests:
     name: C Native Tests
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake valgrind
-    - name: Run C test suite
-      run: make test-c
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  cli-build:
+      - name: Cache build tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt
+            /usr/include
+          key: ${{ env.CACHE_KEY_PREFIX }}-build-tools-${{ runner.os }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake valgrind
+
+      - name: Run C test suite
+        run: make test-c
+
+  # TODO: py-tests, php-tests(composer package),...
+
+  cli-build-test:
+    name: CLI Build & Test
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest] # macos-latest ignored for now
+        os: [ubuntu-latest] # will add macos-latest when ready
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        sparse-checkout: |
-          cisv/
-          LICENSE
-          README.md
-          package.json
-          package-lock.json
-          binding.gyp
-          Makefile
-        sparse-checkout-cone-mode: false
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Build CLI
-      run: |
-        npm install -g node-gyp
-        make clean
-        make build
-        make cli
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-    - name: Test CLI basic functionality
-      run: |
-        ./cisv_bin --version
-        ./cisv_bin --help
-        echo "id,name,value" > test.csv
-        echo "1,test,100" >> test.csv
-        echo "2,demo,200" >> test.csv
-        ./cisv_bin -c test.csv | grep -q "3" # including headers
-        ./cisv_bin test.csv
-        ./cisv_bin -s 0,2 test.csv
-        ./cisv_bin --head 1 test.csv
+      - name: Install node-gyp
+        run: npm install -g node-gyp
 
-    - name: Upload CLI binary
-      uses: actions/upload-artifact@v4
-      with:
-        name: cisv_bin-${{ matrix.os }}
-        path: cisv_bin
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/
+            cisv_bin
+          key: ${{ env.CACHE_KEY_PREFIX }}-cli-${{ matrix.os }}-${{ hashFiles('cisv/**', 'binding.gyp', 'Makefile') }}
 
+      - name: Build CLI
+        run: |
+          make clean
+          make build
+          make cli
+
+      - name: Create test CSV
+        run: |
+          cat > test.csv << 'EOF'
+          id,name,value
+          1,test,100
+          2,demo,200
+          EOF
+
+      - name: Test CLI functionality
+        run: |
+          ./cisv_bin --version
+          ./cisv_bin --help
+          test "$(./cisv_bin -c test.csv | tr -d '[:space:]')" = "3"
+          ./cisv_bin test.csv
+          ./cisv_bin -s 0,2 test.csv
+          ./cisv_bin --head 1 test.csv
+
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: cisv_bin-${{ matrix.os }}
+          path: cisv_bin
+          retention-days: 7
+
+  # memory checks (only on ubuntu)
   memory-check:
+    name: Memory Safety Tests
     runs-on: ubuntu-latest
-    needs: cli-build
+    needs: cli-build-test
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        sparse-checkout: |
-          cisv/
-          LICENSE
-          README.md
-          package.json
-          package-lock.json
-          binding.gyp
-          Makefile
-          test_select.sh
-          test_transform.sh
-          examples/
-          valgrind-node.supp
-          test_transform_leak_test.js
-        sparse-checkout-cone-mode: false
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install memory checking tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y valgrind cppcheck clang-tools
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-    - name: Build CLI with debug symbols
-      run: |
-        npm install -g node-gyp
-        make clean
-        make build
-        CFLAGS="-g -O0" make cli
+      - name: Install memory checking tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind cppcheck clang-tools
 
-    - name: Run memory leak tests with Valgrind
-      run: |
-        # Run with valgrind leak check
-        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose ./cisv_bin --version 2>&1 | tee valgrind-version.log
-        # Test basic CSV parsing
-        echo "id,name,value" > memtest.csv
-        echo "1,test,100" >> memtest.csv
-        echo "2,demo,200" >> memtest.csv
-        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./cisv_bin memtest.csv 2>&1 | tee valgrind-basic.log
-        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./cisv_bin -c memtest.csv 2>&1 | tee valgrind-count.log
-        valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./cisv_bin -s 0,2 memtest.csv 2>&1 | tee valgrind-select.log
-        # Check for memory leaks
-        ! grep -q "definitely lost" valgrind-*.log
-        ! grep -q "indirectly lost" valgrind-*.log
+      - name: Install node-gyp
+        run: npm install -g node-gyp
 
-    - name: Run memory deep leak tests on reader and writer
-      run: |
-        chmod +x test_select.sh
-        bash ./test_select.sh
+      - name: Build with debug symbols
+        run: |
+          make clean
+          make build
+          CFLAGS="-g -O0" make cli
 
-    - name: Run memory deep leak tests on transform
-      run: |
-        chmod +x test_transform.sh
-        bash ./test_transform.sh
+      - name: Create test data
+        run: |
+          cat > memtest.csv << 'EOF'
+          id,name,value
+          1,test,100
+          2,demo,200
+          EOF
+          cat > test_x.csv << 'EOF'
+          id,name,value,x
+          1,test,100,a
+          2,demo,200,b
+          EOF
 
-    - name: Run AddressSanitizer tests
-      run: |
-        make clean
-        CC=clang CFLAGS="-g -O0 -fsanitize=address -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address" make cli
-        ./cisv_bin --version
-        echo "id,name,value,x" > test_x.csv
-        echo "1,test,100,a" >> test_x.csv
-        echo "2,demo,200,b" >> test_x.csv
-        ./cisv_bin -c test_x.csv
-        ./cisv_bin -s 0,2,3 test_x.csv
+      - name: Run Valgrind tests
+        run: |
+          set -e
+          valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+            --verbose --log-file=valgrind-version.log ./cisv_bin --version
 
-    - name: Upload memory check results
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: memory-check-logs
-        path: valgrind-*.log
+          valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+            --log-file=valgrind-basic.log ./cisv_bin memtest.csv
 
-#benchmark:
-#  runs-on: ubuntu-latest
-#  needs: [build, cli-build, memory-check]
-#  steps:
-#  - uses: actions/checkout@v4
-#  - uses: actions/setup-node@v3
-#    with:
-#      node-version: 23.x
-#  - name: Install benchmark dependencies
-#    run: |
-#      sudo apt-get update
-#      sudo apt-get install -y miller bc time
-#      pip3 install --upgrade pip
-#      pip3 install 'babel>=2.9.0' 'csvkit>=1.1.0'
-#  - name: Install Rust tools
-#    uses: actions-rs/toolchain@v1
-#    with:
-#      toolchain: stable
-#      override: true
-#  - name: Install xsv and qsv
-#    run: |
-#      cargo install xsv
-#      cargo install qsv
-#  - name: Build cisv CLI
-#    run: |
-#      make clean
-#      make cli
-#  - name: Run Node.js benchmarks
-#    run: |
-#      npm install
-#      npm run benchmark
-#  - name: Run CLI benchmarks
-#    run: |
-#      make benchmark-cli
-#  - name: Generate benchmark report
-#    run: |
-#      echo "## Benchmark Results" > benchmark-report.md
-#      echo "Date: $(date)" >> benchmark-report.md
-#      echo "Commit: ${{ github.sha }}" >> benchmark-report.md
-#      echo "" >> benchmark-report.md
-#      make benchmark-cli >> benchmark-report.md 2>&1
-#  - name: Upload benchmark results
-#    uses: actions/upload-artifact@v3
-#    with:
-#      name: benchmark-results
-#      path: benchmark-report.md
+          valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+            --log-file=valgrind-count.log ./cisv_bin -c memtest.csv
+
+          valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+            --log-file=valgrind-select.log ./cisv_bin -s 0,2 memtest.csv
+
+      - name: Check for memory leaks
+        run: |
+          ! grep -q "definitely lost" valgrind-*.log
+          ! grep -q "indirectly lost" valgrind-*.log
+
+      - name: Run deep leak tests
+        run: |
+          chmod +x test_select.sh test_transform.sh
+          bash ./test_select.sh
+          bash ./test_transform.sh
+
+      - name: Run AddressSanitizer tests
+        run: |
+          make clean
+          CC=clang \
+            CFLAGS="-g -O0 -fsanitize=address -fno-omit-frame-pointer" \
+            LDFLAGS="-fsanitize=address" \
+            make cli
+
+          ./cisv_bin --version
+          ./cisv_bin -c test_x.csv
+          ./cisv_bin -s 0,2,3 test_x.csv
+
+      - name: Upload memory check logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-check-logs
+          path: |
+            valgrind-*.log
+            *.log
+          retention-days: 30
+
+  # Optional: Benchmark job (uncomment when ready)
+  # benchmark:
+  #   name: Performance Benchmarks
+  #   runs-on: ubuntu-latest
+  #   needs: [npm-tests, cli-build-test, memory-check]
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: ${{ env.NODE_VERSION }}
+  #
+  #     - name: Restore dependencies
+  #       uses: actions/cache/restore@v4
+  #       with:
+  #         path: node_modules
+  #         key: ${{ needs.setup.outputs.cache-key }}
+  #
+  #     - name: Setup Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.x'
+  #         cache: 'pip'
+  #
+  #     - name: Install system dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y miller bc time
+  #
+  #     - name: Install Python tools
+  #       run: pip3 install 'babel>=2.9.0' 'csvkit>=1.1.0'
+  #
+  #     - name: Setup Rust
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         components: rustfmt, clippy
+  #
+  #     - name: Cache Rust dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #         key: ${{ env.CACHE_KEY_PREFIX }}-rust-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+  #
+  #     - name: Install Rust tools
+  #       run: |
+  #         command -v xsv >/dev/null 2>&1 || cargo install xsv
+  #         command -v qsv >/dev/null 2>&1 || cargo install qsv
+  #
+  #     - name: Build CLI
+  #       run: |
+  #         make clean
+  #         make cli
+  #
+  #     - name: Run benchmarks
+  #       run: |
+  #         npm run benchmark
+  #         make benchmark-cli
+  #
+  #     - name: Generate benchmark report
+  #       run: |
+  #         {
+  #           echo "## Benchmark Results"
+  #           echo "Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+  #           echo "Commit: ${{ github.sha }}"
+  #           echo "Branch: ${{ github.ref_name }}"
+  #           echo ""
+  #           make benchmark-cli
+  #         } > benchmark-report.md
+  #
+  #     - name: Upload benchmark results
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: benchmark-results
+  #         path: benchmark-report.md
+  #         retention-days: 90
+  #
+  #     - name: Comment PR with results
+  #       if: github.event_name == 'pull_request'
+  #       uses: actions/github-script@v7
+  #       with:
+  #         script: |
+  #           const fs = require('fs');
+  #           const report = fs.readFileSync('benchmark-report.md', 'utf8');
+  #           github.rest.issues.createComment({
+  #             issue_number: context.issue.number,
+  #             owner: context.repo.owner,
+  #             repo: context.repo.repo,
+  #             body: report
+  #           });
+
+  # status check on job
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [npm-tests, c-tests, cli-build-test, memory-check]
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          elif [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more jobs were cancelled"
+            exit 1
+          else
+            echo "All jobs succeeded"
+          fi
