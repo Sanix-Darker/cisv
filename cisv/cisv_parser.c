@@ -22,7 +22,8 @@
 #include <immintrin.h>
 #endif
 
-#define RINGBUF_SIZE (1 << 20) // 1 MiB
+#define RINGBUF_SIZE (256 * 1024)
+#define DIRECT_PARSE_THRESHOLD (64 * 1024)  // Parse directly if chunk > 64KB
 #define PREFETCH_DISTANCE 256
 
 struct cisv_parser {
@@ -491,6 +492,8 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
                 // Handle newline
                 if (is_newline) {
                     yield_row(parser);
+                    parser->current_row_size = 0;
+                    parser->row_start = special_pos + 1;
                 }
 
                 // Update state branchlessly
@@ -783,6 +786,7 @@ static void parse_simd_chunk(cisv_parser *parser, const uint8_t *buffer, size_t 
         if (action & ACT_ROW) {
             yield_row(parser);
             parser->current_row_size = 0;
+            parser->row_start = cur + 1;
         }
 
         cur += 1 - ((action & ACT_REPROCESS) >> 2);
@@ -805,6 +809,7 @@ static int parse_memory(cisv_parser *parser, const uint8_t *buffer, size_t len) 
         // Yield final row if there's content
         if (parser->field_start > parser->row_start || !parser->skip_empty_lines) {
             yield_row(parser);
+            parser->current_row_size = 0;
         }
     }
     return 0;
@@ -1022,24 +1027,36 @@ int cisv_parser_parse_file(cisv_parser *parser, const char *path) {
 }
 
 int cisv_parser_write(cisv_parser *parser, const uint8_t *chunk, size_t len) {
-    if (!parser || !chunk || len >= RINGBUF_SIZE) return -EINVAL;
+    if (!parser || !chunk) return -EINVAL;
 
-    // Branchless overflow handling
-    size_t overflow = (parser->head + len > RINGBUF_SIZE);
-    if (overflow) {
-        parse_memory(parser, parser->ring, parser->head);
-        parser->head = 0;
+    // For large chunks, bypass ring buffer entirely
+    if (len > DIRECT_PARSE_THRESHOLD) {
+        // Parse directly - this is actually FASTER for large data
+        return parse_memory(parser, chunk, len);
+    }
+
+    // Small chunks use ring buffer for efficiency
+    if (parser->head + len > RINGBUF_SIZE) {
+        // Flush current buffer
+        if (parser->head > 0) {
+            parse_memory(parser, parser->ring, parser->head);
+            parser->head = 0;
+        }
+
+        // If still too large, parse directly
+        if (len > RINGBUF_SIZE) {
+            return parse_memory(parser, chunk, len);
+        }
     }
 
     memcpy(parser->ring + parser->head, chunk, len);
     parser->head += len;
 
-    // Check for newline or buffer threshold
-    uint8_t has_newline = (memchr(chunk, '\n', len) != NULL);
-    uint8_t threshold = (parser->head > (RINGBUF_SIZE / 2));
-    if (has_newline | threshold) {
-        parse_memory(parser, parser->ring, parser->head);
+    // Process on newline or when buffer is getting full
+    if (memchr(chunk, '\n', len) || parser->head > (RINGBUF_SIZE * 3 / 4)) {
+        int result = parse_memory(parser, parser->ring, parser->head);
         parser->head = 0;
+        return result;
     }
     return 0;
 }
