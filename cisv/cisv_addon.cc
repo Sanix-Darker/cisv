@@ -174,6 +174,8 @@ public:
         // Initialize configuration with defaults
         cisv_config_init(&config_);
 
+        config_.max_row_size = 0;
+
         // Handle constructor options if provided
         if (info.Length() > 0 && info[0].IsObject()) {
             Napi::Object options = info[0].As<Napi::Object>();
@@ -261,7 +263,10 @@ public:
 
         // Numeric options
         if (options.Has("maxRowSize")) {
-            config_.max_row_size = options.Get("maxRowSize").As<Napi::Number>().Uint32Value();
+            Napi::Value val = options.Get("maxRowSize");
+            if (!val.IsNull() && !val.IsUndefined()) {
+                config_.max_row_size = val.As<Napi::Number>().Uint32Value();
+            }
         }
 
         if (options.Has("fromLine")) {
