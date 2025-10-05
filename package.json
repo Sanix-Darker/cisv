@@ -1,10 +1,16 @@
 {
   "name": "cisv",
   "version": "0.0.7",
-  "description": "The fastest csv parser of the multiverse",
+  "description": "The csv parser on steroids.",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
   "types": "./types/cisv.d.ts",
+  "exports": {
+    ".": {
+      "import": "./cisv/index.mjs",
+      "require": "./cisv/index.js"
+    }
+  },
   "scripts": {
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
@@ -20,7 +26,8 @@
     "test:perf": "node test/performance.test.js"
   },
   "dependencies": {
-    "node-addon-api": "^5.0.0"
+    "node-addon-api": "^5.0.0",
+    "node-gyp-build": "^4.8.4"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
