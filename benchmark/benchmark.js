@@ -6,6 +6,7 @@ const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');
 const fastCsv = require('fast-csv');
+const { inferSchema, initParser } = require('udsv');
 const fs = require('fs');
 const { Suite } = require('benchmark');
 const stream = require('stream');
@@ -90,6 +91,11 @@ async function runAllBenchmarks() {
           .add('papaparse (sync)', () => {
             Papa.parse(fileString, { fastMode: true });
           })
+          .add('udsv (sync)', () => {
+            const schema = inferSchema(fileString);
+            const parser = initParser(schema);
+            parser.stringArrs(fileString);
+          })
           .on('cycle', (event) => logCycle(event, 'sync'))
           .on('error', reject)
           .on('complete', function() {
@@ -121,6 +127,12 @@ async function runAllBenchmarks() {
           .add('papaparse (sync)', () => {
             const result = Papa.parse(fileString, { fastMode: true });
             const specificRow = result.data[TARGET_ROW_INDEX];
+          })
+          .add('udsv (sync)', () => {
+            const schema = inferSchema(fileString);
+            const parser = initParser(schema);
+            const rows = parser.stringArrs(fileString);
+            const specificRow = rows[TARGET_ROW_INDEX];
           })
           .on('cycle', (event) => logCycle(event, 'sync_data'))
           .on('error', reject)
@@ -168,6 +180,18 @@ async function runAllBenchmarks() {
               });
             }
           })
+          .add('fast-csv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const rows = [];
+              const readable = stream.Readable.from(fileBuffer);
+              readable
+                .pipe(fastCsv.parse({ headers: true }))
+                .on('data', (row) => rows.push(row))
+                .on('end', () => deferred.resolve())
+                .on('error', (err) => deferred.reject(err));
+            }
+          })
           .add('neat-csv (async/promise)', {
             defer: true,
             fn: (deferred) => {
@@ -176,6 +200,30 @@ async function runAllBenchmarks() {
                     deferred.resolve()
                 })
                 .catch((err) => deferred.reject(err));
+            }
+          })
+          .add('udsv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const readable = stream.Readable.from(fileString);
+              let parser = null;
+
+              readable
+                .on('data', (chunk) => {
+                  const strChunk = chunk.toString();
+                  if (parser == null) {
+                    const schema = inferSchema(strChunk);
+                    parser = initParser(schema);
+                  }
+                  parser.chunk(strChunk);
+                })
+                .on('end', () => {
+                  if (parser != null) {
+                    parser.end();
+                  }
+                  deferred.resolve();
+                })
+                .on('error', (err) => deferred.reject(err));
             }
           })
           .on('cycle', (event) => logCycle(event, 'async'))
@@ -227,6 +275,21 @@ async function runAllBenchmarks() {
               });
             }
           })
+          .add('fast-csv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const rows = [];
+              const readable = stream.Readable.from(fileBuffer);
+              readable
+                .pipe(fastCsv.parse({ headers: true }))
+                .on('data', (row) => rows.push(row))
+                .on('end', () => {
+                  const specificRow = rows[TARGET_ROW_INDEX];
+                  deferred.resolve();
+                })
+                .on('error', (err) => deferred.reject(err));
+            }
+          })
           .add('neat-csv (async/promise)', {
             defer: true,
             fn: (deferred) => {
@@ -236,6 +299,32 @@ async function runAllBenchmarks() {
                     deferred.resolve()
                 })
                 .catch((err) => deferred.reject(err));
+            }
+          })
+          .add('udsv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const readable = stream.Readable.from(fileString);
+              let parser = null;
+              let result = null;
+
+              readable
+                .on('data', (chunk) => {
+                  const strChunk = chunk.toString();
+                  if (!parser) {
+                    const schema = inferSchema(strChunk);
+                    parser = initParser(schema);
+                  }
+                  parser.chunk(strChunk, parser.stringArrs);
+                })
+                .on('end', () => {
+                  if (parser) {
+                    result = parser.end();
+                    const specificRow = result[TARGET_ROW_INDEX];
+                  }
+                  deferred.resolve();
+                })
+                .on('error', (err) => deferred.reject(err));
             }
           })
           .on('cycle', (event) => logCycle(event, 'async_data'))
