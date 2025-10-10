@@ -5,6 +5,9 @@
 ![Size](https://deno.bundlejs.com/badge?q=spring-easing)
 ![Downloads](https://badgen.net/npm/dw/cisv)
 
+> # DISCLAIMER
+>
+> This csv parser does not covers all quotes/comments edge cases, it is meant for now to be just extremly fast, thus not PROD ready yet.
 
 Cisv is a csv parser on steroids... literally.
 It's a high-performance CSV parser/writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
