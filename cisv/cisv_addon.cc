@@ -476,7 +476,8 @@ public:
         if (!is_destroyed_) {
             cisv_parser_end(parser_);
             // Clear the environment reference after ending
-            rc_->env = nullptr;
+            // FIXME: the transformer may need this
+            // rc_->env = nullptr;
         }
     }
 
