@@ -207,20 +207,18 @@ async function runAllBenchmarks() {
             fn: (deferred) => {
               const readable = stream.Readable.from(fileString);
               let parser = null;
-              let chunks = '';
 
               readable
                 .on('data', (chunk) => {
                   const strChunk = chunk.toString();
-                  chunks += strChunk;
-                  if (!parser) {
+                  if (parser == null) {
                     const schema = inferSchema(strChunk);
                     parser = initParser(schema);
                   }
-                  parser.chunk(strChunk, parser.stringArrs);
+                  parser.chunk(strChunk);
                 })
                 .on('end', () => {
-                  if (parser) {
+                  if (parser != null) {
                     parser.end();
                   }
                   deferred.resolve();
