@@ -248,37 +248,30 @@ jobs:
         run: |
           bash scripts/generate_test_data.sh --all --fixtures
 
+      - name: Checkout fresh
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
       - name: Run benchmarks
         run: |
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
-          rm -rf ./BENCHMARKS.md
           make clean && make build && make cli
           bash scripts/run_benchmarks.sh
           cat ./BENCHMARKS.md
 
-      - name: Commit and push benchmark results
+      - name: Commit and force push
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
 
-          git fetch origin ${{ github.head_ref }}
-          git add BENCHMARKS.md || true
-
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git commit -m "Update benchmark results [skip ci]"
-          git stash
-          # Pull with rebase to get latest changes
-          git pull --rebase origin ${{ github.head_ref }} || {
-            echo "Rebase failed, trying merge strategy"
-            git rebase --abort 2>/dev/null || true
-            git pull origin ${{ github.head_ref }} --no-rebase
-          }
-          git push origin HEAD:${{ github.head_ref }}
+          # Just add, commit and force push - don't try to merge anything
+          git add BENCHMARKS.md
+          git commit -m "Update benchmark results [skip ci]" || exit 0
+          git push --force origin ${{ github.event.pull_request.head.ref }}
 
       - name: Push changes
         uses: ad-m/github-push-action@master
