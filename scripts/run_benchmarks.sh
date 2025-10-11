@@ -34,6 +34,8 @@ if npm run benchmark-js > benchmark-js-output.txt 2>&1; then
     echo "\n"
     cat ./benchmark-js-output.txt > $OUTPUT_FILE
 else
+    cat ./benchmark-js-output.txt
+    echo "\n----\n\n"
     echo "JavaScript benchmarks failed, see benchmark-js-output.txt for details" >> "$OUTPUT_FILE"
 fi
 
@@ -47,6 +49,8 @@ if bash ./benchmark_cli.sh > benchmark-cli-output.txt 2>&1; then
     echo "\n"
     cat ./benchmark-cli-output.txt > $OUTPUT_FILE
 else
+    cat ./benchmark-cli-output.txt
+    echo "\n----\n\n"
     echo "CLI benchmarks failed, see benchmark-cli-output.txt for details" >> "$OUTPUT_FILE"
 fi
 
