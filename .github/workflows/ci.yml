@@ -253,6 +253,7 @@ jobs:
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
           rm -rf ./BENCHMARKS.md
+          make clean && make build && make cli
           bash scripts/run_benchmarks.sh
           cat ./BENCHMARKS.md
 
@@ -270,7 +271,7 @@ jobs:
           fi
 
           git commit -m "Update benchmark results [skip ci]"
-
+          git stash
           # Pull with rebase to get latest changes
           git pull --rebase origin ${{ github.head_ref }} || {
             echo "Rebase failed, trying merge strategy"
