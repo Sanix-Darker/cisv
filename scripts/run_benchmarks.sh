@@ -21,14 +21,8 @@ echo "## JavaScript Library Benchmarks" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 
 if npm run benchmark-js > benchmark-js-output.txt 2>&1; then
-    # Extract sorted tables from output
-    sed -n '/### Synchronous Results (sorted by speed/,/^$/p' benchmark-js-output.txt >> "$OUTPUT_FILE" || true
-    echo "" >> "$OUTPUT_FILE"
-    sed -n '/### Synchronous Results (with data access - sorted by speed)/,/^$/p' benchmark-js-output.txt >> "$OUTPUT_FILE" || true
-    echo "" >> "$OUTPUT_FILE"
-    sed -n '/### Asynchronous Results (sorted by speed/,/^$/p' benchmark-js-output.txt >> "$OUTPUT_FILE" || true
-    echo "" >> "$OUTPUT_FILE"
-    sed -n '/### Asynchronous Results (with data access - sorted by speed)/,/^$/p' benchmark-js-output.txt >> "$OUTPUT_FILE" || true
+    echo "\n"
+    cat ./benchmark-js-output.txt > $OUTPUT_FILE
 else
     echo "JavaScript benchmarks failed, see benchmark-js-output.txt for details" >> "$OUTPUT_FILE"
 fi
@@ -40,10 +34,8 @@ echo "## CLI Tool Benchmarks" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 
 if bash ./benchmark_cli.sh > benchmark-cli-output.txt 2>&1; then
-    # Extract sorted results
-    sed -n '/Sorted by Speed/,/Sorted by Operations\|^$/p' benchmark-cli-output.txt >> "$OUTPUT_FILE" || true
-    echo "" >> "$OUTPUT_FILE"
-    sed -n '/Sorted by Operations/,/^===/p' benchmark-cli-output.txt | grep -v "===" >> "$OUTPUT_FILE" || true
+    echo "\n"
+    cat ./benchmark-cli-output.txt > $OUTPUT_FILE
 else
     echo "CLI benchmarks failed, see benchmark-cli-output.txt for details" >> "$OUTPUT_FILE"
 fi
