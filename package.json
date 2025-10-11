@@ -26,6 +26,8 @@
     "test:perf": "node test/performance.test.js"
   },
   "dependencies": {
+    "but-csv": "^2.0.14",
+    "d3-dsv": "^3.0.1",
     "node-addon-api": "^5.0.0",
     "node-gyp-build": "^4.8.4",
     "udsv": "^0.7.3"
