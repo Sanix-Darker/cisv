@@ -306,6 +306,14 @@ for size in "small" "medium" "large" "xlarge"; do
     echo -n "| $(printf '%-10s' "$size.csv") | "
     ./cisv_bin -b "$size.csv" | tail -1 | awk '{printf "%12s | %13s | %14s |\n", $3, $5, $7}'
 done
+echo ""
+
+# Generate final summary report
+echo -e "${GREEN}=== Final Summary Report ===${NC}\n"
+echo "This benchmark compared the performance of various CSV processing tools."
+echo "The tests included row counting and column selection operations on files"
+echo "ranging from 1K to 10M rows."
+echo ""
 
 # Cleanup
 echo -e "${YELLOW}Cleaning up test files...${NC}"
