@@ -20,6 +20,16 @@ echo "Running JavaScript benchmarks..."
 echo "## JavaScript Library Benchmarks" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 
+# Check if fixtures exist
+if [ ! -f "fixtures/data.csv" ]; then
+    echo "Creating fixtures/data.csv..."
+    mkdir -p fixtures
+    echo "id,name,value" > fixtures/data.csv
+    for i in {1..10000}; do
+        echo "$i,test_$i,$((i*10))" >> fixtures/data.csv
+    done
+fi
+
 if npm run benchmark-js > benchmark-js-output.txt 2>&1; then
     echo "\n"
     cat ./benchmark-js-output.txt > $OUTPUT_FILE
