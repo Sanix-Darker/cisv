@@ -6,7 +6,7 @@ set -e
 OUTPUT_FILE="BENCHMARKS.md"
 
 # Initialize markdown file
-echo "## 📊 Benchmark Results" > "$OUTPUT_FILE"
+echo "## Benchmark Results" > "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$OUTPUT_FILE"
 echo "**Commit:** ${GITHUB_SHA:-unknown}" >> "$OUTPUT_FILE"

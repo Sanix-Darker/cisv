@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  push:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
@@ -207,7 +206,7 @@ jobs:
     needs: [setup, cli-build-test]
     if: |
       github.event_name == 'pull_request' &&
-      contains(github.event.pull_request.labels.*.name, 'benchmark')
+      contains(github.event.pull_request.labels.*.name, 'benchmarks')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
