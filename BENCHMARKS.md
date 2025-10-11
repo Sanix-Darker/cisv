@@ -1,9 +1,18 @@
-[0;34m=== CSV CLI Tools Benchmark ===[0m
+## Benchmark Results
 
-[0;31mWarning: small.csv not found, skipping...[0m
-[0;31mWarning: medium.csv not found, skipping...[0m
-[0;31mWarning: large.csv not found, skipping...[0m
-[0;32mBenchmark complete![0m
+**Date:** 2025-10-11 12:00:01 UTC
+**Commit:** a7d9db55fc74a6fc2bb302a03bf15eedfe7fc0fe
+**Branch:** 52/merge
 
 ---
-_Benchmarks completed at 2025-10-11 11:47:37 UTC_
+
+## JavaScript Library Benchmarks
+
+JavaScript benchmarks failed, see benchmark-js-output.txt for details
+
+## CLI Tool Benchmarks
+
+CLI benchmarks failed, see benchmark-cli-output.txt for details
+
+---
+_Benchmarks completed at 2025-10-11 12:00:02 UTC_
