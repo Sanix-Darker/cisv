@@ -252,35 +252,32 @@ jobs:
         run: |
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
+          rm -rf ./BENCHMARKS.md
           bash scripts/run_benchmarks.sh
+          cat ./BENCHMARKS.md
 
       - name: Commit and push benchmark results
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Fetch the latest changes from the PR branch
           git fetch origin ${{ github.head_ref }}
-
-          # Check if there are changes to commit
           git add BENCHMARKS.md || true
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
-          else
-            # Commit the changes
-            git commit -m "Update benchmark results [skip ci]"
-
-            # Pull with rebase to get latest changes
-            git pull --rebase origin ${{ github.head_ref }} || {
-              echo "Rebase failed, trying merge strategy"
-              git rebase --abort 2>/dev/null || true
-              git pull origin ${{ github.head_ref }} --no-rebase
-            }
-
-            # Push the changes
-            git push origin HEAD:${{ github.head_ref }}
+            exit 0
           fi
+
+          git commit -m "Update benchmark results [skip ci]"
+
+          # Pull with rebase to get latest changes
+          git pull --rebase origin ${{ github.head_ref }} || {
+            echo "Rebase failed, trying merge strategy"
+            git rebase --abort 2>/dev/null || true
+            git pull origin ${{ github.head_ref }} --no-rebase
+          }
+          git push origin HEAD:${{ github.head_ref }}
 
       - name: Push changes
         uses: ad-m/github-push-action@master
