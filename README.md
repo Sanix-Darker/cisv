@@ -36,41 +36,47 @@ $ docker run --rm      \
 ## BENCHMARKS
 
 Benchmarks comparison with existing popular tools,
-cf pipeline you can check : (https://github.com/Sanix-Darker/cisv/actions/runs/17697547058/job/50298916576) a step "Publish to npm"
+cf pipeline you can check : (https://github.com/Sanix-Darker/cisv/actions/runs/18422464917/job/52498590205) at step "Publish to npm".
 
 ### SYNCHRONOUS RESULTS
 
 | Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 45.58        | 0.01          | 98543          |
-| csv-parse (sync)   | 18.11        | 0.03          | 39155          |
-| papaparse (sync)   | 28.03        | 0.02          | 60596          |
+| cisv (sync)        | 71.10        | 0.01          | 153723         |
+| csv-parse (sync)   | 18.76        | 0.02          | 40563          |
+| papaparse (sync)   | 27.97        | 0.02          | 60467          |
+| udsv (sync)        | 69.81        | 0.01          | 150930         |
+| d3-dsv (sync)      | 98.11        | 0.00          | 212117         |
 
 ### SYNCHRONOUS RESULTS (WITH DATA ACCESS)
 
 | Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 46.80        | 0.01          | 101185         |
-| csv-parse (sync)   | 18.92        | 0.02          | 40900          |
-| papaparse (sync)   | 28.38        | 0.02          | 61363          |
-
+| cisv (sync)        | 104.58       | 0.00          | 226108         |
+| csv-parse (sync)   | 16.87        | 0.03          | 36482          |
+| papaparse (sync)   | 28.13        | 0.02          | 60807          |
+| udsv (sync)        | 69.29        | 0.01          | 149812         |
+| d3-dsv (sync)      | 96.32        | 0.00          | 208248         |
 
 ### ASYNCHRONOUS RESULTS
 
 | Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 70.07        | 0.01          | 151485         |
-| papaparse (async/stream) | 21.58        | 0.02          | 46646          |
-| neat-csv (async/promise) | 9.77         | 0.05          | 21126          |
-
+| cisv (async/stream)      | 98.36        | 0.00          | 212662         |
+| papaparse (async/stream) | 21.56        | 0.02          | 46609          |
+| fast-csv (async/stream)  | 10.09        | 0.05          | 21817          |
+| neat-csv (async/promise) | 9.20         | 0.05          | 19898          |
+| udsv (async/stream)      | 51.74        | 0.01          | 111858         |
 
 ### ASYNCHRONOUS RESULTS (WITH DATA ACCESS)
 
 | Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 25.23        | 0.02          | 54545          |
-| papaparse (async/stream) | 22.49        | 0.02          | 48622          |
-| neat-csv (async/promise) | 9.91         | 0.05          | 21428          |
+| cisv (async/stream)      | 27.50        | 0.02          | 59460          |
+| papaparse (async/stream) | 21.98        | 0.02          | 47513          |
+| fast-csv (async/stream)  | 10.05        | 0.05          | 21719          |
+| neat-csv (async/promise) | 9.58         | 0.05          | 20711          |
+| udsv (async/stream)      | 53.26        | 0.01          | 115146         |
 
 ## INSTALLATION
 
