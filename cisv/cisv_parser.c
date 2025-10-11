@@ -9,6 +9,8 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/time.h>  // For gettimeofday
+#include <getopt.h>    // For getopt_long
 
 #ifdef __AVX512F__
 #include <immintrin.h>
