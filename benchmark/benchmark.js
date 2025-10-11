@@ -1,12 +1,14 @@
 'use strict';
 // direct node ./benchmark/benchmark.js
 // means you have to call from :../build/Release/cisv
-const { cisvParser } = require('../../build/Release/cisv');
+const { cisvParser } = require('../build/Release/cisv');
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');
 const fastCsv = require('fast-csv');
 const { inferSchema, initParser } = require('udsv');
+const d3 = require('d3-dsv');
+// const { iter } = require('but-csv');
 const fs = require('fs');
 const { Suite } = require('benchmark');
 const stream = require('stream');
@@ -96,6 +98,12 @@ async function runAllBenchmarks() {
             const parser = initParser(schema);
             parser.stringArrs(fileString);
           })
+          .add('d3-dsv (sync)', () => {
+            d3.csvParse(fileString);
+          })
+          // .add('but-csv (sync)', () => {
+          //   Array.from(iter(fileString));
+          // })
           .on('cycle', (event) => logCycle(event, 'sync'))
           .on('error', reject)
           .on('complete', function() {
@@ -134,6 +142,14 @@ async function runAllBenchmarks() {
             const rows = parser.stringArrs(fileString);
             const specificRow = rows[TARGET_ROW_INDEX];
           })
+          .add('d3-dsv (sync)', () => {
+            const rows = d3.csvParse(fileString);
+            const specificRow = rows[TARGET_ROW_INDEX];
+          })
+          //.add('but-csv (sync)', () => {
+          //  const rows = Array.from(iter(fileString));
+          //  const specificRow = rows[TARGET_ROW_INDEX];
+          //})
           .on('cycle', (event) => logCycle(event, 'sync_data'))
           .on('error', reject)
           .on('complete', function() {
@@ -226,6 +242,8 @@ async function runAllBenchmarks() {
                 .on('error', (err) => deferred.reject(err));
             }
           })
+          // Note: d3-dsv and but-csv don't have native async streaming support
+          // so they are only included in sync benchmarks
           .on('cycle', (event) => logCycle(event, 'async'))
           .on('error', reject)
           .on('complete', function() {
