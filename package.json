@@ -43,7 +43,7 @@
     "neat-csv": "^7.0.0",
     "nyc": "^17.1.0",
     "papaparse": "^5.5.3",
-    "ts-mocha": "^10.1.0",
+    "ts-mocha": "^11.1.0",
     "typescript": "^5.8.3"
   },
   "gypfile": true,
