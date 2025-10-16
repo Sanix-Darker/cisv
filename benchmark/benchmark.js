@@ -362,6 +362,7 @@ async function runAllBenchmarks() {
         const opsPerSec = event.target.hz;
         const speedMBps = (fileSizeMB * opsPerSec);
 
+        console.log('```');
         const resultLine = `  ${String(event.target)}\n    Speed: ${speedMBps.toFixed(2)} MB/s | Avg Time: ${(meanTime * 1000).toFixed(2)} ms | Ops/sec: ${opsPerSec.toFixed(0)}`;
         console.log(resultLine);
 
@@ -373,6 +374,7 @@ async function runAllBenchmarks() {
         });
 
         console.log('    (cooling down...)\n');
+        console.log('```');
     }
 
     function generateMarkdownReport() {

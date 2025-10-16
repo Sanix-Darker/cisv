@@ -196,6 +196,8 @@ benchmark() {
     local total_time=0
     local successful_runs=0
 
+    print_msg "$RED" "\`\`\`"
+    print_msg "$RED" ""
     for i in $(seq 1 $ITERATIONS); do
         local start_time=$(date +%s.%N 2>/dev/null || date +%s)
         local temp_output=$(mktemp)
@@ -235,6 +237,8 @@ benchmark() {
             print_msg "$RED" "  Run $i failed with exit code $exit_status"
         fi
     done
+    print_msg "$RED" ""
+    print_msg "$RED" "\`\`\`"
 
     if [ $successful_runs -eq 0 ]; then
         print_msg "$RED" "  All runs failed for $name"
@@ -264,64 +268,6 @@ benchmark() {
     RESULT_COUNT=$((RESULT_COUNT + 1))
 }
 
-display_sorted_results() {
-    local test_name=$1
-    print_msg "$GREEN" "\n=== Sorted Results: $test_name ==="
-
-    if [ ${RESULT_COUNT:-0} -eq 0 ]; then
-        print_msg "$YELLOW" "No results to display"
-        return
-    fi
-
-    local temp_file=$(mktemp)
-    trap "rm -f $temp_file" EXIT
-
-    # Store all data fields separated by pipe
-    for i in $(seq 0 $((RESULT_COUNT - 1))); do
-        # Safely access array elements with default values
-        local speed="${BENCH_SPEEDS[$i]:-0}"
-        local time="${BENCH_TIMES[$i]:-0}"
-        local ops="${BENCH_OPS[$i]:-0}"
-        local name="${BENCH_NAMES[$i]:-unknown}"
-        echo "${speed}|${time}|${ops}|${name}" >> "$temp_file"
-    done
-
-    # Sort by Speed (MB/s) - Fastest First
-    print_msg "$YELLOW" "\nSorted by Speed (MB/s) - Fastest First:"
-    printf "| %-20s | %-12s | %-12s | %-14s |\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
-    printf "|%-22s|%-14s|%-14s|%-16s|\n" "----------------------" "--------------" "--------------" "----------------"
-
-    sort -t'|' -k1 -rn "$temp_file" | while IFS='|' read -r speed time ops name; do
-        speed=$(printf "%.2f" "$speed" 2>/dev/null || echo "0.00")
-        time=$(printf "%.4f" "$time" 2>/dev/null || echo "0.0000")
-        ops=$(printf "%.2f" "$ops" 2>/dev/null || echo "0.00")
-        printf "| %-20s | %12s | %12s | %14s |\n" "$name" "$speed" "$time" "$ops"
-    done
-
-    echo ""  # Empty line between tables
-
-    # Sort by Operations/sec - Most Operations First
-    print_msg "$YELLOW" "\nSorted by Operations/sec - Most Operations First:"
-    printf "| %-20s | %-12s | %-12s | %-14s |\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
-    printf "|%-22s|%-14s|%-14s|%-16s|\n" "----------------------" "--------------" "--------------" "----------------"
-
-    sort -t'|' -k3 -rn "$temp_file" | while IFS='|' read -r speed time ops name; do
-        speed=$(printf "%.2f" "$speed" 2>/dev/null || echo "0.00")
-        time=$(printf "%.4f" "$time" 2>/dev/null || echo "0.0000")
-        ops=$(printf "%.2f" "$ops" 2>/dev/null || echo "0.00")
-        printf "| %-20s | %12s | %12s | %14s |\n" "$name" "$speed" "$time" "$ops"
-    done
-
-    rm -f "$temp_file"
-
-    # Clear/Initialize arrays for next run
-    BENCH_SPEEDS=()
-    BENCH_TIMES=()
-    BENCH_OPS=()
-    BENCH_NAMES=()
-    RESULT_COUNT=0
-}
-
 # Initialize arrays at the beginning of your script
 initialize_benchmark_arrays() {
     declare -g -a BENCH_SPEEDS=()
@@ -346,9 +292,7 @@ add_benchmark_result() {
     ((RESULT_COUNT++))
 }
 
-# Alternative version if you want to keep using a single BENCH_RESULTS array
-# that stores concatenated values
-display_sorted_results_alternative() {
+display_sorted_results() {
     local test_name=$1
     print_msg "$GREEN" "\n=== Sorted Results: $test_name ==="
 
@@ -457,7 +401,7 @@ generate_test_files() {
 
 
 run_cli_benchmarks() {
-    print_msg "$BLUE" "\n=== CLI Benchmark ===\n"
+    print_msg "$BLUE" "\n## CLI BENCHMARKS\n"
 
     for size in "${SIZES[@]}"; do
         if [ ! -f "${size}.csv" ]; then
@@ -465,14 +409,14 @@ run_cli_benchmarks() {
             continue
         fi
 
-        print_msg "$GREEN" "\n=== Testing with ${size}.csv ===\n"
+        print_msg "$GREEN" "\n### Testing with ${size}.csv\n"
 
         local file_size=$(get_file_size "${size}.csv")
         local file_size_mb=$(awk "BEGIN {printf \"%.2f\", $file_size / 1048576}")
         local row_count=$(wc -l < "${size}.csv")
         print_msg "$BLUE" "File info: ${file_size_mb} MB, ${row_count} rows\n"
 
-        print_msg "$YELLOW" "Row counting test:\n"
+        print_msg "$YELLOW" "#### Row counting test:\n"
 
         # -------
         # bench for cisv:
@@ -492,7 +436,7 @@ run_cli_benchmarks() {
             benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
         fi
 
-        display_sorted_results_alternative "Row Counting - ${size}.csv"
+        display_sorted_results "Row Counting - ${size}.csv"
 
         print_msg "$YELLOW" "\nColumn selection test (columns 0,2,3):\n"
 
@@ -512,13 +456,12 @@ run_cli_benchmarks() {
             benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
         fi
 
-        display_sorted_results_alternative "Column Selection - ${size}.csv"
-        print_msg "$BLUE" "=============================================================\n"
+        display_sorted_results "Column Selection - ${size}.csv"
     done
 }
 
 run_npm_benchmarks() {
-    print_msg "$BLUE" "\n=== NPM Benchmark ===\n"
+    print_msg "$BLUE" "\n## NPM Benchmarks\n"
     if [ -f "package.json" ] && command_exists npm; then
         npm run benchmark-js
     else
