@@ -245,10 +245,6 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          chmod +x benchmark_cli.sh || true
-
-      - name: Run benchmarks
-        run: |
           # Set environment to disable colors
           export TERM=dumb
           export NO_COLOR=1
@@ -257,7 +253,7 @@ jobs:
           export GITHUB_REF_NAME="${{ github.ref_name }}"
 
           bash ./benchmark_cli.sh install
-          bash ./benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
+          bash ./benchmark_cli.sh benchmark --all > benchmark.log
 
           # Verify BENCHMARKS.md was created
           if [ ! -f BENCHMARKS.md ]; then
@@ -268,7 +264,6 @@ jobs:
             cat benchmark.log >> BENCHMARKS.md
           fi
 
-          # Show results
           cat BENCHMARKS.md
 
       - name: Commit and push
@@ -287,11 +282,11 @@ jobs:
             if (fs.existsSync('BENCHMARKS.md')) {
               const content = fs.readFileSync('BENCHMARKS.md', 'utf8');
               const lines = content.split('\n');
-              let summary = '## 📊 BENCHMARK RESULTS\n\n';
-              summary += '✅ Benchmarks completed successfully!\n\n';
+              let summary = '## BENCHMARK RESULTS\n\n';
+              summary += '> Benchmarks completed successfully!\n\n';
               const dateLines = lines.filter(l => l.includes('Date:') || l.includes('Commit:')).slice(0, 2);
               summary += dateLines.join('\n') + '\n\n';
-              summary += '📄 Full results: [BENCHMARKS.md](../blob/${{ github.head_ref }}/BENCHMARKS.md)\n';
+              summary += '>> Full results: [BENCHMARKS.md](../blob/${{ github.head_ref }}/BENCHMARKS.md)\n';
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
@@ -299,17 +294,6 @@ jobs:
                 body: summary
               });
             }
-
-      - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-outputs
-          path: |
-            benchmark*.txt
-            benchmark*.log
-            BENCHMARKS.md
-            *.csv
-          retention-days: 30
 
   ci-success:
     name: CI Success
