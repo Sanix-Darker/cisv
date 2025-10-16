@@ -239,36 +239,13 @@ jobs:
 
       - name: Build modules
         run: |
-          npm run build
           make clean
+          make build
           make cli
 
-      - name: Make scripts executable
+      - name: Run benchmarks
         run: |
-          chmod +x scripts/generate_test_data.sh || true
-          chmod +x scripts/run_benchmarks.sh || true
           chmod +x benchmark_cli.sh || true
-
-      - name: Generate test data
-        run: |
-          # Generate all test files needed
-          python3 -c "
-          import csv
-          for name, rows in [('small', 1000), ('medium', 100000), ('large', 1000000)]:
-              with open(f'{name}.csv', 'w') as f:
-                  w = csv.writer(f)
-                  w.writerow(['id','name','email','address','phone','date','amount'])
-                  for i in range(rows):
-                      w.writerow([i,f'Person {i}',f'p{i}@email.com',f'{i} Main St',
-                                f'555-{i:04d}','2024-01-01',f'{i*1.23:.2f}'])
-          "
-
-          # Generate fixtures for JS benchmarks
-          mkdir -p fixtures
-          cp medium.csv fixtures/data.csv
-
-          # Verify files exist
-          ls -lh *.csv fixtures/*.csv
 
       - name: Run benchmarks
         run: |
@@ -279,14 +256,14 @@ jobs:
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
 
-          # Run benchmarks and strip color codes
-          bash scripts/run_benchmarks.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
+          bash ./benchmark_cli.sh install
+          bash ./benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
 
           # Verify BENCHMARKS.md was created
           if [ ! -f BENCHMARKS.md ]; then
             echo "Creating fallback BENCHMARKS.md"
-            echo "## Benchmark Results" > BENCHMARKS.md
-            echo "Date: $(date)" >> BENCHMARKS.md
+            echo "## BENCHMARK RESULTS" > BENCHMARKS.md
+            echo "DATE: $(date)" >> BENCHMARKS.md
             echo "" >> BENCHMARKS.md
             cat benchmark.log >> BENCHMARKS.md
           fi
