@@ -505,7 +505,7 @@ main() {
                 shift
                 ;;
             --all)
-                SIZES=("small" "medium" "large")
+                SIZES=("small" "medium") # no large for now :"large"
                 shift
                 ;;
             --force-regenerate)

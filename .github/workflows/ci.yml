@@ -256,13 +256,11 @@ jobs:
           bash ./benchmark_cli.sh benchmark --all > benchmark.log
 
           # Verify BENCHMARKS.md was created
-          if [ ! -f BENCHMARKS.md ]; then
-            echo "Creating fallback BENCHMARKS.md"
-            echo "## BENCHMARK RESULTS" > BENCHMARKS.md
-            echo "DATE: $(date)" >> BENCHMARKS.md
-            echo "" >> BENCHMARKS.md
-            cat benchmark.log >> BENCHMARKS.md
-          fi
+          echo "Creating fallback BENCHMARKS.md"
+          echo "## BENCHMARK RESULTS" > BENCHMARKS.md
+          echo "DATE: $(date)" >> BENCHMARKS.md
+          echo "" >> BENCHMARKS.md
+          cat benchmark.log >> BENCHMARKS.md
 
           cat BENCHMARKS.md
 
