@@ -253,7 +253,7 @@ jobs:
           export GITHUB_REF_NAME="${{ github.ref_name }}"
 
           bash ./benchmark_cli.sh install
-          bash ./benchmark_cli.sh benchmark --all > benchmark.log
+          bash ./benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
 
           # Verify BENCHMARKS.md was created
           echo "Creating fallback BENCHMARKS.md"
