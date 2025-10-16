@@ -268,7 +268,7 @@ display_sorted_results() {
     local test_name=$1
     print_msg "$GREEN" "\n=== Sorted Results: $test_name ==="
 
-    if [ $RESULT_COUNT -eq 0 ]; then
+    if [ ${RESULT_COUNT:-0} -eq 0 ]; then
         print_msg "$YELLOW" "No results to display"
         return
     fi
@@ -278,10 +278,12 @@ display_sorted_results() {
 
     # Store all data fields separated by pipe
     for i in $(seq 0 $((RESULT_COUNT - 1))); do
-        # Assuming BENCH_RESULTS contains speed, BENCH_TIMES contains time,
-        # BENCH_OPS contains ops/sec, and BENCH_NAMES contains names
-        # Adjust these array names to match your actual data structure
-        echo "${BENCH_SPEEDS[$i]}|${BENCH_TIMES[$i]}|${BENCH_OPS[$i]}|${BENCH_NAMES[$i]}" >> "$temp_file"
+        # Safely access array elements with default values
+        local speed="${BENCH_SPEEDS[$i]:-0}"
+        local time="${BENCH_TIMES[$i]:-0}"
+        local ops="${BENCH_OPS[$i]:-0}"
+        local name="${BENCH_NAMES[$i]:-unknown}"
+        echo "${speed}|${time}|${ops}|${name}" >> "$temp_file"
     done
 
     # Sort by Speed (MB/s) - Fastest First
@@ -312,7 +314,7 @@ display_sorted_results() {
 
     rm -f "$temp_file"
 
-    # Clear arrays for next run
+    # Clear/Initialize arrays for next run
     BENCH_SPEEDS=()
     BENCH_TIMES=()
     BENCH_OPS=()
@@ -320,11 +322,37 @@ display_sorted_results() {
     RESULT_COUNT=0
 }
 
+# Initialize arrays at the beginning of your script
+initialize_benchmark_arrays() {
+    declare -g -a BENCH_SPEEDS=()
+    declare -g -a BENCH_TIMES=()
+    declare -g -a BENCH_OPS=()
+    declare -g -a BENCH_NAMES=()
+    declare -g RESULT_COUNT=0
+}
+
+# Function to add benchmark results
+add_benchmark_result() {
+    local speed="$1"
+    local time="$2"
+    local ops="$3"
+    local name="$4"
+
+    BENCH_SPEEDS[${RESULT_COUNT}]="$speed"
+    BENCH_TIMES[${RESULT_COUNT}]="$time"
+    BENCH_OPS[${RESULT_COUNT}]="$ops"
+    BENCH_NAMES[${RESULT_COUNT}]="$name"
+
+    ((RESULT_COUNT++))
+}
+
+# Alternative version if you want to keep using a single BENCH_RESULTS array
+# that stores concatenated values
 display_sorted_results_alternative() {
     local test_name=$1
     print_msg "$GREEN" "\n=== Sorted Results: $test_name ==="
 
-    if [ $RESULT_COUNT -eq 0 ]; then
+    if [ ${RESULT_COUNT:-0} -eq 0 ]; then
         print_msg "$YELLOW" "No results to display"
         return
     fi
@@ -334,7 +362,9 @@ display_sorted_results_alternative() {
 
     # If BENCH_RESULTS contains "speed|time|ops" format
     for i in $(seq 0 $((RESULT_COUNT - 1))); do
-        echo "${BENCH_RESULTS[$i]}|${BENCH_NAMES[$i]}" >> "$temp_file"
+        local result="${BENCH_RESULTS[$i]:-0|0|0}"
+        local name="${BENCH_NAMES[$i]:-unknown}"
+        echo "${result}|${name}" >> "$temp_file"
     done
 
     # Sort by Speed (MB/s) - Fastest First
@@ -462,7 +492,7 @@ run_cli_benchmarks() {
             benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
         fi
 
-        display_sorted_results "Row Counting - ${size}.csv"
+        display_sorted_results_alternative "Row Counting - ${size}.csv"
 
         print_msg "$YELLOW" "\nColumn selection test (columns 0,2,3):\n"
 
@@ -482,7 +512,7 @@ run_cli_benchmarks() {
             benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
         fi
 
-        display_sorted_results "Column Selection - ${size}.csv"
+        display_sorted_results_alternative "Column Selection - ${size}.csv"
         print_msg "$BLUE" "=============================================================\n"
     done
 }
