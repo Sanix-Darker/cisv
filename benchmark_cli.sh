@@ -186,7 +186,8 @@ benchmark() {
     local file=$3
     local extra_args="${4:-}"
 
-    print_msg "$BLUE" "--- $name ---"
+    print_msg "$BLUE" ""
+    print_msg "$BLUE" "-> $name"
 
     if [ ! -f "$file" ]; then
         print_msg "$RED" "Error: File $file not found"
@@ -196,8 +197,6 @@ benchmark() {
     local total_time=0
     local successful_runs=0
 
-    print_msg "$RED" "\`\`\`"
-    print_msg "$RED" ""
     for i in $(seq 1 $ITERATIONS); do
         local start_time=$(date +%s.%N 2>/dev/null || date +%s)
         local temp_output=$(mktemp)
@@ -237,8 +236,6 @@ benchmark() {
             print_msg "$RED" "  Run $i failed with exit code $exit_status"
         fi
     done
-    print_msg "$RED" ""
-    print_msg "$RED" "\`\`\`"
 
     if [ $successful_runs -eq 0 ]; then
         print_msg "$RED" "  All runs failed for $name"
@@ -416,8 +413,10 @@ run_cli_benchmarks() {
         local row_count=$(wc -l < "${size}.csv")
         print_msg "$BLUE" "File info: ${file_size_mb} MB, ${row_count} rows\n"
 
-        print_msg "$YELLOW" "#### Row counting test:\n"
+        print_msg "$YELLOW" "#### ROW COUNTING TEST\n"
 
+        print_msg "$RED" "\`\`\`"
+        print_msg "$RED" ""
         # -------
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -c" "${size}.csv"
@@ -435,11 +434,15 @@ run_cli_benchmarks() {
         if command_exists mlr; then
             benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
         fi
+        print_msg "$RED" ""
+        print_msg "$RED" "\`\`\`"
 
         display_sorted_results "Row Counting - ${size}.csv"
 
-        print_msg "$YELLOW" "\nColumn selection test (columns 0,2,3):\n"
+        print_msg "$YELLOW" "\n#### COLUMN SELECTION TEST (COLUMNS 0,2,3)\n"
 
+        print_msg "$RED" "\`\`\`"
+        print_msg "$RED" ""
         # -------
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -s 0,2,3" "${size}.csv"
@@ -455,6 +458,9 @@ run_cli_benchmarks() {
         if command_exists mlr; then
             benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
         fi
+
+        print_msg "$RED" ""
+        print_msg "$RED" "\`\`\`"
 
         display_sorted_results "Column Selection - ${size}.csv"
     done
