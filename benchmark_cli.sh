@@ -3,12 +3,18 @@
 set -uo pipefail
 trap 'echo "Error occurred at line $LINENO. Exit code: $?"' ERR
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Colors (should be uncomment from direct run not from cli"
+# RED='\033[0;31m'
+# GREEN='\033[0;32m'
+# YELLOW='\033[1;33m'
+# BLUE='\033[0;34m'
+# NC='\033[0m'
+
+RED=""
+GREEN=""
+YELLOW=""
+BLUE=""
+NC=""
 
 # Configuration
 ITERATIONS=3

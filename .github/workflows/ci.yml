@@ -263,11 +263,11 @@ jobs:
           echo "---" >> BENCHMARKS.md
 
           echo "" >> BENCHMARKS.md
-          echo "```markdown" >> BENCHMARKS.md
+          # echo "```markdown" >> BENCHMARKS.md
           echo "" >> BENCHMARKS.md
           cat benchmark.log >> BENCHMARKS.md
           echo ""
-          echo "```" >> BENCHMARKS.md
+          # echo "```" >> BENCHMARKS.md
           echo "" >> BENCHMARKS.md
 
       - name: Commit and push
