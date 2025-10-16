@@ -266,7 +266,6 @@ benchmark() {
 
 display_sorted_results() {
     local test_name=$1
-
     print_msg "$GREEN" "\n=== Sorted Results: $test_name ==="
 
     if [ $RESULT_COUNT -eq 0 ]; then
@@ -277,33 +276,96 @@ display_sorted_results() {
     local temp_file=$(mktemp)
     trap "rm -f $temp_file" EXIT
 
+    # Store all data fields separated by pipe
     for i in $(seq 0 $((RESULT_COUNT - 1))); do
-        echo "${BENCH_RESULTS[$i]}|${BENCH_NAMES[$i]}" >> "$temp_file"
+        # Assuming BENCH_RESULTS contains speed, BENCH_TIMES contains time,
+        # BENCH_OPS contains ops/sec, and BENCH_NAMES contains names
+        # Adjust these array names to match your actual data structure
+        echo "${BENCH_SPEEDS[$i]}|${BENCH_TIMES[$i]}|${BENCH_OPS[$i]}|${BENCH_NAMES[$i]}" >> "$temp_file"
     done
 
+    # Sort by Speed (MB/s) - Fastest First
     print_msg "$YELLOW" "\nSorted by Speed (MB/s) - Fastest First:"
-    printf "%-20s | %-12s | %-12s | %-14s\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
-    printf "%-20s-+-%-12s-+-%-12s-+-%-14s\n" "--------------------" "------------" "------------" "--------------"
+    printf "| %-20s | %-12s | %-12s | %-14s |\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
+    printf "|%-22s|%-14s|%-14s|%-16s|\n" "----------------------" "--------------" "--------------" "----------------"
 
     sort -t'|' -k1 -rn "$temp_file" | while IFS='|' read -r speed time ops name; do
         speed=$(printf "%.2f" "$speed" 2>/dev/null || echo "0.00")
         time=$(printf "%.4f" "$time" 2>/dev/null || echo "0.0000")
         ops=$(printf "%.2f" "$ops" 2>/dev/null || echo "0.00")
-        printf "%-20s | %12s | %12s | %14s\n" "$name" "$speed" "$time" "$ops"
+        printf "| %-20s | %12s | %12s | %14s |\n" "$name" "$speed" "$time" "$ops"
     done
 
+    echo ""  # Empty line between tables
+
+    # Sort by Operations/sec - Most Operations First
     print_msg "$YELLOW" "\nSorted by Operations/sec - Most Operations First:"
-    printf "%-20s | %-12s | %-12s | %-14s\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
-    printf "%-20s-+-%-12s-+-%-12s-+-%-14s\n" "--------------------" "------------" "------------" "--------------"
+    printf "| %-20s | %-12s | %-12s | %-14s |\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
+    printf "|%-22s|%-14s|%-14s|%-16s|\n" "----------------------" "--------------" "--------------" "----------------"
 
     sort -t'|' -k3 -rn "$temp_file" | while IFS='|' read -r speed time ops name; do
         speed=$(printf "%.2f" "$speed" 2>/dev/null || echo "0.00")
         time=$(printf "%.4f" "$time" 2>/dev/null || echo "0.0000")
         ops=$(printf "%.2f" "$ops" 2>/dev/null || echo "0.00")
-        printf "%-20s | %12s | %12s | %14s\n" "$name" "$speed" "$time" "$ops"
+        printf "| %-20s | %12s | %12s | %14s |\n" "$name" "$speed" "$time" "$ops"
     done
 
     rm -f "$temp_file"
+
+    # Clear arrays for next run
+    BENCH_SPEEDS=()
+    BENCH_TIMES=()
+    BENCH_OPS=()
+    BENCH_NAMES=()
+    RESULT_COUNT=0
+}
+
+display_sorted_results_alternative() {
+    local test_name=$1
+    print_msg "$GREEN" "\n=== Sorted Results: $test_name ==="
+
+    if [ $RESULT_COUNT -eq 0 ]; then
+        print_msg "$YELLOW" "No results to display"
+        return
+    fi
+
+    local temp_file=$(mktemp)
+    trap "rm -f $temp_file" EXIT
+
+    # If BENCH_RESULTS contains "speed|time|ops" format
+    for i in $(seq 0 $((RESULT_COUNT - 1))); do
+        echo "${BENCH_RESULTS[$i]}|${BENCH_NAMES[$i]}" >> "$temp_file"
+    done
+
+    # Sort by Speed (MB/s) - Fastest First
+    print_msg "$YELLOW" "\nSorted by Speed (MB/s) - Fastest First:"
+    printf "| %-20s | %-12s | %-12s | %-14s |\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
+    printf "|%-22s|%-14s|%-14s|%-16s|\n" "----------------------" "--------------" "--------------" "----------------"
+
+    sort -t'|' -k1 -rn "$temp_file" | while IFS='|' read -r speed time ops name; do
+        speed=$(printf "%.2f" "$speed" 2>/dev/null || echo "0.00")
+        time=$(printf "%.4f" "$time" 2>/dev/null || echo "0.0000")
+        ops=$(printf "%.2f" "$ops" 2>/dev/null || echo "0.00")
+        printf "| %-20s | %12s | %12s | %14s |\n" "$name" "$speed" "$time" "$ops"
+    done
+
+    echo ""  # Empty line between tables
+
+    # Sort by Operations/sec - Most Operations First
+    print_msg "$YELLOW" "\nSorted by Operations/sec - Most Operations First:"
+    printf "| %-20s | %-12s | %-12s | %-14s |\n" "Library" "Speed (MB/s)" "Avg Time (s)" "Operations/sec"
+    printf "|%-22s|%-14s|%-14s|%-16s|\n" "----------------------" "--------------" "--------------" "----------------"
+
+    sort -t'|' -k3 -rn "$temp_file" | while IFS='|' read -r speed time ops name; do
+        speed=$(printf "%.2f" "$speed" 2>/dev/null || echo "0.00")
+        time=$(printf "%.4f" "$time" 2>/dev/null || echo "0.0000")
+        ops=$(printf "%.2f" "$ops" 2>/dev/null || echo "0.00")
+        printf "| %-20s | %12s | %12s | %14s |\n" "$name" "$speed" "$time" "$ops"
+    done
+
+    rm -f "$temp_file"
+
+    # Clear arrays for next run
     BENCH_RESULTS=()
     BENCH_NAMES=()
     RESULT_COUNT=0

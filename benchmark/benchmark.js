@@ -35,7 +35,7 @@ try {
 }
 
 const BENCH_FILE = path.resolve(benchFilePath);
-console.log(">>> Using benchmark file:", BENCH_FILE);
+console.log(" Using benchmark file:", BENCH_FILE);
 
 // We set a row to retrieve.
 // This ensures all parsers do the work to make data accessible.
@@ -107,7 +107,7 @@ async function runAllBenchmarks() {
           .on('cycle', (event) => logCycle(event, 'sync'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Sync is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Sync is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run();
@@ -153,7 +153,7 @@ async function runAllBenchmarks() {
           .on('cycle', (event) => logCycle(event, 'sync_data'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Sync is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Sync is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run();
@@ -247,7 +247,7 @@ async function runAllBenchmarks() {
           .on('cycle', (event) => logCycle(event, 'async'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Async is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Async is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run({ async: true });
@@ -348,7 +348,7 @@ async function runAllBenchmarks() {
           .on('cycle', (event) => logCycle(event, 'async_data'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Async is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Async is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run({ async: true });
