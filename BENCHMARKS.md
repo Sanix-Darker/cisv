@@ -1,7 +1,6 @@
 ## BENCHMARK RESULTS
-**DATE:** Thu Oct 16 23:44:48 UTC 2025
-
-**COMMIT:** cb48d0d2b914208ac06852a28c3a2b6e5cf29194
+**DATE:** Thu Oct 16 23:54:04 UTC 2025
+| **COMMIT:** ac7c6deae6d3c08c3d0a5dc6695de16e0b13cf23
 ---
 
 
@@ -17,233 +16,207 @@ Creating medium.csv (100K rows)...
 
 File info: 0.09 MB, 1001 rows
 
-#### Row counting test:
-
---- cisv ---
-```
-
-  Run 1: 0.00896168s
-  Run 2: 0.00826764s
-  Run 3: 0.00800776s
+#### ROW COUNTING TEST
 
 ```
+
+
+-> cisv
+  Run 1: 0.00852633s
+  Run 2: 0.00787115s
+  Run 3: 0.00783372s
+  Average Time: 0.0081 seconds
+  Successful runs: 3/3
+
+-> rust-csv
+  Run 1: 0.00836968s
+  Run 2: 0.00827384s
+  Run 3: 0.00843263s
   Average Time: 0.0084 seconds
   Successful runs: 3/3
---- rust-csv ---
-```
 
-  Run 1: 0.00829887s
-  Run 2: 0.00857353s
-  Run 3: 0.00828123s
-
-```
-  Average Time: 0.0084 seconds
+-> wc -l
+  Run 1: 0.0082314s
+  Run 2: 0.00808573s
+  Run 3: 0.00811124s
+  Average Time: 0.0081 seconds
   Successful runs: 3/3
---- wc -l ---
-```
 
-  Run 1: 0.00830793s
-  Run 2: 0.00838375s
-  Run 3: 0.00828075s
-
-```
-  Average Time: 0.0083 seconds
+-> csvkit
+  Run 1: 0.212403s
+  Run 2: 0.115982s
+  Run 3: 0.118929s
+  Average Time: 0.1491 seconds
   Successful runs: 3/3
---- csvkit ---
-```
-
-  Run 1: 0.285857s
-  Run 2: 0.125828s
-  Run 3: 0.122355s
 
 ```
-  Average Time: 0.1780 seconds
-  Successful runs: 3/3
 
 === Sorted Results: Row Counting - small.csv ===
 
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| wc -l                |        10.84 |       0.0083 |         120.48 |
+| wc -l                |        11.11 |       0.0081 |         123.46 |
+| cisv                 |        11.11 |       0.0081 |         123.46 |
 | rust-csv             |        10.71 |       0.0084 |         119.05 |
-| cisv                 |        10.71 |       0.0084 |         119.05 |
-| csvkit               |         0.51 |       0.1780 |           5.62 |
+| csvkit               |         0.60 |       0.1491 |           6.71 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| wc -l                |        10.84 |       0.0083 |         120.48 |
+| wc -l                |        11.11 |       0.0081 |         123.46 |
+| cisv                 |        11.11 |       0.0081 |         123.46 |
 | rust-csv             |        10.71 |       0.0084 |         119.05 |
-| cisv                 |        10.71 |       0.0084 |         119.05 |
-| csvkit               |         0.51 |       0.1780 |           5.62 |
+| csvkit               |         0.60 |       0.1491 |           6.71 |
 
-Column selection test (columns 0,2,3):
-
---- cisv ---
-```
-
-  Run 1: 0.00848436s
-  Run 2: 0.00847578s
-  Run 3: 0.00912094s
+#### COLUMN SELECTION TEST (COLUMNS 0,2,3)
 
 ```
-  Average Time: 0.0087 seconds
+
+
+-> cisv
+  Run 1: 0.00833344s
+  Run 2: 0.00833631s
+  Run 3: 0.00824928s
+  Average Time: 0.0083 seconds
   Successful runs: 3/3
---- rust-csv ---
-```
 
-  Run 1: 0.00865126s
-  Run 2: 0.00849271s
-  Run 3: 0.00855732s
-
-```
-  Average Time: 0.0086 seconds
+-> rust-csv
+  Run 1: 0.00828671s
+  Run 2: 0.00840092s
+  Run 3: 0.00835514s
+  Average Time: 0.0083 seconds
   Successful runs: 3/3
---- csvkit ---
-```
 
-  Run 1: 0.126121s
-  Run 2: 0.122047s
-  Run 3: 0.123368s
-
-```
-  Average Time: 0.1238 seconds
+-> csvkit
+  Run 1: 0.116s
+  Run 2: 0.117578s
+  Run 3: 0.119571s
+  Average Time: 0.1177 seconds
   Successful runs: 3/3
+
+```
 
 === Sorted Results: Column Selection - small.csv ===
 
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |        10.47 |       0.0086 |         116.28 |
-| cisv                 |        10.34 |       0.0087 |         114.94 |
-| csvkit               |         0.73 |       0.1238 |           8.08 |
+| rust-csv             |        10.84 |       0.0083 |         120.48 |
+| cisv                 |        10.84 |       0.0083 |         120.48 |
+| csvkit               |         0.76 |       0.1177 |           8.50 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |        10.47 |       0.0086 |         116.28 |
-| cisv                 |        10.34 |       0.0087 |         114.94 |
-| csvkit               |         0.73 |       0.1238 |           8.08 |
+| rust-csv             |        10.84 |       0.0083 |         120.48 |
+| cisv                 |        10.84 |       0.0083 |         120.48 |
+| csvkit               |         0.76 |       0.1177 |           8.50 |
 
 ### Testing with medium.csv
 
 File info: 10.25 MB, 100001 rows
 
-#### Row counting test:
-
---- cisv ---
-```
-
-  Run 1: 0.00946832s
-  Run 2: 0.00966048s
-  Run 3: 0.00965381s
+#### ROW COUNTING TEST
 
 ```
-  Average Time: 0.0096 seconds
+
+
+-> cisv
+  Run 1: 0.0092144s
+  Run 2: 0.00908828s
+  Run 3: 0.00924778s
+  Average Time: 0.0092 seconds
   Successful runs: 3/3
---- rust-csv ---
-```
 
-  Run 1: 0.0254514s
-  Run 2: 0.0259845s
-  Run 3: 0.0250032s
-
-```
-  Average Time: 0.0255 seconds
+-> rust-csv
+  Run 1: 0.0257616s
+  Run 2: 0.0260634s
+  Run 3: 0.0260463s
+  Average Time: 0.0260 seconds
   Successful runs: 3/3
---- wc -l ---
-```
 
-  Run 1: 0.00987244s
-  Run 2: 0.00990939s
-  Run 3: 0.00995445s
-
-```
-  Average Time: 0.0099 seconds
+-> wc -l
+  Run 1: 0.00982976s
+  Run 2: 0.00974226s
+  Run 3: 0.00976634s
+  Average Time: 0.0098 seconds
   Successful runs: 3/3
---- csvkit ---
-```
 
-  Run 1: 0.296501s
-  Run 2: 0.29733s
-  Run 3: 0.286818s
-
-```
-  Average Time: 0.2935 seconds
+-> csvkit
+  Run 1: 0.28457s
+  Run 2: 0.282212s
+  Run 3: 0.284944s
+  Average Time: 0.2839 seconds
   Successful runs: 3/3
+
+```
 
 === Sorted Results: Row Counting - medium.csv ===
 
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      1067.71 |       0.0096 |         104.17 |
-| wc -l                |      1035.35 |       0.0099 |         101.01 |
-| rust-csv             |       401.96 |       0.0255 |          39.22 |
-| csvkit               |        34.92 |       0.2935 |           3.41 |
+| cisv                 |      1114.13 |       0.0092 |         108.70 |
+| wc -l                |      1045.92 |       0.0098 |         102.04 |
+| rust-csv             |       394.23 |       0.0260 |          38.46 |
+| csvkit               |        36.10 |       0.2839 |           3.52 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      1067.71 |       0.0096 |         104.17 |
-| wc -l                |      1035.35 |       0.0099 |         101.01 |
-| rust-csv             |       401.96 |       0.0255 |          39.22 |
-| csvkit               |        34.92 |       0.2935 |           3.41 |
+| cisv                 |      1114.13 |       0.0092 |         108.70 |
+| wc -l                |      1045.92 |       0.0098 |         102.04 |
+| rust-csv             |       394.23 |       0.0260 |          38.46 |
+| csvkit               |        36.10 |       0.2839 |           3.52 |
 
-Column selection test (columns 0,2,3):
-
---- cisv ---
-```
-
-  Run 1: 0.0513973s
-  Run 2: 0.0514696s
-  Run 3: 0.0516763s
+#### COLUMN SELECTION TEST (COLUMNS 0,2,3)
 
 ```
-  Average Time: 0.0515 seconds
+
+
+-> cisv
+  Run 1: 0.0533195s
+  Run 2: 0.0534384s
+  Run 3: 0.051544s
+  Average Time: 0.0528 seconds
   Successful runs: 3/3
---- rust-csv ---
-```
 
-  Run 1: 0.0400519s
-  Run 2: 0.0394375s
-  Run 3: 0.0398226s
-
-```
-  Average Time: 0.0398 seconds
+-> rust-csv
+  Run 1: 0.0396314s
+  Run 2: 0.0398347s
+  Run 3: 0.0392864s
+  Average Time: 0.0396 seconds
   Successful runs: 3/3
---- csvkit ---
-```
 
-  Run 1: 0.363572s
-  Run 2: 0.355073s
-  Run 3: 0.355952s
-
-```
-  Average Time: 0.3582 seconds
+-> csvkit
+  Run 1: 0.358168s
+  Run 2: 0.357236s
+  Run 3: 0.355257s
+  Average Time: 0.3569 seconds
   Successful runs: 3/3
+
+```
 
 === Sorted Results: Column Selection - medium.csv ===
 
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       257.54 |       0.0398 |          25.13 |
-| cisv                 |       199.03 |       0.0515 |          19.42 |
-| csvkit               |        28.62 |       0.3582 |           2.79 |
+| rust-csv             |       258.84 |       0.0396 |          25.25 |
+| cisv                 |       194.13 |       0.0528 |          18.94 |
+| csvkit               |        28.72 |       0.3569 |           2.80 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       257.54 |       0.0398 |          25.13 |
-| cisv                 |       199.03 |       0.0515 |          19.42 |
-| csvkit               |        28.62 |       0.3582 |           2.79 |
+| rust-csv             |       258.84 |       0.0396 |          25.25 |
+| cisv                 |       194.13 |       0.0528 |          18.94 |
+| csvkit               |        28.72 |       0.3569 |           2.80 |
 
 ## NPM Benchmarks
 
@@ -261,32 +234,32 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
 
 --- Running: Sync (Parse only) Benchmarks ---
 ```
-  cisv (sync) x 151,749 ops/sec ±2.27% (92 runs sampled)
-    Speed: 70.19 MB/s | Avg Time: 0.01 ms | Ops/sec: 151749
+  cisv (sync) x 154,323 ops/sec ±2.01% (92 runs sampled)
+    Speed: 71.38 MB/s | Avg Time: 0.01 ms | Ops/sec: 154323
     (cooling down...)
 
 ```
 ```
-  csv-parse (sync) x 40,658 ops/sec ±2.18% (96 runs sampled)
-    Speed: 18.81 MB/s | Avg Time: 0.02 ms | Ops/sec: 40658
+  csv-parse (sync) x 40,718 ops/sec ±1.37% (96 runs sampled)
+    Speed: 18.83 MB/s | Avg Time: 0.02 ms | Ops/sec: 40718
     (cooling down...)
 
 ```
 ```
-  papaparse (sync) x 60,287 ops/sec ±0.85% (94 runs sampled)
-    Speed: 27.88 MB/s | Avg Time: 0.02 ms | Ops/sec: 60287
+  papaparse (sync) x 60,707 ops/sec ±1.19% (95 runs sampled)
+    Speed: 28.08 MB/s | Avg Time: 0.02 ms | Ops/sec: 60707
     (cooling down...)
 
 ```
 ```
-  udsv (sync) x 149,076 ops/sec ±0.47% (94 runs sampled)
-    Speed: 68.95 MB/s | Avg Time: 0.01 ms | Ops/sec: 149076
+  udsv (sync) x 151,442 ops/sec ±0.36% (98 runs sampled)
+    Speed: 70.05 MB/s | Avg Time: 0.01 ms | Ops/sec: 151442
     (cooling down...)
 
 ```
 ```
-  d3-dsv (sync) x 206,431 ops/sec ±0.95% (96 runs sampled)
-    Speed: 95.48 MB/s | Avg Time: 0.00 ms | Ops/sec: 206431
+  d3-dsv (sync) x 212,460 ops/sec ±0.35% (98 runs sampled)
+    Speed: 98.27 MB/s | Avg Time: 0.00 ms | Ops/sec: 212460
     (cooling down...)
 
 ```
@@ -297,32 +270,32 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
 
 --- Running: Sync (Parse + Access) Benchmarks ---
 ```
-  cisv (sync) x 226,848 ops/sec ±8.87% (70 runs sampled)
-    Speed: 104.92 MB/s | Avg Time: 0.00 ms | Ops/sec: 226848
+  cisv (sync) x 225,941 ops/sec ±9.08% (69 runs sampled)
+    Speed: 104.50 MB/s | Avg Time: 0.00 ms | Ops/sec: 225941
     (cooling down...)
 
 ```
 ```
-  csv-parse (sync) x 42,462 ops/sec ±0.12% (97 runs sampled)
-    Speed: 19.64 MB/s | Avg Time: 0.02 ms | Ops/sec: 42462
+  csv-parse (sync) x 42,732 ops/sec ±0.15% (98 runs sampled)
+    Speed: 19.76 MB/s | Avg Time: 0.02 ms | Ops/sec: 42732
     (cooling down...)
 
 ```
 ```
-  papaparse (sync) x 60,343 ops/sec ±0.83% (93 runs sampled)
-    Speed: 27.91 MB/s | Avg Time: 0.02 ms | Ops/sec: 60343
+  papaparse (sync) x 61,275 ops/sec ±0.85% (96 runs sampled)
+    Speed: 28.34 MB/s | Avg Time: 0.02 ms | Ops/sec: 61275
     (cooling down...)
 
 ```
 ```
-  udsv (sync) x 150,130 ops/sec ±0.50% (92 runs sampled)
-    Speed: 69.44 MB/s | Avg Time: 0.01 ms | Ops/sec: 150130
+  udsv (sync) x 151,548 ops/sec ±0.47% (95 runs sampled)
+    Speed: 70.10 MB/s | Avg Time: 0.01 ms | Ops/sec: 151548
     (cooling down...)
 
 ```
 ```
-  d3-dsv (sync) x 211,003 ops/sec ±0.28% (96 runs sampled)
-    Speed: 97.60 MB/s | Avg Time: 0.00 ms | Ops/sec: 211003
+  d3-dsv (sync) x 211,125 ops/sec ±0.29% (97 runs sampled)
+    Speed: 97.65 MB/s | Avg Time: 0.00 ms | Ops/sec: 211125
     (cooling down...)
 
 ```
@@ -333,32 +306,32 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
 
 --- Running: Async (Parse only) Benchmarks ---
 ```
-  cisv (async/stream) x 209,934 ops/sec ±0.60% (72 runs sampled)
-    Speed: 97.10 MB/s | Avg Time: 0.00 ms | Ops/sec: 209934
+  cisv (async/stream) x 215,118 ops/sec ±0.73% (71 runs sampled)
+    Speed: 99.50 MB/s | Avg Time: 0.00 ms | Ops/sec: 215118
     (cooling down...)
 
 ```
 ```
-  papaparse (async/stream) x 44,552 ops/sec ±3.92% (83 runs sampled)
-    Speed: 20.61 MB/s | Avg Time: 0.02 ms | Ops/sec: 44552
+  papaparse (async/stream) x 45,538 ops/sec ±3.76% (79 runs sampled)
+    Speed: 21.06 MB/s | Avg Time: 0.02 ms | Ops/sec: 45538
     (cooling down...)
 
 ```
 ```
-  fast-csv (async/stream) x 21,451 ops/sec ±1.39% (83 runs sampled)
-    Speed: 9.92 MB/s | Avg Time: 0.05 ms | Ops/sec: 21451
+  fast-csv (async/stream) x 22,387 ops/sec ±0.99% (87 runs sampled)
+    Speed: 10.35 MB/s | Avg Time: 0.04 ms | Ops/sec: 22387
     (cooling down...)
 
 ```
 ```
-  neat-csv (async/promise) x 20,214 ops/sec ±2.66% (82 runs sampled)
-    Speed: 9.35 MB/s | Avg Time: 0.05 ms | Ops/sec: 20214
+  neat-csv (async/promise) x 20,314 ops/sec ±2.24% (82 runs sampled)
+    Speed: 9.40 MB/s | Avg Time: 0.05 ms | Ops/sec: 20314
     (cooling down...)
 
 ```
 ```
-  udsv (async/stream) x 112,990 ops/sec ±0.29% (87 runs sampled)
-    Speed: 52.26 MB/s | Avg Time: 0.01 ms | Ops/sec: 112990
+  udsv (async/stream) x 113,115 ops/sec ±0.28% (90 runs sampled)
+    Speed: 52.32 MB/s | Avg Time: 0.01 ms | Ops/sec: 113115
     (cooling down...)
 
 ```
@@ -369,32 +342,32 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
 
 --- Running: Async (Parse + Access) Benchmarks ---
 ```
-  cisv (async/stream) x 58,119 ops/sec ±0.70% (86 runs sampled)
-    Speed: 26.88 MB/s | Avg Time: 0.02 ms | Ops/sec: 58119
+  cisv (async/stream) x 59,077 ops/sec ±0.24% (88 runs sampled)
+    Speed: 27.32 MB/s | Avg Time: 0.02 ms | Ops/sec: 59077
     (cooling down...)
 
 ```
 ```
-  papaparse (async/stream) x 45,592 ops/sec ±5.65% (86 runs sampled)
-    Speed: 21.09 MB/s | Avg Time: 0.02 ms | Ops/sec: 45592
+  papaparse (async/stream) x 48,661 ops/sec ±2.00% (85 runs sampled)
+    Speed: 22.51 MB/s | Avg Time: 0.02 ms | Ops/sec: 48661
     (cooling down...)
 
 ```
 ```
-  fast-csv (async/stream) x 20,958 ops/sec ±0.22% (88 runs sampled)
-    Speed: 9.69 MB/s | Avg Time: 0.05 ms | Ops/sec: 20958
+  fast-csv (async/stream) x 22,013 ops/sec ±0.48% (85 runs sampled)
+    Speed: 10.18 MB/s | Avg Time: 0.05 ms | Ops/sec: 22013
     (cooling down...)
 
 ```
 ```
-  neat-csv (async/promise) x 20,695 ops/sec ±1.08% (88 runs sampled)
-    Speed: 9.57 MB/s | Avg Time: 0.05 ms | Ops/sec: 20695
+  neat-csv (async/promise) x 20,947 ops/sec ±1.46% (87 runs sampled)
+    Speed: 9.69 MB/s | Avg Time: 0.05 ms | Ops/sec: 20947
     (cooling down...)
 
 ```
 ```
-  udsv (async/stream) x 112,230 ops/sec ±0.68% (90 runs sampled)
-    Speed: 51.91 MB/s | Avg Time: 0.01 ms | Ops/sec: 112230
+  udsv (async/stream) x 113,565 ops/sec ±0.40% (91 runs sampled)
+    Speed: 52.53 MB/s | Avg Time: 0.01 ms | Ops/sec: 113565
     (cooling down...)
 
 ```
@@ -409,43 +382,43 @@ Benchmark Results Table (Markdown)
 
 | Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------|--------------|---------------|----------------|
-| d3-dsv (sync)      | 95.48        | 0.00          | 206431         |
-| cisv (sync)        | 70.19        | 0.01          | 151749         |
-| udsv (sync)        | 68.95        | 0.01          | 149076         |
-| papaparse (sync)   | 27.88        | 0.02          | 60287          |
-| csv-parse (sync)   | 18.81        | 0.02          | 40658          |
+| d3-dsv (sync)      | 98.27        | 0.00          | 212460         |
+| cisv (sync)        | 71.38        | 0.01          | 154323         |
+| udsv (sync)        | 70.05        | 0.01          | 151442         |
+| papaparse (sync)   | 28.08        | 0.02          | 60707          |
+| csv-parse (sync)   | 18.83        | 0.02          | 40718          |
 
 ### Synchronous Results (with data access - sorted by speed)
 
 | Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 104.92       | 0.00          | 226848         |
-| d3-dsv (sync)      | 97.60        | 0.00          | 211003         |
-| udsv (sync)        | 69.44        | 0.01          | 150130         |
-| papaparse (sync)   | 27.91        | 0.02          | 60343          |
-| csv-parse (sync)   | 19.64        | 0.02          | 42462          |
+| cisv (sync)        | 104.50       | 0.00          | 225941         |
+| d3-dsv (sync)      | 97.65        | 0.00          | 211125         |
+| udsv (sync)        | 70.10        | 0.01          | 151548         |
+| papaparse (sync)   | 28.34        | 0.02          | 61275          |
+| csv-parse (sync)   | 19.76        | 0.02          | 42732          |
 
 
 ### Asynchronous Results (sorted by speed - fastest first)
 
 | Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 97.10        | 0.00          | 209934         |
-| udsv (async/stream)      | 52.26        | 0.01          | 112990         |
-| papaparse (async/stream) | 20.61        | 0.02          | 44552          |
-| fast-csv (async/stream)  | 9.92         | 0.05          | 21451          |
-| neat-csv (async/promise) | 9.35         | 0.05          | 20214          |
+| cisv (async/stream)      | 99.50        | 0.00          | 215118         |
+| udsv (async/stream)      | 52.32        | 0.01          | 113115         |
+| papaparse (async/stream) | 21.06        | 0.02          | 45538          |
+| fast-csv (async/stream)  | 10.35        | 0.04          | 22387          |
+| neat-csv (async/promise) | 9.40         | 0.05          | 20314          |
 
 
 ### Asynchronous Results (with data access - sorted by speed)
 
 | Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
 |--------------------------|--------------|---------------|----------------|
-| udsv (async/stream)      | 51.91        | 0.01          | 112230         |
-| cisv (async/stream)      | 26.88        | 0.02          | 58119          |
-| papaparse (async/stream) | 21.09        | 0.02          | 45592          |
-| fast-csv (async/stream)  | 9.69         | 0.05          | 20958          |
-| neat-csv (async/promise) | 9.57         | 0.05          | 20695          |
+| udsv (async/stream)      | 52.53        | 0.01          | 113565         |
+| cisv (async/stream)      | 27.32        | 0.02          | 59077          |
+| papaparse (async/stream) | 22.51        | 0.02          | 48661          |
+| fast-csv (async/stream)  | 10.18        | 0.05          | 22013          |
+| neat-csv (async/promise) | 9.69         | 0.05          | 20947          |
 
 
 ## Alternative Sorting: By Operations/sec
@@ -454,21 +427,21 @@ Benchmark Results Table (Markdown)
 
 | Library            | Operations/sec | Speed (MB/s) | Avg Time (ms) |
 |--------------------|----------------|--------------|---------------|
-| d3-dsv (sync)      | 206431         | 95.48        | 0.00          |
-| cisv (sync)        | 151749         | 70.19        | 0.01          |
-| udsv (sync)        | 149076         | 68.95        | 0.01          |
-| papaparse (sync)   | 60287          | 27.88        | 0.02          |
-| csv-parse (sync)   | 40658          | 18.81        | 0.02          |
+| d3-dsv (sync)      | 212460         | 98.27        | 0.00          |
+| cisv (sync)        | 154323         | 71.38        | 0.01          |
+| udsv (sync)        | 151442         | 70.05        | 0.01          |
+| papaparse (sync)   | 60707          | 28.08        | 0.02          |
+| csv-parse (sync)   | 40718          | 18.83        | 0.02          |
 
 ### Asynchronous Results (sorted by operations/sec)
 
 | Library                  | Operations/sec | Speed (MB/s) | Avg Time (ms) |
 |--------------------------|----------------|--------------|---------------|
-| cisv (async/stream)      | 209934         | 97.10        | 0.00          |
-| udsv (async/stream)      | 112990         | 52.26        | 0.01          |
-| papaparse (async/stream) | 44552          | 20.61        | 0.02          |
-| fast-csv (async/stream)  | 21451          | 9.92         | 0.05          |
-| neat-csv (async/promise) | 20214          | 9.35         | 0.05          |
+| cisv (async/stream)      | 215118         | 99.50        | 0.00          |
+| udsv (async/stream)      | 113115         | 52.32        | 0.01          |
+| papaparse (async/stream) | 45538          | 21.06        | 0.02          |
+| fast-csv (async/stream)  | 22387          | 10.35        | 0.04          |
+| neat-csv (async/promise) | 20314          | 9.40         | 0.05          |
 
 
 Cleaning up test files...
