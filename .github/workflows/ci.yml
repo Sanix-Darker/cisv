@@ -257,8 +257,10 @@ jobs:
 
           # Verify BENCHMARKS.md was created
           echo "## BENCHMARK RESULTS" > BENCHMARKS.md
+          echo "```" >> BENCHMARKS.md
           echo "**DATE:** $(date)" >> BENCHMARKS.md
-          echo "| **COMMIT:** $GITHUB_SHA" >> BENCHMARKS.md
+          echo "**COMMIT:** $GITHUB_SHA" >> BENCHMARKS.md
+          echo "```" >> BENCHMARKS.md
 
           echo "---" >> BENCHMARKS.md
 
