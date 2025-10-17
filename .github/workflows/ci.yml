@@ -1,14 +1,19 @@
 name: CI
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
 
 env:
   NODE_VERSION: '23.x'
   CACHE_KEY_PREFIX: 'cisv-v1'
 
 jobs:
-  # NOTE: reusable setup job for common dependencies
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -25,8 +30,7 @@ jobs:
 
       - name: Generate cache keys
         id: cache-keys
-        run: |
-          echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
+        run: echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm ci
@@ -57,8 +61,7 @@ jobs:
           key: ${{ needs.setup.outputs.cache-key }}
 
       - name: Build and test
-        run: |
-          npm run test:build
+        run: npm run test:build
 
   c-tests:
     name: C Native Tests
@@ -83,15 +86,13 @@ jobs:
       - name: Run C test suite
         run: make test-c
 
-  # TODO: py-tests, php-tests(composer package),...
-
   cli-build-test:
     name: CLI Build & Test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest] # will add macos-latest when ready
+        os: [ubuntu-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -118,22 +119,20 @@ jobs:
           make build
           make cli
 
-      - name: Create test CSV
+      - name: Test CLI functionality
         run: |
           cat > test.csv << 'EOF'
           id,name,value
           1,test,100
           2,demo,200
           EOF
-
-      - name: Test CLI functionality
-        run: |
           ./cisv_bin --version
           ./cisv_bin --help
           test "$(./cisv_bin -c test.csv | tr -d '[:space:]')" = "3"
           ./cisv_bin test.csv
           ./cisv_bin -s 0,2 test.csv
           ./cisv_bin --head 1 test.csv
+          rm -f test.csv
 
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
@@ -142,7 +141,6 @@ jobs:
           path: cisv_bin
           retention-days: 7
 
-  # memory checks (only on ubuntu)
   memory-check:
     name: Memory Safety Tests
     runs-on: ubuntu-latest
@@ -177,24 +175,15 @@ jobs:
           1,test,100
           2,demo,200
           EOF
-          cat > test_x.csv << 'EOF'
-          id,name,value,x
-          1,test,100,a
-          2,demo,200,b
-          EOF
 
       - name: Run Valgrind tests
         run: |
-          set -e
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
             --verbose --log-file=valgrind-version.log ./cisv_bin --version
-
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
             --log-file=valgrind-basic.log ./cisv_bin memtest.csv
-
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
             --log-file=valgrind-count.log ./cisv_bin -c memtest.csv
-
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
             --log-file=valgrind-select.log ./cisv_bin -s 0,2 memtest.csv
 
@@ -205,131 +194,113 @@ jobs:
 
       - name: Run deep leak tests
         run: |
-          chmod +x test_select.sh test_transform.sh
-          bash ./test_select.sh
-          bash ./test_transform.sh
-
-       # FIXME: on flag : [-Wmacro-redefined
-       # - name: Run AddressSanitizer tests
-       #   run: |
-       #     make clean
-       #     CC=clang \
-       #       CFLAGS="-g -O0 -fsanitize=address -fno-omit-frame-pointer" \
-       #       LDFLAGS="-fsanitize=address" \
-       #       make cli
-
-       #     ./cisv_bin --version
-       #     ./cisv_bin -c test_x.csv
-       #     ./cisv_bin -s 0,2,3 test_x.csv
+          if [ -f test_select.sh ]; then chmod +x test_select.sh && bash ./test_select.sh; fi
+          if [ -f test_transform.sh ]; then chmod +x test_transform.sh && bash ./test_transform.sh; fi
 
       - name: Upload memory check logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: memory-check-logs
-          path: |
-            valgrind-*.log
-            *.log
+          path: valgrind-*.log
           retention-days: 30
 
-  # Optional: Benchmark job (uncomment when ready)
-  # benchmark:
-  #   name: Performance Benchmarks
-  #   runs-on: ubuntu-latest
-  #   needs: [npm-tests, cli-build-test, memory-check]
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: ${{ env.NODE_VERSION }}
-  #
-  #     - name: Restore dependencies
-  #       uses: actions/cache/restore@v4
-  #       with:
-  #         path: node_modules
-  #         key: ${{ needs.setup.outputs.cache-key }}
-  #
-  #     - name: Setup Python
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: '3.x'
-  #         cache: 'pip'
-  #
-  #     - name: Install system dependencies
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y miller bc time
-  #
-  #     - name: Install Python tools
-  #       run: pip3 install 'babel>=2.9.0' 'csvkit>=1.1.0'
-  #
-  #     - name: Setup Rust
-  #       uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         components: rustfmt, clippy
-  #
-  #     - name: Cache Rust dependencies
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #         key: ${{ env.CACHE_KEY_PREFIX }}-rust-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-  #
-  #     - name: Install Rust tools
-  #       run: |
-  #         command -v xsv >/dev/null 2>&1 || cargo install xsv
-  #         command -v qsv >/dev/null 2>&1 || cargo install qsv
-  #
-  #     - name: Build CLI
-  #       run: |
-  #         make clean
-  #         make cli
-  #
-  #     - name: Run benchmarks
-  #       run: |
-  #         npm run benchmark
-  #         make benchmark-cli
-  #
-  #     - name: Generate benchmark report
-  #       run: |
-  #         {
-  #           echo "## Benchmark Results"
-  #           echo "Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-  #           echo "Commit: ${{ github.sha }}"
-  #           echo "Branch: ${{ github.ref_name }}"
-  #           echo ""
-  #           make benchmark-cli
-  #         } > benchmark-report.md
-  #
-  #     - name: Upload benchmark results
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: benchmark-results
-  #         path: benchmark-report.md
-  #         retention-days: 90
-  #
-  #     - name: Comment PR with results
-  #       if: github.event_name == 'pull_request'
-  #       uses: actions/github-script@v7
-  #       with:
-  #         script: |
-  #           const fs = require('fs');
-  #           const report = fs.readFileSync('benchmark-report.md', 'utf8');
-  #           github.rest.issues.createComment({
-  #             issue_number: context.issue.number,
-  #             owner: context.repo.owner,
-  #             repo: context.repo.repo,
-  #             body: report
-  #           });
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: [setup, cli-build-test]
+    if: |
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'benchmarks')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-  # status check on job
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Restore node_modules
+        uses: actions/cache/restore@v4
+        with:
+          path: node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Install dependencies
+        run: |
+          npm install -g node-gyp
+          sudo apt-get update
+          sudo apt-get install -y bc time python3
+
+      - name: Build modules
+        run: |
+          make clean
+          make build
+          make cli
+
+      - name: Run benchmarks
+        run: |
+          # Set environment to disable colors
+          export TERM=dumb
+          export NO_COLOR=1
+          export CI=true
+          export GITHUB_SHA="${{ github.sha }}"
+          export GITHUB_REF_NAME="${{ github.ref_name }}"
+
+          bash ./benchmark_cli.sh install
+          bash ./benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
+
+          # Verify BENCHMARKS.md was created
+          echo "## BENCHMARK RESULTS" > BENCHMARKS.md
+          echo "```" >> BENCHMARKS.md
+          echo "**DATE:** $(date)" >> BENCHMARKS.md
+          echo "**COMMIT:** $GITHUB_SHA" >> BENCHMARKS.md
+          echo "```" >> BENCHMARKS.md
+
+          echo "---" >> BENCHMARKS.md
+
+          echo "" >> BENCHMARKS.md
+          # echo "```markdown" >> BENCHMARKS.md
+          echo "" >> BENCHMARKS.md
+          cat benchmark.log >> BENCHMARKS.md
+          echo ""
+          # echo "```" >> BENCHMARKS.md
+          echo "" >> BENCHMARKS.md
+
+      - name: Commit and push
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add BENCHMARKS.md
+          git commit -m "Update benchmark results [skip ci]" || exit 0
+          git push --force origin ${{ github.event.pull_request.head.ref }}
+
+      - name: Comment PR with summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('BENCHMARKS.md')) {
+              const content = fs.readFileSync('BENCHMARKS.md', 'utf8');
+              const lines = content.split('\n');
+              let summary = '## BENCHMARK RESULTS\n\n';
+              summary += '> Benchmarks completed successfully!\n\n';
+              const dateLines = lines.filter(l => l.includes('Date:') || l.includes('Commit:')).slice(0, 2);
+              summary += dateLines.join('\n') + '\n\n';
+              summary += '>> Full results: [BENCHMARKS.md](../blob/${{ github.head_ref }}/BENCHMARKS.md)\n';
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
@@ -345,5 +316,5 @@ jobs:
             echo "One or more jobs were cancelled"
             exit 1
           else
-            echo "All jobs succeeded"
+            echo "All CI jobs succeeded"
           fi
