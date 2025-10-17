@@ -5,19 +5,14 @@
 ![Size](https://deno.bundlejs.com/badge?q=spring-easing)
 ![Downloads](https://badgen.net/npm/dw/cisv)
 
+> # DISCLAIMER
+>
+> This csv parser does not covers all quotes/comments edge cases, it is meant for now to be just extremly fast, thus not PROD ready yet.
 
 Cisv is a csv parser on steroids... literally.
 It's a high-performance CSV parser/writer leveraging SIMD instructions and zero-copy memory mapping. Available as both a Node.js native addon and standalone CLI tool with extensive configuration options.
 
 I wrote about basics in a blog post, you can read here :https://sanixdk.xyz/blogs/how-i-accidentally-created-the-fastest-csv-parser-ever-made.
-
-## PERFORMANCE
-
-- **469,968 MB/s** throughput on 2M row CSV files (AVX-512)
-- **10-100x faster** than popular CSV parsers
-- Zero-copy memory-mapped I/O with kernel optimizations
-- SIMD accelerated with AVX-512/AVX2 auto-detection
-- Dynamic lookup tables for configurable parsing
 
 ## CLI BENCHMARKS WITH DOCKER
 
@@ -37,45 +32,7 @@ $ docker run --rm      \
     seccomp=unconfined \
     cisv-benchmark
 ```
-
-## BENCHMARKS
-
-Benchmarks comparison with existing popular tools,
-cf pipeline you can check : (https://github.com/Sanix-Darker/cisv/actions/runs/17194915214/job/48775516036)
-
-### SYNCHRONOUS RESULTS
-
-| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 30.04        | 0.02          | 64936          |
-| csv-parse (sync)   | 13.35        | 0.03          | 28870          |
-| papaparse (sync)   | 25.16        | 0.02          | 54406          |
-
-### SYNCHRONOUS RESULTS (WITH DATA ACCESS)
-
-| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 31.24        | 0.01          | 67543          |
-| csv-parse (sync)   | 15.42        | 0.03          | 33335          |
-| papaparse (sync)   | 25.49        | 0.02          | 55107          |
-
-
-### ASYNCHRONOUS RESULTS
-
-| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 61.31        | 0.01          | 132561         |
-| papaparse (async/stream) | 19.24        | 0.02          | 41603          |
-| neat-csv (async/promise) | 9.09         | 0.05          | 19655          |
-
-
-### ASYNCHRONOUS RESULTS (WITH DATA ACCESS)
-
-| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 24.59        | 0.02          | 53160          |
-| papaparse (async/stream) | 21.86        | 0.02          | 47260          |
-| neat-csv (async/promise) | 9.38         | 0.05          | 20283          |
+**NOTE:** To have more details on benchmarks, check [BENCHMARK-LIST](./BENCHMARKS.md).
 
 ## INSTALLATION
 
@@ -120,16 +77,16 @@ const tsv_rows = tsv_parser.parseSync('./data.tsv');
 ### CLI
 ```bash
 # Basic parsing
-cisv data.csv
+cisv_bin data.csv
 
 # Parse TSV file
-cisv -d $'\t' data.tsv
+cisv_bin -d $'\t' data.tsv
 
 # Parse with custom quote and trim
-cisv -q "'" -t data.csv
+cisv_bin -q "'" -t data.csv
 
 # Skip comment lines
-cisv -m '#' config.csv
+cisv_bin -m '#' config.csv
 ```
 
 ## CONFIGURATION OPTIONS
@@ -352,7 +309,7 @@ const tsvCount = cisvParser.countRowsWithConfig('data.tsv', {
 ### PARSING OPTIONS
 
 ```bash
-cisv [OPTIONS] [FILE]
+cisv_bin [OPTIONS] [FILE]
 
 General Options:
   -h, --help              Show help message
@@ -384,34 +341,34 @@ Processing Options:
 
 ```bash
 # Parse TSV file
-cisv -d $'\t' data.tsv
+cisv_bin -d $'\t' data.tsv
 
 # Parse CSV with semicolon delimiter and single quotes
-cisv -d ';' -q "'" european.csv
+cisv_bin -d ';' -q "'" european.csv
 
 # Skip comment lines starting with #
-cisv -m '#' config.csv
+cisv_bin -m '#' config.csv
 
 # Trim whitespace and skip empty lines
-cisv -t --skip-empty messy.csv
+cisv_bin -t --skip-empty messy.csv
 
 # Parse lines 100-1000 only
-cisv --from-line 100 --to-line 1000 large.csv
+cisv_bin --from-line 100 --to-line 1000 large.csv
 
 # Select specific columns
-cisv -s 0,2,5,7 data.csv
+cisv_bin -s 0,2,5,7 data.csv
 
 # Count rows with specific configuration
-cisv -c -d $'\t' --skip-empty data.tsv
+cisv_bin -c -d $'\t' --skip-empty data.tsv
 
 # Benchmark with custom delimiter
-cisv -b -d ';' european.csv
+cisv_bin -b -d ';' european.csv
 ```
 
 ### WRITING
 
 ```bash
-cisv write [OPTIONS]
+cisv_bin write [OPTIONS]
 
 Options:
   -g, --generate N       Generate N rows of test data
@@ -423,44 +380,9 @@ Options:
   -b, --benchmark        Benchmark mode
 ```
 
-## BENCHMARKS
-
-### PARSER PERFORMANCE (273 MB, 5M ROWS)
-
-| Parser        | Speed (MB/s) | Time (ms) | Relative       |
-|---------------|--------------|-----------|----------------|
-| **cisv**      | 7,184        | 38        | 1.0x (fastest) |
-| rust-csv      | 391          | 698       | 18x slower     |
-| xsv           | 650          | 420       | 11x slower     |
-| csvkit        | 28           | 9,875     | 260x slower    |
-
-### NODE.JS LIBRARY BENCHMARKS
-
-| Library            | Speed (MB/s) | Operations/sec | Configuration Support |
-|--------------------|--------------|----------------|----------------------|
-| cisv              | 61.24        | 136,343        | Full                 |
-| csv-parse         | 15.48        | 34,471         | Partial              |
-| papaparse         | 25.67        | 57,147         | Partial              |
-
-(you can check more benchmarks details from release pipelines)
-
-### RUNNING BENCHMARKS
-
-```bash
-# CLI benchmarks
-make clean && make cli && make benchmark-cli
-
-# Node.js benchmarks
-npm run benchmark
-
-# Benchmark with custom configuration
-cisv -b -d ';' -q "'" --trim european.csv
-```
-
 ## TECHNICAL ARCHITECTURE
 
 - **SIMD Processing**: AVX-512 (64-byte vectors) or AVX2 (32-byte vectors) for parallel processing
-- **Dynamic Lookup Tables**: Generated per-configuration for optimal state transitions
 - **Memory Mapping**: Direct kernel-to-userspace zero-copy with `mmap()`
 - **Optimized Buffering**: 1MB ring buffer sized for L3 cache efficiency
 - **Compiler Optimizations**: LTO and architecture-specific tuning with `-march=native`

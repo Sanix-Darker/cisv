@@ -1,6 +1,6 @@
 # CONTRIBUTING
 
-Fill free to open an issue, we discuss about it,
+Feel free to open an issue, we discuss about it,
 then open the PR if you want to contribute.
 
 Keep in mind, creating an issue is in fact contribution ;)

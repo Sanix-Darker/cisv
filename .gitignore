@@ -7,3 +7,5 @@ cisv_bin
 valgrind_output.log
 benchmark/rust-csv-bench/
 valgrind_report.txt
+digest.txt
+tests/test_native

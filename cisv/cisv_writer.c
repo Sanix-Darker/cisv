@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "cisv_writer.h"
 #include <stdlib.h>
 #include <string.h>

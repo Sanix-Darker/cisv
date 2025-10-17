@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 15
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    rebase-strategy: "auto"
+
+# TODO:
+# upcomming for pip,composer,...
