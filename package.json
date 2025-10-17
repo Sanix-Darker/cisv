@@ -1,18 +1,24 @@
 {
   "name": "cisv",
   "version": "0.0.7",
-  "description": "The fastest csv parser of the multiverse",
+  "description": "The csv parser on steroids.",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
   "types": "./types/cisv.d.ts",
+  "exports": {
+    ".": {
+      "import": "./cisv/index.mjs",
+      "require": "./cisv/index.js"
+    }
+  },
   "scripts": {
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
     "test": "mocha ./tests/*.test.js && bash ./test_transform.sh",
-    "test:build": "npm run test",
-    "benchmark": "node benchmark/benchmark.js",
+    "test:build": "npm run build && npm run test",
+    "benchmark-js": "node benchmark/benchmark.js",
+    "benchmark-core": "bash ./benchmark_cli_reader.sh",
     "lint": "clang-format -i cisv/*.{cc,h}",
-    "prepublishOnly": "npm run benchmark",
     "pretest:typescript": "tsc --project tsconfig.json --noEmit",
     "build:types": "tsc --project tsconfig.json --declaration --emitDeclarationOnly",
     "test:all": "npm run test && npm run test:typescript",
@@ -20,21 +26,25 @@
     "test:perf": "node test/performance.test.js"
   },
   "dependencies": {
-    "node-addon-api": "^5.0.0"
+    "node-addon-api": "^8.5.0",
+    "node-gyp-build": "^4.8.4"
   },
   "devDependencies": {
+    "but-csv": "^2.0.14",
+    "d3-dsv": "^3.0.1",
+    "udsv": "^0.7.3",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^20.19.9",
+    "@types/node": "^24.7.1",
     "benchmark": "^2.1.4",
-    "chai": "^4.3.6",
-    "mocha": "^10.0.0",
-    "nyc": "^15.0.0",
-    "ts-mocha": "^10.1.0",
-    "typescript": "^5.8.3",
+    "chai": "^6.2.0",
     "csv-parse": "^6.0.0",
     "fast-csv": "^5.0.2",
+    "mocha": "^11.7.4",
     "neat-csv": "^7.0.0",
-    "papaparse": "^5.5.3"
+    "nyc": "^17.1.0",
+    "papaparse": "^5.5.3",
+    "ts-mocha": "^11.1.0",
+    "typescript": "^5.8.3"
   },
   "gypfile": true,
   "keywords": [

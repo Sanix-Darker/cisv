@@ -1,11 +1,14 @@
 'use strict';
 // direct node ./benchmark/benchmark.js
 // means you have to call from :../build/Release/cisv
-const { cisvParser } = require('../../build/Release/cisv');
+const { cisvParser } = require('../build/Release/cisv');
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');
 const fastCsv = require('fast-csv');
+const { inferSchema, initParser } = require('udsv');
+const d3 = require('d3-dsv');
+// const { iter } = require('but-csv');
 const fs = require('fs');
 const { Suite } = require('benchmark');
 const stream = require('stream');
@@ -32,7 +35,7 @@ try {
 }
 
 const BENCH_FILE = path.resolve(benchFilePath);
-console.log(">>> Using benchmark file:", BENCH_FILE);
+console.log(" Using benchmark file:", BENCH_FILE);
 
 // We set a row to retrieve.
 // This ensures all parsers do the work to make data accessible.
@@ -90,10 +93,21 @@ async function runAllBenchmarks() {
           .add('papaparse (sync)', () => {
             Papa.parse(fileString, { fastMode: true });
           })
+          .add('udsv (sync)', () => {
+            const schema = inferSchema(fileString);
+            const parser = initParser(schema);
+            parser.stringArrs(fileString);
+          })
+          .add('d3-dsv (sync)', () => {
+            d3.csvParse(fileString);
+          })
+          // .add('but-csv (sync)', () => {
+          //   Array.from(iter(fileString));
+          // })
           .on('cycle', (event) => logCycle(event, 'sync'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Sync is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Sync is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run();
@@ -122,10 +136,24 @@ async function runAllBenchmarks() {
             const result = Papa.parse(fileString, { fastMode: true });
             const specificRow = result.data[TARGET_ROW_INDEX];
           })
+          .add('udsv (sync)', () => {
+            const schema = inferSchema(fileString);
+            const parser = initParser(schema);
+            const rows = parser.stringArrs(fileString);
+            const specificRow = rows[TARGET_ROW_INDEX];
+          })
+          .add('d3-dsv (sync)', () => {
+            const rows = d3.csvParse(fileString);
+            const specificRow = rows[TARGET_ROW_INDEX];
+          })
+          //.add('but-csv (sync)', () => {
+          //  const rows = Array.from(iter(fileString));
+          //  const specificRow = rows[TARGET_ROW_INDEX];
+          //})
           .on('cycle', (event) => logCycle(event, 'sync_data'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Sync is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Sync is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run();
@@ -168,6 +196,18 @@ async function runAllBenchmarks() {
               });
             }
           })
+          .add('fast-csv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const rows = [];
+              const readable = stream.Readable.from(fileBuffer);
+              readable
+                .pipe(fastCsv.parse({ headers: true }))
+                .on('data', (row) => rows.push(row))
+                .on('end', () => deferred.resolve())
+                .on('error', (err) => deferred.reject(err));
+            }
+          })
           .add('neat-csv (async/promise)', {
             defer: true,
             fn: (deferred) => {
@@ -178,10 +218,36 @@ async function runAllBenchmarks() {
                 .catch((err) => deferred.reject(err));
             }
           })
+          .add('udsv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const readable = stream.Readable.from(fileString);
+              let parser = null;
+
+              readable
+                .on('data', (chunk) => {
+                  const strChunk = chunk.toString();
+                  if (parser == null) {
+                    const schema = inferSchema(strChunk);
+                    parser = initParser(schema);
+                  }
+                  parser.chunk(strChunk);
+                })
+                .on('end', () => {
+                  if (parser != null) {
+                    parser.end();
+                  }
+                  deferred.resolve();
+                })
+                .on('error', (err) => deferred.reject(err));
+            }
+          })
+          // Note: d3-dsv and but-csv don't have native async streaming support
+          // so they are only included in sync benchmarks
           .on('cycle', (event) => logCycle(event, 'async'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Async is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Async is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run({ async: true });
@@ -227,6 +293,21 @@ async function runAllBenchmarks() {
               });
             }
           })
+          .add('fast-csv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const rows = [];
+              const readable = stream.Readable.from(fileBuffer);
+              readable
+                .pipe(fastCsv.parse({ headers: true }))
+                .on('data', (row) => rows.push(row))
+                .on('end', () => {
+                  const specificRow = rows[TARGET_ROW_INDEX];
+                  deferred.resolve();
+                })
+                .on('error', (err) => deferred.reject(err));
+            }
+          })
           .add('neat-csv (async/promise)', {
             defer: true,
             fn: (deferred) => {
@@ -238,10 +319,36 @@ async function runAllBenchmarks() {
                 .catch((err) => deferred.reject(err));
             }
           })
+          .add('udsv (async/stream)', {
+            defer: true,
+            fn: (deferred) => {
+              const readable = stream.Readable.from(fileString);
+              let parser = null;
+              let result = null;
+
+              readable
+                .on('data', (chunk) => {
+                  const strChunk = chunk.toString();
+                  if (!parser) {
+                    const schema = inferSchema(strChunk);
+                    parser = initParser(schema);
+                  }
+                  parser.chunk(strChunk, parser.stringArrs);
+                })
+                .on('end', () => {
+                  if (parser) {
+                    result = parser.end();
+                    const specificRow = result[TARGET_ROW_INDEX];
+                  }
+                  deferred.resolve();
+                })
+                .on('error', (err) => deferred.reject(err));
+            }
+          })
           .on('cycle', (event) => logCycle(event, 'async_data'))
           .on('error', reject)
           .on('complete', function() {
-            console.log(`\n>>>>> Fastest Async is ${this.filter('fastest').map('name')}\n`);
+            console.log(`\n Fastest Async is ${this.filter('fastest').map('name')}\n`);
             resolve();
           })
           .run({ async: true });
@@ -255,6 +362,7 @@ async function runAllBenchmarks() {
         const opsPerSec = event.target.hz;
         const speedMBps = (fileSizeMB * opsPerSec);
 
+        console.log('```');
         const resultLine = `  ${String(event.target)}\n    Speed: ${speedMBps.toFixed(2)} MB/s | Avg Time: ${(meanTime * 1000).toFixed(2)} ms | Ops/sec: ${opsPerSec.toFixed(0)}`;
         console.log(resultLine);
 
@@ -266,43 +374,71 @@ async function runAllBenchmarks() {
         });
 
         console.log('    (cooling down...)\n');
+        console.log('```');
     }
 
     function generateMarkdownReport() {
         console.log('-'.repeat(50));
         console.log('\nBenchmark Results Table (Markdown)\n');
 
-        console.log('### Synchronous Results\n');
+        // Sort results by speed (fastest first) for each category
+        const sortBySpeed = (a, b) => parseFloat(b.speed) - parseFloat(a.speed);
+        const sortByOps = (a, b) => parseFloat(b.ops) - parseFloat(a.ops);
+
+        // Synchronous Results - sorted by speed
+        console.log('### Synchronous Results (sorted by speed - fastest first)\n');
         let syncTable = '| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
         syncTable +=    '|--------------------|--------------|---------------|----------------|\n';
-        results.sync.forEach(r => {
+        results.sync.sort(sortBySpeed).forEach(r => {
             syncTable += `| ${r.name.padEnd(18)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
         });
         console.log(syncTable);
 
-        console.log('### Synchronous Results (with data access)\n');
+        // Synchronous Results with data access - sorted by speed
+        console.log('### Synchronous Results (with data access - sorted by speed)\n');
         let syncTabled = '| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
         syncTabled +=    '|--------------------|--------------|---------------|----------------|\n';
-        results.sync_data.forEach(r => {
+        results.sync_data.sort(sortBySpeed).forEach(r => {
             syncTabled += `| ${r.name.padEnd(18)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
         });
         console.log(syncTabled);
 
-        console.log('\n### Asynchronous Results\n');
+        // Asynchronous Results - sorted by speed
+        console.log('\n### Asynchronous Results (sorted by speed - fastest first)\n');
         let asyncTable = '| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
         asyncTable +=    '|--------------------------|--------------|---------------|----------------|\n';
-        results.async.forEach(r => {
+        results.async.sort(sortBySpeed).forEach(r => {
             asyncTable += `| ${r.name.padEnd(24)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
         });
         console.log(asyncTable);
 
-        console.log('\n### Asynchronous Results (with data access)\n');
+        // Asynchronous Results with data access - sorted by speed
+        console.log('\n### Asynchronous Results (with data access - sorted by speed)\n');
         let asyncTabled = '| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
         asyncTabled +=    '|--------------------------|--------------|---------------|----------------|\n';
-        results.async_data.forEach(r => {
+        results.async_data.sort(sortBySpeed).forEach(r => {
             asyncTabled += `| ${r.name.padEnd(24)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
         });
         console.log(asyncTabled);
+
+        // sorted by Operations/sec tables
+        console.log('\n## Alternative Sorting: By Operations/sec\n');
+
+        console.log('### Synchronous Results (sorted by operations/sec)\n');
+        let syncOpsTable = '| Library            | Operations/sec | Speed (MB/s) | Avg Time (ms) |\n';
+        syncOpsTable +=    '|--------------------|----------------|--------------|---------------|\n';
+        results.sync.sort(sortByOps).forEach(r => {
+            syncOpsTable += `| ${r.name.padEnd(18)} | ${r.ops.padEnd(14)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} |\n`;
+        });
+        console.log(syncOpsTable);
+
+        console.log('### Asynchronous Results (sorted by operations/sec)\n');
+        let asyncOpsTable = '| Library                  | Operations/sec | Speed (MB/s) | Avg Time (ms) |\n';
+        asyncOpsTable +=    '|--------------------------|----------------|--------------|---------------|\n';
+        results.async.sort(sortByOps).forEach(r => {
+            asyncOpsTable += `| ${r.name.padEnd(24)} | ${r.ops.padEnd(14)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} |\n`;
+        });
+        console.log(asyncOpsTable);
     }
 }
 

@@ -1,16 +1,18 @@
-#define _GNU_SOURCE
 #include "cisv_transformer.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
 
+#ifdef __AVX512F__
+#include <immintrin.h>
+#endif
+
 #ifdef __AVX2__
 #include <immintrin.h>
 #endif
 
 #define TRANSFORM_POOL_SIZE (1 << 20)  // 1MB default pool
-// #define TRANSFORM_POOL_SIZE (1 << 16)  // 64kb (for memory safe reasons)
 #define SIMD_ALIGNMENT 64
 
 // Create transform pipeline
