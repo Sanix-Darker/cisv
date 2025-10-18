@@ -18,7 +18,7 @@ NC=""
 
 # Configuration
 ITERATIONS=3
-SIZES=("small")
+SIZES=("large")
 declare -a BENCH_RESULTS
 declare -a BENCH_NAMES
 RESULT_COUNT=0
@@ -380,24 +380,30 @@ generate_test_files() {
         exit 1
     fi
 
-    if [ ! -f "small.csv" ] || [ "$FORCE_REGENERATE" = "true" ]; then
-        echo "Creating small.csv (1K rows)..."
-        generate_csv 1000 "small.csv"
-    fi
+    # if [ ! -f "small.csv" ] || [ "$FORCE_REGENERATE" = "true" ]; then
+    #     echo "Creating small.csv (1K rows)..."
+    #     generate_csv 1000 "small.csv"
+    # fi
 
-    if ([ ! -f "medium.csv" ] || [ "$FORCE_REGENERATE" = "true" ]) && [[ " ${SIZES[@]} " =~ " medium " ]]; then
-        echo "Creating medium.csv (100K rows)..."
-        generate_csv 100000 "medium.csv"
-    fi
+    # if ([ ! -f "medium.csv" ] || [ "$FORCE_REGENERATE" = "true" ]) && [[ " ${SIZES[@]} " =~ " medium " ]]; then
+    #     echo "Creating medium.csv (100K rows)..."
+    #     generate_csv 100000 "medium.csv"
+    # fi
 
     if ([ ! -f "large.csv" ] || [ "$FORCE_REGENERATE" = "true" ]) && [[ " ${SIZES[@]} " =~ " large " ]]; then
-        echo "Creating large.csv (100K rows)..."
+        echo "Creating large.csv (1M rows)..."
         generate_csv 1000000 "large.csv"
     fi
 }
 
+# install_cli_tools() {
+#     # linux/deb related
+#     # sudo apt-get install miller csvkit -y
+# }
 
 run_cli_benchmarks() {
+    # install_cli_tools
+
     print_msg "$BLUE" "\n## CLI BENCHMARKS\n"
 
     for size in "${SIZES[@]}"; do
@@ -421,43 +427,31 @@ run_cli_benchmarks() {
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -c" "${size}.csv"
 
-        if [ -f "benchmark/rust-csv-bench/target/release/csv-bench" ]; then
-            benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-bench" "${size}.csv"
-        fi
+        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-bench" "${size}.csv"
 
         benchmark "wc -l" "wc -l" "${size}.csv"
 
-        if command_exists csvstat; then
-            benchmark "csvkit" "csvstat --count" "${size}.csv"
-        fi
+        benchmark "csvkit" "csvstat --count" "${size}.csv"
 
-        if command_exists mlr; then
-            benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
-        fi
+        benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
         print_msg "$RED" ""
         print_msg "$RED" "\`\`\`"
 
         display_sorted_results "Row Counting - ${size}.csv"
 
         print_msg "$YELLOW" "\n#### COLUMN SELECTION TEST (COLUMNS 0,2,3)\n"
-
         print_msg "$RED" "\`\`\`"
         print_msg "$RED" ""
+
         # -------
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -s 0,2,3" "${size}.csv"
 
-        if [ -f "benchmark/rust-csv-bench/target/release/csv-select" ]; then
-            benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "${size}.csv" "0,2,3"
-        fi
+        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "${size}.csv" "0,2,3"
 
-        if command_exists csvcut; then
-            benchmark "csvkit" "csvcut -c 1,3,4" "${size}.csv"
-        fi
+        benchmark "csvkit" "csvcut -c 1,3,4" "${size}.csv"
 
-        if command_exists mlr; then
-            benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
-        fi
+        benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
 
         print_msg "$RED" ""
         print_msg "$RED" "\`\`\`"
@@ -482,7 +476,7 @@ cleanup() {
     for file in "${files[@]}"; do
         if [ -f "$file" ]; then
             rm -f "$file"
-            echo "  Removed $file"
+            echo "Removed $file"
         fi
     done
 }
@@ -552,7 +546,7 @@ main() {
                 shift
                 ;;
             --all)
-                SIZES=("small" "medium") # no large for now :"large"
+                SIZES=("large") # "small" "medium" "large"
                 shift
                 ;;
             --force-regenerate)
