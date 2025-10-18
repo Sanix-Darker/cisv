@@ -1,12 +1,10 @@
 'use strict';
 // direct node ./benchmark/benchmark.js
 // means you have to call from :../build/Release/cisv
-
 function loadCisvParser() {
     const paths = [
         '../build/Release/cisv',
         '../../build/Release/cisv',
-        './build/Release/cisv'
     ];
 
     for (const path of paths) {
