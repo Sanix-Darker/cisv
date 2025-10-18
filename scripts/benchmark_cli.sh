@@ -396,8 +396,14 @@ generate_test_files() {
     fi
 }
 
+install_cli_tools() {
+    # linux/deb related
+    apt-get install miller csvkit -y
+}
 
 run_cli_benchmarks() {
+    install_cli_tools
+
     print_msg "$BLUE" "\n## CLI BENCHMARKS\n"
 
     for size in "${SIZES[@]}"; do
@@ -421,28 +427,22 @@ run_cli_benchmarks() {
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -c" "${size}.csv"
 
-        if [ -f "benchmark/rust-csv-bench/target/release/csv-bench" ]; then
-            benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-bench" "${size}.csv"
-        fi
+        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-bench" "${size}.csv"
 
         benchmark "wc -l" "wc -l" "${size}.csv"
 
-        if command_exists csvstat; then
-            benchmark "csvkit" "csvstat --count" "${size}.csv"
-        fi
+        benchmark "csvkit" "csvstat --count" "${size}.csv"
 
-        if command_exists mlr; then
-            benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
-        fi
+        benchmark "miller" "mlr --csv --headerless-csv-output cat -n then stats1 -a max -f n " "${size}.csv"
         print_msg "$RED" ""
         print_msg "$RED" "\`\`\`"
 
         display_sorted_results "Row Counting - ${size}.csv"
 
         print_msg "$YELLOW" "\n#### COLUMN SELECTION TEST (COLUMNS 0,2,3)\n"
-
         print_msg "$RED" "\`\`\`"
         print_msg "$RED" ""
+
         # -------
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -s 0,2,3" "${size}.csv"
