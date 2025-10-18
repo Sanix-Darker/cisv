@@ -18,7 +18,7 @@ NC=""
 
 # Configuration
 ITERATIONS=3
-SIZES=("small")
+SIZES=("large")
 declare -a BENCH_RESULTS
 declare -a BENCH_NAMES
 RESULT_COUNT=0
@@ -396,13 +396,13 @@ generate_test_files() {
     fi
 }
 
-install_cli_tools() {
-    # linux/deb related
-    apt-get install miller csvkit -y
-}
+# install_cli_tools() {
+#     # linux/deb related
+#     # sudo apt-get install miller csvkit -y
+# }
 
 run_cli_benchmarks() {
-    install_cli_tools
+    # install_cli_tools
 
     print_msg "$BLUE" "\n## CLI BENCHMARKS\n"
 
@@ -447,17 +447,11 @@ run_cli_benchmarks() {
         # bench for cisv:
         benchmark "cisv" "./cisv_bin -s 0,2,3" "${size}.csv"
 
-        if [ -f "benchmark/rust-csv-bench/target/release/csv-select" ]; then
-            benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "${size}.csv" "0,2,3"
-        fi
+        benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "${size}.csv" "0,2,3"
 
-        if command_exists csvcut; then
-            benchmark "csvkit" "csvcut -c 1,3,4" "${size}.csv"
-        fi
+        benchmark "csvkit" "csvcut -c 1,3,4" "${size}.csv"
 
-        if command_exists mlr; then
-            benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
-        fi
+        benchmark "miller" "mlr --csv cut -f id,email,address" "${size}.csv"
 
         print_msg "$RED" ""
         print_msg "$RED" "\`\`\`"
@@ -482,7 +476,7 @@ cleanup() {
     for file in "${files[@]}"; do
         if [ -f "$file" ]; then
             rm -f "$file"
-            echo "  Removed $file"
+            echo "Removed $file"
         fi
     done
 }
