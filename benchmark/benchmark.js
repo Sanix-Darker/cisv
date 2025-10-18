@@ -1,7 +1,36 @@
 'use strict';
 // direct node ./benchmark/benchmark.js
 // means you have to call from :../build/Release/cisv
-const { cisvParser } = require('../../build/Release/cisv');
+
+function loadCisvParser() {
+    const paths = [
+        '../build/Release/cisv',
+        '../../build/Release/cisv',
+        './build/Release/cisv'
+    ];
+
+    for (const path of paths) {
+        try {
+            const module = require(path);
+            if (module && module.cisvParser) {
+                return module.cisvParser;
+            }
+        } catch (error) {
+            // Simply try the next path if there's an error
+        }
+    }
+
+    // If none of the paths worked, throw an error
+    throw new Error('Failed to load cisvParser from the specified paths.');
+}
+
+let cisvParser;
+
+try {
+    cisvParser = loadCisvParser();
+} catch (error) {
+    console.error(error.message);
+}
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
 const Papa = require('papaparse');
