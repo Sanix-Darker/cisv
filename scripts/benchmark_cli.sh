@@ -380,18 +380,18 @@ generate_test_files() {
         exit 1
     fi
 
-    if [ ! -f "small.csv" ] || [ "$FORCE_REGENERATE" = "true" ]; then
-        echo "Creating small.csv (1K rows)..."
-        generate_csv 1000 "small.csv"
-    fi
+    # if [ ! -f "small.csv" ] || [ "$FORCE_REGENERATE" = "true" ]; then
+    #     echo "Creating small.csv (1K rows)..."
+    #     generate_csv 1000 "small.csv"
+    # fi
 
-    if ([ ! -f "medium.csv" ] || [ "$FORCE_REGENERATE" = "true" ]) && [[ " ${SIZES[@]} " =~ " medium " ]]; then
-        echo "Creating medium.csv (100K rows)..."
-        generate_csv 100000 "medium.csv"
-    fi
+    # if ([ ! -f "medium.csv" ] || [ "$FORCE_REGENERATE" = "true" ]) && [[ " ${SIZES[@]} " =~ " medium " ]]; then
+    #     echo "Creating medium.csv (100K rows)..."
+    #     generate_csv 100000 "medium.csv"
+    # fi
 
     if ([ ! -f "large.csv" ] || [ "$FORCE_REGENERATE" = "true" ]) && [[ " ${SIZES[@]} " =~ " large " ]]; then
-        echo "Creating large.csv (100K rows)..."
+        echo "Creating large.csv (1M rows)..."
         generate_csv 1000000 "large.csv"
     fi
 }
@@ -552,7 +552,7 @@ main() {
                 shift
                 ;;
             --all)
-                SIZES=("small" "medium") # no large for now :"large"
+                SIZES=("large") # "small" "medium" "large"
                 shift
                 ;;
             --force-regenerate)
