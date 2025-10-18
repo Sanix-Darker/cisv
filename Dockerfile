@@ -52,12 +52,13 @@ WORKDIR /home/benchmark/cisv
 RUN make clean && cargo install qsv && make install-benchmark-deps && make cli
 
 # Create main benchmark runner script
-COPY ./benchmark_cli_writer.sh ./benchmark_cli_reader.sh ./run_benchmarks.sh /home/benchmark/
-RUN chmod +x /home/benchmark/run_benchmarks.sh
+COPY ./scripts/benchmark_cli.sh /home/benchmark/
+RUN chmod +x /home/benchmark/benchmark_cli.sh
+RUN /home/benchmark/benchmark_cli.sh install
 
 # Switch to benchmark user
 USER benchmark
 WORKDIR /home/benchmark/cisv
 
 # Default command runs all benchmarks
-CMD ["/home/benchmark/run_benchmarks.sh", "all"]
+CMD ["/home/benchmark/benchmark_cli.sh", "benchmark"]
