@@ -256,21 +256,14 @@ jobs:
           bash ./scripts/benchmark_cli.sh install
           bash ./scripts/benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
 
-          # Verify BENCHMARKS.md was created
           echo "## BENCHMARK RESULTS" > BENCHMARKS.md
-          echo "```" >> BENCHMARKS.md
-          echo "**DATE:** $(date)" >> BENCHMARKS.md
-          echo "**COMMIT:** $GITHUB_SHA" >> BENCHMARKS.md
-          echo "```" >> BENCHMARKS.md
+          echo "`**DATE:** $(date)" >> BENCHMARKS.md
+          echo "**COMMIT:** $GITHUB_SHA`" >> BENCHMARKS.md
 
           echo "---" >> BENCHMARKS.md
 
           echo "" >> BENCHMARKS.md
-          # echo "```markdown" >> BENCHMARKS.md
-          echo "" >> BENCHMARKS.md
           cat benchmark.log >> BENCHMARKS.md
-          echo ""
-          # echo "```" >> BENCHMARKS.md
           echo "" >> BENCHMARKS.md
 
       - name: Commit and push
