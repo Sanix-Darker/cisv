@@ -492,9 +492,9 @@ show_help() {
 Usage: $0 [MODE] [OPTIONS]
 
 Modes:
-    install         Install dependencies and build tools
-    cli             Run CLI benchmarks
-    npm             Run NPM/Node benchmarks
+    install           Install dependencies and build tools
+    benchmark         Run CLI benchmarks
+    npm-benchmark     Run npm benchmark
 
 Options:
     --large           Include large (1M rows) file in benchmarks
@@ -528,6 +528,10 @@ main() {
             ;;
         benchmark)
             MODE="benchmark"
+            shift
+            ;;
+        npm-benchmark)
+            MODE="npm-benchmark"
             shift
             ;;
         --help|-h)
@@ -579,31 +583,23 @@ main() {
         install)
             install_dependencies
             ;;
-
-        cli)
+        benchmark)
             if ! command_exists awk; then
                 print_msg "$RED" "Error: 'awk' is required but not installed"
                 exit 1
             fi
             generate_test_files
+            # cli benchs
             run_cli_benchmarks
-            if [ "$NO_CLEANUP" != "true" ]; then
-                cleanup
-            fi
-            print_msg "$GREEN" "\nCLI Benchmark complete!"
-            ;;
-
-        npm)
-            if ! command_exists awk; then
-                print_msg "$RED" "Error: 'awk' is required but not installed"
-                exit 1
-            fi
-            generate_test_files
+            # npm benchs
             run_npm_benchmarks
             if [ "$NO_CLEANUP" != "true" ]; then
                 cleanup
             fi
-            print_msg "$GREEN" "\nNPM Benchmark complete!"
+            print_msg "$GREEN" "\nBenchmark complete!"
+            ;;
+        npm-benchmark)
+            run_npm_benchmarks
             ;;
     esac
 }
