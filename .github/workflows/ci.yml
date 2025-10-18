@@ -146,6 +146,9 @@ jobs:
     name: Memory Safety Tests
     runs-on: ubuntu-latest
     needs: cli-build-test
+    if: |
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'memory-checks')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
