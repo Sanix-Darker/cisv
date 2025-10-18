@@ -238,13 +238,13 @@ package: clean build test
 
 # Test writer functionality
 test-writer: cli
-	chmod +x test_writer.sh
-	./test_writer.sh
+	chmod +x ./scripts/test_writer.sh
+	./scripts/test_writer.sh
 
 # Benchmark writer performance
 benchmark-writer: cli
-	chmod +x benchmark_cli_writer.sh
-	./benchmark_cli_writer.sh
+	chmod +x ./scripts/benchmark_cli_writer.sh
+	./scripts/benchmark_cli_writer.sh
 
 # Run all benchmarks
 benchmark-all: benchmark-cli benchmark-writer
