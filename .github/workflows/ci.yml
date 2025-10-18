@@ -195,8 +195,8 @@ jobs:
 
       - name: Run deep leak tests
         run: |
-          if [ -f test_select.sh ]; then chmod +x test_select.sh && bash ./test_select.sh; fi
-          if [ -f test_transform.sh ]; then chmod +x test_transform.sh && bash ./test_transform.sh; fi
+          if [ -f scripts/test_select.sh ]; then chmod +x scripts/test_select.sh && bash ./scripts/test_select.sh; fi
+          if [ -f scripts/test_transform.sh ]; then chmod +x scripts/test_transform.sh && bash ./scripts/test_transform.sh; fi
 
       - name: Upload memory check logs
         if: failure()
@@ -253,8 +253,8 @@ jobs:
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
 
-          bash ./benchmark_cli.sh install
-          bash ./benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
+          bash ./scripts/benchmark_cli.sh install
+          bash ./scripts/benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
 
           # Verify BENCHMARKS.md was created
           echo "## BENCHMARK RESULTS" > BENCHMARKS.md
