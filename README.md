@@ -34,12 +34,6 @@ $ docker run --rm      \
 ```
 **NOTE:** To have more details on benchmarks, check [BENCHMARK-LIST](./BENCHMARKS.md).
 
-## INSTALLATION
-
-### NODE.JS PACKAGE
-```bash
-npm install cisv
-```
 
 ### CLI TOOL (FROM SOURCE)
 ```bash
@@ -49,30 +43,8 @@ make cli
 sudo make install-cli
 ```
 
-### BUILD FROM SOURCE (NODE.JS ADDON)
-```bash
-npm install -g node-gyp
 make build
-```
 
-## QUICK START
-
-### NODE.JS
-```javascript
-const { cisvParser } = require('cisv');
-
-// Basic usage
-const parser = new cisvParser();
-const rows = parser.parseSync('./data.csv');
-
-// With configuration (optional)
-const tsv_parser = new cisvParser({
-    delimiter: '\t',
-    quote: "'",
-    trim: true
-});
-const tsv_rows = tsv_parser.parseSync('./data.tsv');
-```
 
 ### CLI
 ```bash
