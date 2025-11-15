@@ -1,7 +1,7 @@
 ## BENCHMARK RESULTS
 ```
-**DATE:** Sat Nov 15 22:18:49 UTC 2025
-**COMMIT:** 248ab55e753cd5a839f4907d4597c381cf8549ee
+DATE: Sat Nov 15 22:26:30 UTC 2025
+COMMIT: f20141f7c334bcafe5bff3a69282d3d0c739c1ed
 ```
 ---
 
@@ -31,31 +31,31 @@ File info: 108.19 MB, 1000001 rows
 
 
 -> cisv
-  Run 1: 0.0217733s
-  Run 2: 0.0203111s
-  Run 3: 0.0202143s
-  Average Time: 0.0208 seconds
+  Run 1: 0.0217245s
+  Run 2: 0.0206788s
+  Run 3: 0.0209408s
+  Average Time: 0.0211 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.188477s
-  Run 2: 0.189259s
-  Run 3: 0.177363s
-  Average Time: 0.1850 seconds
+  Run 1: 0.192736s
+  Run 2: 0.191062s
+  Run 3: 0.188862s
+  Average Time: 0.1909 seconds
   Successful runs: 3/3
 
 -> wc -l
-  Run 1: 0.021579s
-  Run 2: 0.0213945s
-  Run 3: 0.0214257s
-  Average Time: 0.0215 seconds
+  Run 1: 0.0222838s
+  Run 2: 0.0226128s
+  Run 3: 0.0213947s
+  Average Time: 0.0221 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.43545s
-  Run 2: 2.30144s
-  Run 3: 2.29134s
-  Average Time: 2.3427 seconds
+  Run 1: 2.35846s
+  Run 2: 2.35629s
+  Run 3: 2.3525s
+  Average Time: 2.3558 seconds
   Successful runs: 3/3
 
 -> miller
@@ -71,19 +71,19 @@ File info: 108.19 MB, 1000001 rows
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      5201.44 |       0.0208 |          48.08 |
-| wc -l                |      5032.09 |       0.0215 |          46.51 |
-| rust-csv             |       584.81 |       0.1850 |           5.41 |
-| csvkit               |        46.18 |       2.3427 |           0.43 |
+| cisv                 |      5127.49 |       0.0211 |          47.39 |
+| wc -l                |      4895.48 |       0.0221 |          45.25 |
+| rust-csv             |       566.74 |       0.1909 |           5.24 |
+| csvkit               |        45.92 |       2.3558 |           0.42 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      5201.44 |       0.0208 |          48.08 |
-| wc -l                |      5032.09 |       0.0215 |          46.51 |
-| rust-csv             |       584.81 |       0.1850 |           5.41 |
-| csvkit               |        46.18 |       2.3427 |           0.43 |
+| cisv                 |      5127.49 |       0.0211 |          47.39 |
+| wc -l                |      4895.48 |       0.0221 |          45.25 |
+| rust-csv             |       566.74 |       0.1909 |           5.24 |
+| csvkit               |        45.92 |       2.3558 |           0.42 |
 
 #### COLUMN SELECTION TEST (COLUMNS 0,2,3)
 
@@ -91,24 +91,24 @@ Sorted by Operations/sec - Most Operations First:
 
 
 -> cisv
-  Run 1: 0.436717s
-  Run 2: 0.431018s
-  Run 3: 0.434706s
-  Average Time: 0.4341 seconds
+  Run 1: 0.433977s
+  Run 2: 0.440974s
+  Run 3: 0.436573s
+  Average Time: 0.4372 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.320278s
-  Run 2: 0.317139s
-  Run 3: 0.321364s
-  Average Time: 0.3196 seconds
+  Run 1: 0.323612s
+  Run 2: 0.331573s
+  Run 3: 0.320407s
+  Average Time: 0.3252 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.60245s
-  Run 2: 2.56421s
-  Run 3: 2.58601s
-  Average Time: 2.5842 seconds
+  Run 1: 2.56045s
+  Run 2: 2.61004s
+  Run 3: 2.55851s
+  Average Time: 2.5763 seconds
   Successful runs: 3/3
 
 -> miller
@@ -124,31 +124,49 @@ Sorted by Operations/sec - Most Operations First:
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       338.52 |       0.3196 |           3.13 |
-| cisv                 |       249.23 |       0.4341 |           2.30 |
-| csvkit               |        41.87 |       2.5842 |           0.39 |
+| rust-csv             |       332.69 |       0.3252 |           3.08 |
+| cisv                 |       247.46 |       0.4372 |           2.29 |
+| csvkit               |        41.99 |       2.5763 |           0.39 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       338.52 |       0.3196 |           3.13 |
-| cisv                 |       249.23 |       0.4341 |           2.30 |
-| csvkit               |        41.87 |       2.5842 |           0.39 |
+| rust-csv             |       332.69 |       0.3252 |           3.08 |
+| cisv                 |       247.46 |       0.4372 |           2.29 |
+| csvkit               |        41.99 |       2.5763 |           0.39 |
 
 ## NPM Benchmarks
 
-npm error code ENOENT
-npm error syscall open
-npm error path /home/runner/work/cisv/cisv/package.json
-npm error errno -2
-npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/home/runner/work/cisv/cisv/package.json'
-npm error enoent This is related to npm not being able to find a file.
-npm error enoent
-npm error A complete log of this run can be found in: /home/runner/.npm/_logs/2025-11-15T22_18_49_244Z-debug-0.log
+
+> cisv@0.0.7 benchmark-js
+> node ../benchmark/benchmark.js
+
+Failed to load cisvParser from the specified paths.
+node:internal/modules/cjs/loader:1408
+  throw err;
+  ^
+
+Error: Cannot find module 'csv-parse/sync'
+Require stack:
+- /home/runner/work/cisv/cisv/benchmark/benchmark.js
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1405:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1061:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1066:22)
+    at Function._load (node:internal/modules/cjs/loader:1215:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1491:12)
+    at require (node:internal/modules/helpers:135:16)
+    at Object.<anonymous> (/home/runner/work/cisv/cisv/benchmark/benchmark.js:32:33)
+    at Module._compile (node:internal/modules/cjs/loader:1734:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ '/home/runner/work/cisv/cisv/benchmark/benchmark.js' ]
+}
+
+Node.js v23.11.1
 
 Cleaning up test files...
-Removed large.csv
 
 Benchmark complete!
 
