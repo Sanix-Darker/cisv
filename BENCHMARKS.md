@@ -1,7 +1,7 @@
 ## BENCHMARK RESULTS
 ```
-DATE: Sat Nov 15 22:30:01 UTC 2025
-COMMIT: f2853ed3d03c1398c5be11853de9ac28f3fb3c0c
+DATE: Sat Nov 15 23:00:17 UTC 2025
+COMMIT: 7b9c6ee061b636cbd72d8ab08793197fb172b03c
 ```
 ---
 
@@ -31,31 +31,31 @@ File info: 108.19 MB, 1000001 rows
 
 
 -> cisv
-  Run 1: 0.0226421s
-  Run 2: 0.020613s
-  Run 3: 0.0201261s
-  Average Time: 0.0211 seconds
+  Run 1: 0.0225294s
+  Run 2: 0.0219939s
+  Run 3: 0.0220187s
+  Average Time: 0.0222 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.189707s
-  Run 2: 0.188575s
-  Run 3: 0.175647s
-  Average Time: 0.1846 seconds
+  Run 1: 0.20649s
+  Run 2: 0.190939s
+  Run 3: 0.190119s
+  Average Time: 0.1958 seconds
   Successful runs: 3/3
 
 -> wc -l
-  Run 1: 0.0216455s
-  Run 2: 0.0214756s
-  Run 3: 0.0215247s
-  Average Time: 0.0215 seconds
+  Run 1: 0.0222485s
+  Run 2: 0.0222785s
+  Run 3: 0.0226967s
+  Average Time: 0.0224 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.38741s
-  Run 2: 2.2831s
-  Run 3: 2.27701s
-  Average Time: 2.3158 seconds
+  Run 1: 2.4325s
+  Run 2: 2.31402s
+  Run 3: 2.33884s
+  Average Time: 2.3618 seconds
   Successful runs: 3/3
 
 -> miller
@@ -71,19 +71,19 @@ File info: 108.19 MB, 1000001 rows
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      5127.49 |       0.0211 |          47.39 |
-| wc -l                |      5032.09 |       0.0215 |          46.51 |
-| rust-csv             |       586.08 |       0.1846 |           5.42 |
-| csvkit               |        46.72 |       2.3158 |           0.43 |
+| cisv                 |      4873.42 |       0.0222 |          45.05 |
+| wc -l                |      4829.91 |       0.0224 |          44.64 |
+| rust-csv             |       552.55 |       0.1958 |           5.11 |
+| csvkit               |        45.81 |       2.3618 |           0.42 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      5127.49 |       0.0211 |          47.39 |
-| wc -l                |      5032.09 |       0.0215 |          46.51 |
-| rust-csv             |       586.08 |       0.1846 |           5.42 |
-| csvkit               |        46.72 |       2.3158 |           0.43 |
+| cisv                 |      4873.42 |       0.0222 |          45.05 |
+| wc -l                |      4829.91 |       0.0224 |          44.64 |
+| rust-csv             |       552.55 |       0.1958 |           5.11 |
+| csvkit               |        45.81 |       2.3618 |           0.42 |
 
 #### COLUMN SELECTION TEST (COLUMNS 0,2,3)
 
@@ -91,24 +91,24 @@ Sorted by Operations/sec - Most Operations First:
 
 
 -> cisv
-  Run 1: 0.436359s
-  Run 2: 0.433794s
-  Run 3: 0.431139s
-  Average Time: 0.4338 seconds
+  Run 1: 0.438275s
+  Run 2: 0.43885s
+  Run 3: 0.433384s
+  Average Time: 0.4368 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.319634s
-  Run 2: 0.323812s
-  Run 3: 0.320839s
-  Average Time: 0.3214 seconds
+  Run 1: 0.32317s
+  Run 2: 0.3172s
+  Run 3: 0.321904s
+  Average Time: 0.3208 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.57306s
-  Run 2: 2.62427s
-  Run 3: 2.54828s
-  Average Time: 2.5819 seconds
+  Run 1: 2.57889s
+  Run 2: 2.57856s
+  Run 3: 2.57223s
+  Average Time: 2.5766 seconds
   Successful runs: 3/3
 
 -> miller
@@ -124,108 +124,247 @@ Sorted by Operations/sec - Most Operations First:
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       336.62 |       0.3214 |           3.11 |
-| cisv                 |       249.40 |       0.4338 |           2.31 |
-| csvkit               |        41.90 |       2.5819 |           0.39 |
+| rust-csv             |       337.25 |       0.3208 |           3.12 |
+| cisv                 |       247.69 |       0.4368 |           2.29 |
+| csvkit               |        41.99 |       2.5766 |           0.39 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       336.62 |       0.3214 |           3.11 |
-| cisv                 |       249.40 |       0.4338 |           2.31 |
-| csvkit               |        41.90 |       2.5819 |           0.39 |
+| rust-csv             |       337.25 |       0.3208 |           3.12 |
+| cisv                 |       247.69 |       0.4368 |           2.29 |
+| csvkit               |        41.99 |       2.5766 |           0.39 |
 
 ## NPM Benchmarks
 
 
-> cisv@0.0.7 install
-> node-gyp rebuild
-
-gyp info it worked if it ends with ok
-gyp info using node-gyp@11.0.0
-gyp info using node@23.11.1 | linux | x64
-gyp info find Python using Python version 3.12.3 found at "/usr/bin/python3"
-
-gyp info spawn /usr/bin/python3
-gyp info spawn args [
-gyp info spawn args '/opt/hostedtoolcache/node/23.11.1/x64/lib/node_modules/npm/node_modules/node-gyp/gyp/gyp_main.py',
-gyp info spawn args 'binding.gyp',
-gyp info spawn args '-f',
-gyp info spawn args 'make',
-gyp info spawn args '-I',
-gyp info spawn args '/home/runner/work/cisv/cisv/npm/build/config.gypi',
-gyp info spawn args '-I',
-gyp info spawn args '/opt/hostedtoolcache/node/23.11.1/x64/lib/node_modules/npm/node_modules/node-gyp/addon.gypi',
-gyp info spawn args '-I',
-gyp info spawn args '/home/runner/.cache/node-gyp/23.11.1/include/node/common.gypi',
-gyp info spawn args '-Dlibrary=shared_library',
-gyp info spawn args '-Dvisibility=default',
-gyp info spawn args '-Dnode_root_dir=/home/runner/.cache/node-gyp/23.11.1',
-gyp info spawn args '-Dnode_gyp_dir=/opt/hostedtoolcache/node/23.11.1/x64/lib/node_modules/npm/node_modules/node-gyp',
-gyp info spawn args '-Dnode_lib_file=/home/runner/.cache/node-gyp/23.11.1/<(target_arch)/node.lib',
-gyp info spawn args '-Dmodule_root_dir=/home/runner/work/cisv/cisv/npm',
-gyp info spawn args '-Dnode_engine=v8',
-gyp info spawn args '--depth=.',
-gyp info spawn args '--no-parallel',
-gyp info spawn args '--generator-output',
-gyp info spawn args 'build',
-gyp info spawn args '-Goutput_dir=.'
-gyp info spawn args ]
-gyp info spawn make
-gyp info spawn args [ 'BUILDTYPE=Release', '-C', 'build' ]
-make: Entering directory '/home/runner/work/cisv/cisv/npm/build'
-  CC(target) Release/obj.target/nothing/node_modules/node-addon-api/nothing.o
-rm -f Release/obj.target/node_modules/node-addon-api/nothing.a Release/obj.target/node_modules/node-addon-api/nothing.a.ar-file-list; mkdir -p `dirname Release/obj.target/node_modules/node-addon-api/nothing.a`
-ar crs Release/obj.target/node_modules/node-addon-api/nothing.a @Release/obj.target/node_modules/node-addon-api/nothing.a.ar-file-list
-  COPY Release/nothing.a
-  CXX(target) Release/obj.target/cisv/cisv/cisv_addon.o
-  CC(target) Release/obj.target/cisv/../lib/cisv_parser.o
-  CC(target) Release/obj.target/cisv/../lib/cisv_writer.o
-  CC(target) Release/obj.target/cisv/../lib/cisv_transformer.o
-  SOLINK_MODULE(target) Release/obj.target/cisv.node
-  COPY Release/cisv.node
-make: Leaving directory '/home/runner/work/cisv/cisv/npm/build'
-gyp info ok 
-
-up to date, audited 262 packages in 5s
-
-46 packages are looking for funding
-  run `npm fund` for details
-
-3 moderate severity vulnerabilities
-
-To address all issues (including breaking changes), run:
-  npm audit fix --force
-
-Run `npm audit` for details.
-
 > cisv@0.0.7 benchmark-js
-> node ../benchmark/benchmark.js
+> node ./benchmark.js
 
 Failed to load cisvParser from the specified paths.
-node:internal/modules/cjs/loader:1408
-  throw err;
-  ^
+ Using benchmark file: /home/runner/work/cisv/cisv/fixtures/data.csv
+Starting benchmark with file: /home/runner/work/cisv/cisv/fixtures/data.csv
+All tests will retrieve row index: 4
 
-Error: Cannot find module 'csv-parse/sync'
-Require stack:
-- /home/runner/work/cisv/cisv/benchmark/benchmark.js
-    at Function._resolveFilename (node:internal/modules/cjs/loader:1405:15)
-    at defaultResolveImpl (node:internal/modules/cjs/loader:1061:19)
-    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1066:22)
-    at Function._load (node:internal/modules/cjs/loader:1215:37)
-    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
-    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
-    at Module.require (node:internal/modules/cjs/loader:1491:12)
-    at require (node:internal/modules/helpers:135:16)
-    at Object.<anonymous> (/home/runner/work/cisv/cisv/benchmark/benchmark.js:32:33)
-    at Module._compile (node:internal/modules/cjs/loader:1734:14) {
-  code: 'MODULE_NOT_FOUND',
-  requireStack: [ '/home/runner/work/cisv/cisv/benchmark/benchmark.js' ]
+File size: 0.00 MB
+Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
+
+
+--- Running: Sync (Parse only) Benchmarks ---
+```
+  cisv (sync): 
+    Speed: 0.00 MB/s | Avg Time: 0.00 ms | Ops/sec: 0
+    (cooling down...)
+
+```
+```
+  csv-parse (sync) x 41,431 ops/sec ±1.04% (94 runs sampled)
+    Speed: 19.16 MB/s | Avg Time: 0.02 ms | Ops/sec: 41431
+    (cooling down...)
+
+```
+```
+  papaparse (sync) x 71,348 ops/sec ±1.68% (98 runs sampled)
+    Speed: 33.00 MB/s | Avg Time: 0.01 ms | Ops/sec: 71348
+    (cooling down...)
+
+```
+```
+  udsv (sync) x 153,993 ops/sec ±0.15% (95 runs sampled)
+    Speed: 71.23 MB/s | Avg Time: 0.01 ms | Ops/sec: 153993
+    (cooling down...)
+
+```
+```
+  d3-dsv (sync) x 208,893 ops/sec ±0.24% (98 runs sampled)
+    Speed: 96.62 MB/s | Avg Time: 0.00 ms | Ops/sec: 208893
+    (cooling down...)
+
+```
+
+ Fastest Sync is d3-dsv (sync)
+
+A benchmark test failed and was caught: Event {
+  timeStamp: 1763247594968,
+  type: 'error',
+  target: Benchmark {
+    name: 'cisv (sync)',
+    options: {
+      async: false,
+      defer: false,
+      delay: 0.005,
+      id: undefined,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      name: undefined,
+      onAbort: undefined,
+      onComplete: undefined,
+      onCycle: undefined,
+      onError: undefined,
+      onReset: undefined,
+      onStart: undefined
+    },
+    async: false,
+    defer: false,
+    delay: 0.005,
+    initCount: 1,
+    maxTime: 5,
+    minSamples: 5,
+    minTime: 0.05,
+    id: 1,
+    fn: [Function (anonymous)],
+    stats: {
+      moe: 0,
+      rme: 0,
+      sem: 0,
+      deviation: 0,
+      mean: 0,
+      sample: [],
+      variance: 0
+    },
+    times: { cycle: 0, elapsed: 0, period: 0, timeStamp: 0 },
+    running: false,
+    count: 0,
+    compiled: [Function: anonymous],
+    f17632475949061: [Function (anonymous)],
+    cycles: 0,
+    error: TypeError: cisvParser is not a constructor
+        at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
+        at Benchmark.eval (eval at createCompiled (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1725:16), <anonymous>:5:124)
+        at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1644:22)
+        at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1818:20)
+        at cycle (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2007:49)
+        at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2114:13)
+        at execute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:860:74)
+        at invoke (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:970:20)
+        at compute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1966:7)
+        at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2119:11),
+    aborted: true
+  },
+  currentTarget: Suite {
+    '0': Benchmark {
+      name: 'cisv (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 1,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 0,
+      compiled: [Function: anonymous],
+      f17632475949061: [Function (anonymous)],
+      cycles: 0,
+      error: TypeError: cisvParser is not a constructor
+          at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
+          at Benchmark.eval (eval at createCompiled (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1725:16), <anonymous>:5:124)
+          at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1644:22)
+          at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1818:20)
+          at cycle (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2007:49)
+          at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2114:13)
+          at execute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:860:74)
+          at invoke (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:970:20)
+          at compute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1966:7)
+          at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2119:11),
+      aborted: true
+    },
+    '1': Benchmark {
+      name: 'csv-parse (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 2,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 2111,
+      compiled: [Function: anonymous],
+      cycles: 5,
+      hz: 41431.29202394313
+    },
+    '2': Benchmark {
+      name: 'papaparse (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 3,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 3638,
+      compiled: [Function: anonymous],
+      cycles: 6,
+      hz: 71347.98732517101
+    },
+    '3': Benchmark {
+      name: 'udsv (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 4,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 7816,
+      compiled: [Function: anonymous],
+      cycles: 8,
+      hz: 153992.68187522367
+    },
+    '4': Benchmark {
+      name: 'd3-dsv (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 5,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 10607,
+      compiled: [Function: anonymous],
+      cycles: 7,
+      hz: 208893.03719415175
+    },
+    name: 'Sync (Parse only) Benchmark',
+    options: { name: undefined },
+    length: 5,
+    events: { cycle: [Array], error: [Array], complete: [Array] },
+    running: false
+  },
+  result: undefined
 }
-
-Node.js v23.11.1
 
 Cleaning up test files...
 
