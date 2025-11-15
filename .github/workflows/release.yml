@@ -7,9 +7,11 @@ on:
 
 permissions:
   contents: write
-  packages: read
+  packages: write
+
 env:
   VERSION: ${{ github.ref_name }}
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -27,18 +29,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Only check out necessary files
-          sparse-checkout: |
-            cisv/
-            LICENSE
-            README.md
-            Makefile
-            package.json
-            binding.gyp
-          sparse-checkout-cone-mode: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '23.x'
 
@@ -46,7 +39,10 @@ jobs:
         shell: bash
         run: |
           npm install -g node-gyp node-addon-api
+          # Install npm dependencies in the npm directory
+          cd npm
           npm install
+          cd ..
 
       - name: Build CLI binary
         shell: bash
@@ -56,7 +52,6 @@ jobs:
           EXT=""
 
           # Build cisv with version info
-          npm install -g node-gyp
           make clean
           make build
           CFLAGS="-DCISV_VERSION=\"${VERSION}\" -O3 -march=native" make cli
@@ -68,8 +63,12 @@ jobs:
       - name: Build Node.js addon
         shell: bash
         run: |
+          # Build from npm directory
+          cd npm
           npm run build
-          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}${ARCH}.node"
+          cd ..
+
+          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}-${ARCH}.node"
           cp build/Release/cisv.node "$ADDON_OUTPUT"
           echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
 
@@ -81,7 +80,7 @@ jobs:
           mkdir -p cisv-package/bin
 
           # Copy only necessary files
-          cp -r cisv/* cisv-package/cisv/
+          cp -r lib/* cisv-package/cisv/
           cp LICENSE cisv-package/
           cp README.md cisv-package/
           cp "$OUTPUT_FILE" cisv-package/bin/cisv
@@ -105,44 +104,31 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            cisv/
-            LICENSE
-            README.md
-            package.json
-            binding.gyp
-            index.d.ts
-            types/
-            build/Release/cisv.node
-            benchmark/
-            fixtures/data.csv
-          sparse-checkout-cone-mode: false
 
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
           node-version: '23.x'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Prepare npm package
         run: |
-          # Create clean package structure
-          mkdir -p pkg
-          cp -r cisv benchmark fixtures/data.csv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
+          # Work in the npm directory
+          cd npm
 
           # Update package version
-          cd pkg
           npm version ${VERSION#v} --no-git-tag-version
-          cd ..
+
+          # Install dependencies
+          npm install
 
       - name: Build and test
         run: |
-          npm install
+          cd npm
           npm run build
 
       - name: Publish to npm
         run: |
-          cd pkg
+          cd npm
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

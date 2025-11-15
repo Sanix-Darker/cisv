@@ -23,7 +23,7 @@ endif
 # CLI binary name
 CLI_BIN = cisv_bin
 # Source files for CLI
-CLI_SRCS = cisv/cisv_parser.c cisv/cisv_writer.c cisv/cisv_transformer.c
+CLI_SRCS = lib/cisv_parser.c lib/cisv_writer.c lib/cisv_transformer.c
 CLI_OBJ = $(CLI_SRCS:.c=.cli.o)
 
 # Test files
@@ -31,7 +31,7 @@ TEST_SOURCES = tests/test_native.c
 TEST_BINARY = tests/test_native
 
 # Library object files for testing (WITHOUT -DCISV_CLI)
-TEST_LIB_SRCS = cisv/cisv_parser.c cisv/cisv_writer.c cisv/cisv_transformer.c
+TEST_LIB_SRCS = lib/cisv_parser.c lib/cisv_writer.c lib/cisv_transformer.c
 TEST_LIB_OBJ = $(TEST_LIB_SRCS:.c=.test.o)
 TEST_LIB_OBJ_DEBUG = $(TEST_LIB_SRCS:.c=.test.debug.o)
 
@@ -53,15 +53,15 @@ $(CLI_BIN): $(CLI_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Compile CLI objects WITH CISV_CLI defined
-cisv/%.cli.o: cisv/%.c
+lib/%.cli.o: lib/%.c
 	$(CC) $(CFLAGS) -DCISV_CLI -c -o $@ $<
 
 # Compile test objects WITHOUT CISV_CLI defined
-cisv/%.test.o: cisv/%.c
+lib/%.test.o: lib/%.c
 	$(CC) $(CFLAGS) -Icisv -c -o $@ $<
 
 # Debug object files for testing (WITHOUT CISV_CLI)
-cisv/%.test.debug.o: cisv/%.c
+lib/%.test.debug.o: lib/%.c
 	$(CC) $(CFLAGS_DEBUG) -Icisv -c -o $@ $<
 
 # Install CLI tool
@@ -176,7 +176,7 @@ clean:
 	$(NODE_GYP) clean
 	rm -rf build
 	rm -rf $(CLI_BIN) $(CLI_OBJ) $(TEST_LIB_OBJ) $(TEST_LIB_OBJ_DEBUG)
-	rm -rf cisv/*.o  # Clean all object files
+	rm -rf lib/*.o  # Clean all object files
 	rm -f $(TEST_BINARY) $(TEST_BINARY).debug $(TEST_BINARY).cov
 	rm -f *.gcno *.gcda *.gcov coverage.info
 	rm -rf testdata

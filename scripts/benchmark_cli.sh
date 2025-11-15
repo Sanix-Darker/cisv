@@ -462,8 +462,8 @@ run_cli_benchmarks() {
 
 run_npm_benchmarks() {
     print_msg "$BLUE" "\n## NPM Benchmarks\n"
-    if [ -f "package.json" ] && command_exists npm; then
-        npm run benchmark-js
+    if [ -f "./npm/package.json" ] && command_exists npm; then
+        cd ./npm && npm run benchmark-js
     else
         print_msg "$RED" "Error: package.json not found or npm not installed"
         exit 1
