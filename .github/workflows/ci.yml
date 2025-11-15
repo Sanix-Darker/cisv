@@ -248,8 +248,9 @@ jobs:
       - name: Build modules
         run: |
           make clean
-          make build
-          make cli
+          cd ./npm/ && npm install -g node-gyp node-addon-api && npm install && \
+          node-gyp configure build CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+          cd ../ && make cli
 
       - name: Run benchmarks
         run: |
