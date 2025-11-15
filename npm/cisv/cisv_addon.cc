@@ -1,6 +1,6 @@
 #include <napi.h>
-#include "cisv_parser.h"
-#include "cisv_transformer.h"
+#include "../../lib/cisv_parser.h"
+#include "../../lib/cisv_transformer.h"
 #include <vector>
 #include <memory>
 #include <string>

@@ -6,9 +6,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "../cisv/cisv_parser.h"
-#include "../cisv/cisv_transformer.h"
-#include "../cisv/cisv_writer.h"
+#include "../lib/cisv_parser.h"
+#include "../lib/cisv_transformer.h"
+#include "../lib/cisv_writer.h"
 
 // Test result tracking
 typedef struct {
