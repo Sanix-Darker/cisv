@@ -19,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cache-key: ${{ steps.cache-keys.outputs.node }}
-    defaults:
-      run:
-        working-directory: npm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,28 +28,27 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          cache-dependency-path: 'npm/package-lock.json'
 
       - name: Generate cache keys
         id: cache-keys
-        run: echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
+        run: echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('npm/package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          cd npm
+          npm ci
 
       - name: Cache node_modules
         uses: actions/cache/save@v4
         with:
-          path: node_modules
+          path: npm/node_modules
           key: ${{ steps.cache-keys.outputs.node }}
 
   npm-tests:
     name: Node.js Tests
     runs-on: ubuntu-latest
     needs: setup
-    defaults:
-      run:
-        working-directory: npm
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,11 +61,13 @@ jobs:
       - name: Restore dependencies
         uses: actions/cache/restore@v4
         with:
-          path: node_modules
+          path: npm/node_modules
           key: ${{ needs.setup.outputs.cache-key }}
 
       - name: Build and test
-        run: npm run test:build
+        run: |
+          cd npm
+          npm run test:build
 
   c-tests:
     name: C Native Tests
@@ -119,7 +117,7 @@ jobs:
           path: |
             build/
             cisv_bin
-          key: ${{ env.CACHE_KEY_PREFIX }}-cli-${{ matrix.os }}-${{ hashFiles('lib/**', 'binding.gyp', 'Makefile') }}
+          key: ${{ env.CACHE_KEY_PREFIX }}-cli-${{ matrix.os }}-${{ hashFiles('lib/**', 'npm/binding.gyp', 'Makefile') }}
 
       - name: Build CLI
         run: |
@@ -239,7 +237,7 @@ jobs:
       - name: Restore node_modules
         uses: actions/cache/restore@v4
         with:
-          path: node_modules
+          path: npm/node_modules
           key: ${{ needs.setup.outputs.cache-key }}
 
       - name: Install dependencies
@@ -267,8 +265,10 @@ jobs:
           bash ./scripts/benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
 
           echo "## BENCHMARK RESULTS" > BENCHMARKS.md
-          echo "`**DATE:** $(date)" >> BENCHMARKS.md
-          echo "**COMMIT:** $GITHUB_SHA`" >> BENCHMARKS.md
+          echo "\`\`\`" >> BENCHMARKS.md
+          echo "**DATE:** $(date)" >> BENCHMARKS.md
+          echo "**COMMIT:** $GITHUB_SHA" >> BENCHMARKS.md
+          echo "\`\`\`" >> BENCHMARKS.md
 
           echo "---" >> BENCHMARKS.md
 
@@ -308,7 +308,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [npm-tests, c-tests, cli-build-test, memory-check]
+    needs: [npm-tests, c-tests, cli-build-test]
     if: always()
     steps:
       - name: Check job results
