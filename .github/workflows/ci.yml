@@ -122,7 +122,6 @@ jobs:
       - name: Build CLI
         run: |
           make clean
-          make build
           make cli
 
       - name: Test CLI functionality
