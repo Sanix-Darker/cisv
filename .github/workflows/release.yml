@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0
           # Only check out necessary files
           sparse-checkout: |
-            cisv/
+            lib/
             LICENSE
             README.md
             Makefile
@@ -81,7 +81,7 @@ jobs:
           mkdir -p cisv-package/bin
 
           # Copy only necessary files
-          cp -r cisv/* cisv-package/cisv/
+          cp -r lib/* cisv-package/cisv/
           cp LICENSE cisv-package/
           cp README.md cisv-package/
           cp "$OUTPUT_FILE" cisv-package/bin/cisv
@@ -107,7 +107,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            cisv/
+            lib/
             LICENSE
             README.md
             package.json
@@ -128,7 +128,7 @@ jobs:
         run: |
           # Create clean package structure
           mkdir -p pkg
-          cp -r cisv benchmark fixtures/data.csv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
+          cp -r lib benchmark fixtures/data.csv LICENSE README.md package.json binding.gyp index.d.ts types/ pkg/
 
           # Update package version
           cd pkg
