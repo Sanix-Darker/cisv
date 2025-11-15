@@ -1,5 +1,8 @@
 ## BENCHMARK RESULTS
-
+```
+DATE: Sat Nov 15 23:12:29 UTC 2025
+COMMIT: 752907ed67518d2a566eb1686cdd1312d81cf7dc
+```
 ---
 
 Generating test CSV files...
@@ -28,31 +31,31 @@ File info: 108.19 MB, 1000001 rows
 
 
 -> cisv
-  Run 1: 0.0233178s
-  Run 2: 0.0224478s
-  Run 3: 0.0222077s
-  Average Time: 0.0227 seconds
+  Run 1: 0.0219536s
+  Run 2: 0.0210238s
+  Run 3: 0.0209265s
+  Average Time: 0.0213 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.189227s
-  Run 2: 0.187593s
-  Run 3: 0.187789s
-  Average Time: 0.1882 seconds
+  Run 1: 0.183442s
+  Run 2: 0.188875s
+  Run 3: 0.189518s
+  Average Time: 0.1873 seconds
   Successful runs: 3/3
 
 -> wc -l
-  Run 1: 0.0228014s
-  Run 2: 0.0229805s
-  Run 3: 0.0242462s
-  Average Time: 0.0233 seconds
+  Run 1: 0.02283s
+  Run 2: 0.0224392s
+  Run 3: 0.0219481s
+  Average Time: 0.0224 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.53979s
-  Run 2: 2.39725s
-  Run 3: 2.36552s
-  Average Time: 2.4342 seconds
+  Run 1: 2.42971s
+  Run 2: 2.34041s
+  Run 3: 2.34619s
+  Average Time: 2.3721 seconds
   Successful runs: 3/3
 
 -> miller
@@ -68,19 +71,19 @@ File info: 108.19 MB, 1000001 rows
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      4766.08 |       0.0227 |          44.05 |
-| wc -l                |      4643.35 |       0.0233 |          42.92 |
-| rust-csv             |       574.87 |       0.1882 |           5.31 |
-| csvkit               |        44.45 |       2.4342 |           0.41 |
+| cisv                 |      5079.34 |       0.0213 |          46.95 |
+| wc -l                |      4829.91 |       0.0224 |          44.64 |
+| rust-csv             |       577.63 |       0.1873 |           5.34 |
+| csvkit               |        45.61 |       2.3721 |           0.42 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      4766.08 |       0.0227 |          44.05 |
-| wc -l                |      4643.35 |       0.0233 |          42.92 |
-| rust-csv             |       574.87 |       0.1882 |           5.31 |
-| csvkit               |        44.45 |       2.4342 |           0.41 |
+| cisv                 |      5079.34 |       0.0213 |          46.95 |
+| wc -l                |      4829.91 |       0.0224 |          44.64 |
+| rust-csv             |       577.63 |       0.1873 |           5.34 |
+| csvkit               |        45.61 |       2.3721 |           0.42 |
 
 #### COLUMN SELECTION TEST (COLUMNS 0,2,3)
 
@@ -88,24 +91,24 @@ Sorted by Operations/sec - Most Operations First:
 
 
 -> cisv
-  Run 1: 0.436198s
-  Run 2: 0.438279s
-  Run 3: 0.435271s
-  Average Time: 0.4366 seconds
+  Run 1: 0.459149s
+  Run 2: 0.432704s
+  Run 3: 0.432262s
+  Average Time: 0.4414 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.351171s
-  Run 2: 0.345821s
-  Run 3: 0.342545s
-  Average Time: 0.3465 seconds
+  Run 1: 0.321084s
+  Run 2: 0.331566s
+  Run 3: 0.326894s
+  Average Time: 0.3265 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.58791s
-  Run 2: 2.60158s
-  Run 3: 2.55235s
-  Average Time: 2.5806 seconds
+  Run 1: 2.57627s
+  Run 2: 2.59093s
+  Run 3: 2.63323s
+  Average Time: 2.6001 seconds
   Successful runs: 3/3
 
 -> miller
@@ -121,24 +124,25 @@ Sorted by Operations/sec - Most Operations First:
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       312.24 |       0.3465 |           2.89 |
-| cisv                 |       247.80 |       0.4366 |           2.29 |
-| csvkit               |        41.92 |       2.5806 |           0.39 |
+| rust-csv             |       331.36 |       0.3265 |           3.06 |
+| cisv                 |       245.11 |       0.4414 |           2.27 |
+| csvkit               |        41.61 |       2.6001 |           0.38 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       312.24 |       0.3465 |           2.89 |
-| cisv                 |       247.80 |       0.4366 |           2.29 |
-| csvkit               |        41.92 |       2.5806 |           0.39 |
+| rust-csv             |       331.36 |       0.3265 |           3.06 |
+| cisv                 |       245.11 |       0.4414 |           2.27 |
+| csvkit               |        41.61 |       2.6001 |           0.38 |
 
 ## NPM Benchmarks
 
 
 > cisv@0.0.7 benchmark-js
-> node benchmark/benchmark.js
+> node ./benchmark.js
 
+Failed to load cisvParser from the specified paths.
  Using benchmark file: /home/runner/work/cisv/cisv/fixtures/data.csv
 Starting benchmark with file: /home/runner/work/cisv/cisv/fixtures/data.csv
 All tests will retrieve row index: 4
@@ -149,218 +153,220 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
 
 --- Running: Sync (Parse only) Benchmarks ---
 ```
-  cisv (sync) x 150,683 ops/sec ±2.36% (91 runs sampled)
-    Speed: 69.70 MB/s | Avg Time: 0.01 ms | Ops/sec: 150683
+  cisv (sync): 
+    Speed: 0.00 MB/s | Avg Time: 0.00 ms | Ops/sec: 0
     (cooling down...)
 
 ```
 ```
-  csv-parse (sync) x 40,249 ops/sec ±1.90% (95 runs sampled)
-    Speed: 18.62 MB/s | Avg Time: 0.02 ms | Ops/sec: 40249
+  csv-parse (sync) x 39,806 ops/sec ±0.83% (99 runs sampled)
+    Speed: 18.41 MB/s | Avg Time: 0.03 ms | Ops/sec: 39806
     (cooling down...)
 
 ```
 ```
-  papaparse (sync) x 59,849 ops/sec ±1.46% (93 runs sampled)
-    Speed: 27.68 MB/s | Avg Time: 0.02 ms | Ops/sec: 59849
+  papaparse (sync) x 60,796 ops/sec ±1.42% (93 runs sampled)
+    Speed: 28.12 MB/s | Avg Time: 0.02 ms | Ops/sec: 60796
     (cooling down...)
 
 ```
 ```
-  udsv (sync) x 150,791 ops/sec ±0.30% (97 runs sampled)
-    Speed: 69.75 MB/s | Avg Time: 0.01 ms | Ops/sec: 150791
+  udsv (sync) x 152,948 ops/sec ±0.39% (97 runs sampled)
+    Speed: 70.74 MB/s | Avg Time: 0.01 ms | Ops/sec: 152948
     (cooling down...)
 
 ```
 ```
-  d3-dsv (sync) x 208,867 ops/sec ±0.24% (99 runs sampled)
-    Speed: 96.61 MB/s | Avg Time: 0.00 ms | Ops/sec: 208867
-    (cooling down...)
-
-```
-
- Fastest Sync is d3-dsv (sync)
-
---------------------------------------------------
-
---- Running: Sync (Parse + Access) Benchmarks ---
-```
-  cisv (sync) x 222,356 ops/sec ±9.22% (68 runs sampled)
-    Speed: 102.85 MB/s | Avg Time: 0.00 ms | Ops/sec: 222356
-    (cooling down...)
-
-```
-```
-  csv-parse (sync) x 39,681 ops/sec ±3.84% (98 runs sampled)
-    Speed: 18.35 MB/s | Avg Time: 0.03 ms | Ops/sec: 39681
-    (cooling down...)
-
-```
-```
-  papaparse (sync) x 59,232 ops/sec ±0.85% (93 runs sampled)
-    Speed: 27.40 MB/s | Avg Time: 0.02 ms | Ops/sec: 59232
-    (cooling down...)
-
-```
-```
-  udsv (sync) x 148,844 ops/sec ±0.42% (92 runs sampled)
-    Speed: 68.85 MB/s | Avg Time: 0.01 ms | Ops/sec: 148844
-    (cooling down...)
-
-```
-```
-  d3-dsv (sync) x 208,781 ops/sec ±0.33% (92 runs sampled)
-    Speed: 96.57 MB/s | Avg Time: 0.00 ms | Ops/sec: 208781
+  d3-dsv (sync) x 210,703 ops/sec ±0.24% (98 runs sampled)
+    Speed: 97.46 MB/s | Avg Time: 0.00 ms | Ops/sec: 210703
     (cooling down...)
 
 ```
 
  Fastest Sync is d3-dsv (sync)
 
---------------------------------------------------
-
---- Running: Async (Parse only) Benchmarks ---
-```
-  cisv (async/stream) x 205,172 ops/sec ±1.10% (71 runs sampled)
-    Speed: 94.90 MB/s | Avg Time: 0.00 ms | Ops/sec: 205172
-    (cooling down...)
-
-```
-```
-  papaparse (async/stream) x 45,825 ops/sec ±3.73% (87 runs sampled)
-    Speed: 21.20 MB/s | Avg Time: 0.02 ms | Ops/sec: 45825
-    (cooling down...)
-
-```
-```
-  fast-csv (async/stream) x 20,840 ops/sec ±1.25% (82 runs sampled)
-    Speed: 9.64 MB/s | Avg Time: 0.05 ms | Ops/sec: 20840
-    (cooling down...)
-
-```
-```
-  neat-csv (async/promise) x 20,039 ops/sec ±3.51% (79 runs sampled)
-    Speed: 9.27 MB/s | Avg Time: 0.05 ms | Ops/sec: 20039
-    (cooling down...)
-
-```
-```
-  udsv (async/stream) x 114,897 ops/sec ±0.31% (87 runs sampled)
-    Speed: 53.14 MB/s | Avg Time: 0.01 ms | Ops/sec: 114897
-    (cooling down...)
-
-```
-
- Fastest Async is cisv (async/stream)
-
---------------------------------------------------
-
---- Running: Async (Parse + Access) Benchmarks ---
-```
-  cisv (async/stream) x 58,408 ops/sec ±0.38% (82 runs sampled)
-    Speed: 27.02 MB/s | Avg Time: 0.02 ms | Ops/sec: 58408
-    (cooling down...)
-
-```
-```
-  papaparse (async/stream) x 48,128 ops/sec ±2.10% (88 runs sampled)
-    Speed: 22.26 MB/s | Avg Time: 0.02 ms | Ops/sec: 48128
-    (cooling down...)
-
-```
-```
-  fast-csv (async/stream) x 21,430 ops/sec ±0.34% (87 runs sampled)
-    Speed: 9.91 MB/s | Avg Time: 0.05 ms | Ops/sec: 21430
-    (cooling down...)
-
-```
-```
-  neat-csv (async/promise) x 21,035 ops/sec ±1.06% (84 runs sampled)
-    Speed: 9.73 MB/s | Avg Time: 0.05 ms | Ops/sec: 21035
-    (cooling down...)
-
-```
-```
-  udsv (async/stream) x 115,525 ops/sec ±0.21% (90 runs sampled)
-    Speed: 53.43 MB/s | Avg Time: 0.01 ms | Ops/sec: 115525
-    (cooling down...)
-
-```
-
- Fastest Async is udsv (async/stream)
-
---------------------------------------------------
-
-Benchmark Results Table (Markdown)
-
-### Synchronous Results (sorted by speed - fastest first)
-
-| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------|--------------|---------------|----------------|
-| d3-dsv (sync)      | 96.61        | 0.00          | 208867         |
-| udsv (sync)        | 69.75        | 0.01          | 150791         |
-| cisv (sync)        | 69.70        | 0.01          | 150683         |
-| papaparse (sync)   | 27.68        | 0.02          | 59849          |
-| csv-parse (sync)   | 18.62        | 0.02          | 40249          |
-
-### Synchronous Results (with data access - sorted by speed)
-
-| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------|--------------|---------------|----------------|
-| cisv (sync)        | 102.85       | 0.00          | 222356         |
-| d3-dsv (sync)      | 96.57        | 0.00          | 208781         |
-| udsv (sync)        | 68.85        | 0.01          | 148844         |
-| papaparse (sync)   | 27.40        | 0.02          | 59232          |
-| csv-parse (sync)   | 18.35        | 0.03          | 39681          |
-
-
-### Asynchronous Results (sorted by speed - fastest first)
-
-| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------------|--------------|---------------|----------------|
-| cisv (async/stream)      | 94.90        | 0.00          | 205172         |
-| udsv (async/stream)      | 53.14        | 0.01          | 114897         |
-| papaparse (async/stream) | 21.20        | 0.02          | 45825          |
-| fast-csv (async/stream)  | 9.64         | 0.05          | 20840          |
-| neat-csv (async/promise) | 9.27         | 0.05          | 20039          |
-
-
-### Asynchronous Results (with data access - sorted by speed)
-
-| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |
-|--------------------------|--------------|---------------|----------------|
-| udsv (async/stream)      | 53.43        | 0.01          | 115525         |
-| cisv (async/stream)      | 27.02        | 0.02          | 58408          |
-| papaparse (async/stream) | 22.26        | 0.02          | 48128          |
-| fast-csv (async/stream)  | 9.91         | 0.05          | 21430          |
-| neat-csv (async/promise) | 9.73         | 0.05          | 21035          |
-
-
-## Alternative Sorting: By Operations/sec
-
-### Synchronous Results (sorted by operations/sec)
-
-| Library            | Operations/sec | Speed (MB/s) | Avg Time (ms) |
-|--------------------|----------------|--------------|---------------|
-| d3-dsv (sync)      | 208867         | 96.61        | 0.00          |
-| udsv (sync)        | 150791         | 69.75        | 0.01          |
-| cisv (sync)        | 150683         | 69.70        | 0.01          |
-| papaparse (sync)   | 59849          | 27.68        | 0.02          |
-| csv-parse (sync)   | 40249          | 18.62        | 0.02          |
-
-### Asynchronous Results (sorted by operations/sec)
-
-| Library                  | Operations/sec | Speed (MB/s) | Avg Time (ms) |
-|--------------------------|----------------|--------------|---------------|
-| cisv (async/stream)      | 205172         | 94.90        | 0.00          |
-| udsv (async/stream)      | 114897         | 53.14        | 0.01          |
-| papaparse (async/stream) | 45825          | 21.20        | 0.02          |
-| fast-csv (async/stream)  | 20840          | 9.64         | 0.05          |
-| neat-csv (async/promise) | 20039          | 9.27         | 0.05          |
-
+A benchmark test failed and was caught: Event {
+  timeStamp: 1763248326798,
+  type: 'error',
+  target: Benchmark {
+    name: 'cisv (sync)',
+    options: {
+      async: false,
+      defer: false,
+      delay: 0.005,
+      id: undefined,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      name: undefined,
+      onAbort: undefined,
+      onComplete: undefined,
+      onCycle: undefined,
+      onError: undefined,
+      onReset: undefined,
+      onStart: undefined
+    },
+    async: false,
+    defer: false,
+    delay: 0.005,
+    initCount: 1,
+    maxTime: 5,
+    minSamples: 5,
+    minTime: 0.05,
+    id: 1,
+    fn: [Function (anonymous)],
+    stats: {
+      moe: 0,
+      rme: 0,
+      sem: 0,
+      deviation: 0,
+      mean: 0,
+      sample: [],
+      variance: 0
+    },
+    times: { cycle: 0, elapsed: 0, period: 0, timeStamp: 0 },
+    running: false,
+    count: 0,
+    compiled: [Function: anonymous],
+    f17632483267361: [Function (anonymous)],
+    cycles: 0,
+    error: TypeError: cisvParser is not a constructor
+        at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
+        at Benchmark.eval (eval at createCompiled (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1725:16), <anonymous>:5:124)
+        at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1644:22)
+        at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1818:20)
+        at cycle (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2007:49)
+        at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2114:13)
+        at execute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:860:74)
+        at invoke (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:970:20)
+        at compute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1966:7)
+        at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2119:11),
+    aborted: true
+  },
+  currentTarget: Suite {
+    '0': Benchmark {
+      name: 'cisv (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 1,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 0,
+      compiled: [Function: anonymous],
+      f17632483267361: [Function (anonymous)],
+      cycles: 0,
+      error: TypeError: cisvParser is not a constructor
+          at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
+          at Benchmark.eval (eval at createCompiled (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1725:16), <anonymous>:5:124)
+          at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1644:22)
+          at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1818:20)
+          at cycle (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2007:49)
+          at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2114:13)
+          at execute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:860:74)
+          at invoke (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:970:20)
+          at compute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1966:7)
+          at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2119:11),
+      aborted: true
+    },
+    '1': Benchmark {
+      name: 'csv-parse (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 2,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 2035,
+      compiled: [Function: anonymous],
+      cycles: 7,
+      hz: 39805.58822284531
+    },
+    '2': Benchmark {
+      name: 'papaparse (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 3,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 3212,
+      compiled: [Function: anonymous],
+      cycles: 6,
+      hz: 60795.64608013495
+    },
+    '3': Benchmark {
+      name: 'udsv (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 4,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 7787,
+      compiled: [Function: anonymous],
+      cycles: 8,
+      hz: 152947.67502081575
+    },
+    '4': Benchmark {
+      name: 'd3-dsv (sync)',
+      options: [Object],
+      async: false,
+      defer: false,
+      delay: 0.005,
+      initCount: 1,
+      maxTime: 5,
+      minSamples: 5,
+      minTime: 0.05,
+      id: 5,
+      fn: [Function (anonymous)],
+      stats: [Object],
+      times: [Object],
+      running: false,
+      count: 10705,
+      compiled: [Function: anonymous],
+      cycles: 7,
+      hz: 210703.3372539758
+    },
+    name: 'Sync (Parse only) Benchmark',
+    options: { name: undefined },
+    length: 5,
+    events: { cycle: [Array], error: [Array], complete: [Array] },
+    running: false
+  },
+  result: undefined
+}
 
 Cleaning up test files...
-Removed large.csv
 
 Benchmark complete!
 
