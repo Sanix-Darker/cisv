@@ -1,7 +1,7 @@
 ## BENCHMARK RESULTS
 ```
-DATE: Sat Nov 15 23:00:17 UTC 2025
-COMMIT: 7b9c6ee061b636cbd72d8ab08793197fb172b03c
+DATE: Sat Nov 15 23:12:29 UTC 2025
+COMMIT: 752907ed67518d2a566eb1686cdd1312d81cf7dc
 ```
 ---
 
@@ -31,31 +31,31 @@ File info: 108.19 MB, 1000001 rows
 
 
 -> cisv
-  Run 1: 0.0225294s
-  Run 2: 0.0219939s
-  Run 3: 0.0220187s
-  Average Time: 0.0222 seconds
+  Run 1: 0.0219536s
+  Run 2: 0.0210238s
+  Run 3: 0.0209265s
+  Average Time: 0.0213 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.20649s
-  Run 2: 0.190939s
-  Run 3: 0.190119s
-  Average Time: 0.1958 seconds
+  Run 1: 0.183442s
+  Run 2: 0.188875s
+  Run 3: 0.189518s
+  Average Time: 0.1873 seconds
   Successful runs: 3/3
 
 -> wc -l
-  Run 1: 0.0222485s
-  Run 2: 0.0222785s
-  Run 3: 0.0226967s
+  Run 1: 0.02283s
+  Run 2: 0.0224392s
+  Run 3: 0.0219481s
   Average Time: 0.0224 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.4325s
-  Run 2: 2.31402s
-  Run 3: 2.33884s
-  Average Time: 2.3618 seconds
+  Run 1: 2.42971s
+  Run 2: 2.34041s
+  Run 3: 2.34619s
+  Average Time: 2.3721 seconds
   Successful runs: 3/3
 
 -> miller
@@ -71,19 +71,19 @@ File info: 108.19 MB, 1000001 rows
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      4873.42 |       0.0222 |          45.05 |
+| cisv                 |      5079.34 |       0.0213 |          46.95 |
 | wc -l                |      4829.91 |       0.0224 |          44.64 |
-| rust-csv             |       552.55 |       0.1958 |           5.11 |
-| csvkit               |        45.81 |       2.3618 |           0.42 |
+| rust-csv             |       577.63 |       0.1873 |           5.34 |
+| csvkit               |        45.61 |       2.3721 |           0.42 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| cisv                 |      4873.42 |       0.0222 |          45.05 |
+| cisv                 |      5079.34 |       0.0213 |          46.95 |
 | wc -l                |      4829.91 |       0.0224 |          44.64 |
-| rust-csv             |       552.55 |       0.1958 |           5.11 |
-| csvkit               |        45.81 |       2.3618 |           0.42 |
+| rust-csv             |       577.63 |       0.1873 |           5.34 |
+| csvkit               |        45.61 |       2.3721 |           0.42 |
 
 #### COLUMN SELECTION TEST (COLUMNS 0,2,3)
 
@@ -91,24 +91,24 @@ Sorted by Operations/sec - Most Operations First:
 
 
 -> cisv
-  Run 1: 0.438275s
-  Run 2: 0.43885s
-  Run 3: 0.433384s
-  Average Time: 0.4368 seconds
+  Run 1: 0.459149s
+  Run 2: 0.432704s
+  Run 3: 0.432262s
+  Average Time: 0.4414 seconds
   Successful runs: 3/3
 
 -> rust-csv
-  Run 1: 0.32317s
-  Run 2: 0.3172s
-  Run 3: 0.321904s
-  Average Time: 0.3208 seconds
+  Run 1: 0.321084s
+  Run 2: 0.331566s
+  Run 3: 0.326894s
+  Average Time: 0.3265 seconds
   Successful runs: 3/3
 
 -> csvkit
-  Run 1: 2.57889s
-  Run 2: 2.57856s
-  Run 3: 2.57223s
-  Average Time: 2.5766 seconds
+  Run 1: 2.57627s
+  Run 2: 2.59093s
+  Run 3: 2.63323s
+  Average Time: 2.6001 seconds
   Successful runs: 3/3
 
 -> miller
@@ -124,17 +124,17 @@ Sorted by Operations/sec - Most Operations First:
 Sorted by Speed (MB/s) - Fastest First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       337.25 |       0.3208 |           3.12 |
-| cisv                 |       247.69 |       0.4368 |           2.29 |
-| csvkit               |        41.99 |       2.5766 |           0.39 |
+| rust-csv             |       331.36 |       0.3265 |           3.06 |
+| cisv                 |       245.11 |       0.4414 |           2.27 |
+| csvkit               |        41.61 |       2.6001 |           0.38 |
 
 
 Sorted by Operations/sec - Most Operations First:
 | Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
 |----------------------|--------------|--------------|----------------|
-| rust-csv             |       337.25 |       0.3208 |           3.12 |
-| cisv                 |       247.69 |       0.4368 |           2.29 |
-| csvkit               |        41.99 |       2.5766 |           0.39 |
+| rust-csv             |       331.36 |       0.3265 |           3.06 |
+| cisv                 |       245.11 |       0.4414 |           2.27 |
+| csvkit               |        41.61 |       2.6001 |           0.38 |
 
 ## NPM Benchmarks
 
@@ -159,26 +159,26 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
 
 ```
 ```
-  csv-parse (sync) x 41,431 ops/sec ±1.04% (94 runs sampled)
-    Speed: 19.16 MB/s | Avg Time: 0.02 ms | Ops/sec: 41431
+  csv-parse (sync) x 39,806 ops/sec ±0.83% (99 runs sampled)
+    Speed: 18.41 MB/s | Avg Time: 0.03 ms | Ops/sec: 39806
     (cooling down...)
 
 ```
 ```
-  papaparse (sync) x 71,348 ops/sec ±1.68% (98 runs sampled)
-    Speed: 33.00 MB/s | Avg Time: 0.01 ms | Ops/sec: 71348
+  papaparse (sync) x 60,796 ops/sec ±1.42% (93 runs sampled)
+    Speed: 28.12 MB/s | Avg Time: 0.02 ms | Ops/sec: 60796
     (cooling down...)
 
 ```
 ```
-  udsv (sync) x 153,993 ops/sec ±0.15% (95 runs sampled)
-    Speed: 71.23 MB/s | Avg Time: 0.01 ms | Ops/sec: 153993
+  udsv (sync) x 152,948 ops/sec ±0.39% (97 runs sampled)
+    Speed: 70.74 MB/s | Avg Time: 0.01 ms | Ops/sec: 152948
     (cooling down...)
 
 ```
 ```
-  d3-dsv (sync) x 208,893 ops/sec ±0.24% (98 runs sampled)
-    Speed: 96.62 MB/s | Avg Time: 0.00 ms | Ops/sec: 208893
+  d3-dsv (sync) x 210,703 ops/sec ±0.24% (98 runs sampled)
+    Speed: 97.46 MB/s | Avg Time: 0.00 ms | Ops/sec: 210703
     (cooling down...)
 
 ```
@@ -186,7 +186,7 @@ Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
  Fastest Sync is d3-dsv (sync)
 
 A benchmark test failed and was caught: Event {
-  timeStamp: 1763247594968,
+  timeStamp: 1763248326798,
   type: 'error',
   target: Benchmark {
     name: 'cisv (sync)',
@@ -229,7 +229,7 @@ A benchmark test failed and was caught: Event {
     running: false,
     count: 0,
     compiled: [Function: anonymous],
-    f17632475949061: [Function (anonymous)],
+    f17632483267361: [Function (anonymous)],
     cycles: 0,
     error: TypeError: cisvParser is not a constructor
         at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
@@ -262,7 +262,7 @@ A benchmark test failed and was caught: Event {
       running: false,
       count: 0,
       compiled: [Function: anonymous],
-      f17632475949061: [Function (anonymous)],
+      f17632483267361: [Function (anonymous)],
       cycles: 0,
       error: TypeError: cisvParser is not a constructor
           at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
@@ -292,10 +292,10 @@ A benchmark test failed and was caught: Event {
       stats: [Object],
       times: [Object],
       running: false,
-      count: 2111,
+      count: 2035,
       compiled: [Function: anonymous],
-      cycles: 5,
-      hz: 41431.29202394313
+      cycles: 7,
+      hz: 39805.58822284531
     },
     '2': Benchmark {
       name: 'papaparse (sync)',
@@ -312,10 +312,10 @@ A benchmark test failed and was caught: Event {
       stats: [Object],
       times: [Object],
       running: false,
-      count: 3638,
+      count: 3212,
       compiled: [Function: anonymous],
       cycles: 6,
-      hz: 71347.98732517101
+      hz: 60795.64608013495
     },
     '3': Benchmark {
       name: 'udsv (sync)',
@@ -332,10 +332,10 @@ A benchmark test failed and was caught: Event {
       stats: [Object],
       times: [Object],
       running: false,
-      count: 7816,
+      count: 7787,
       compiled: [Function: anonymous],
       cycles: 8,
-      hz: 153992.68187522367
+      hz: 152947.67502081575
     },
     '4': Benchmark {
       name: 'd3-dsv (sync)',
@@ -352,10 +352,10 @@ A benchmark test failed and was caught: Event {
       stats: [Object],
       times: [Object],
       running: false,
-      count: 10607,
+      count: 10705,
       compiled: [Function: anonymous],
       cycles: 7,
-      hz: 208893.03719415175
+      hz: 210703.3372539758
     },
     name: 'Sync (Parse only) Benchmark',
     options: { name: undefined },
