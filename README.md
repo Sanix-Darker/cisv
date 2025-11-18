@@ -3,7 +3,9 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 ![Size](https://deno.bundlejs.com/badge?q=spring-easing)
-![Downloads](https://badgen.net/npm/dw/cisv)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Sanix-Darker/cisv)
+
+<!-- Service is down fow now ![Downloads](https://badgen.net/npm/dw/cisv) -->
 
 > # DISCLAIMER
 >
