@@ -1,0 +1,43 @@
+{
+  "name": "cisv",
+  "version": "0.0.8",
+  "description": "High-performance CSV parser with SIMD optimizations",
+  "author": "sanix<s4nixd@gmail.com>",
+  "main": "./build/Release/cisv.node",
+  "types": "./types/cisv.d.ts",
+  "exports": {
+    ".": {
+      "import": "./lib/index.mjs",
+      "require": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "test": "mocha ./tests/*.test.js",
+    "lint": "clang-format -i src/*.cc"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.5.0",
+    "node-gyp-build": "^4.8.4"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.7.1",
+    "chai": "^6.2.0",
+    "mocha": "^11.7.4"
+  },
+  "gypfile": true,
+  "keywords": [
+    "csv",
+    "parser",
+    "fast",
+    "simd",
+    "native"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sanix-Darker/cisv.git"
+  }
+}
