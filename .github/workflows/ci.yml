@@ -230,8 +230,13 @@ jobs:
         run: |
           npm install -g node-gyp
           sudo apt-get update
-          sudo apt-get install -y bc time python3 python3-pip
+          sudo apt-get install -y bc time python3 python3-pip php-cli
           pip3 install pandas --quiet || true
+
+          # Install Node.js comparison libraries
+          cd bindings/nodejs
+          npm install papaparse csv-parse fast-csv --save-dev || true
+          cd ../..
 
       - name: Run benchmarks
         run: |
@@ -240,10 +245,13 @@ jobs:
           export GITHUB_REF_NAME="${{ github.ref_name }}"
 
           # Install benchmark dependencies (rust-csv, miller, csvkit)
-          bash ./scripts/benchmark_cli.sh install
+          bash ./scripts/benchmark_cli.sh install 2>&1 | tee install.log
 
-          # Run benchmarks and generate markdown report
-          bash ./scripts/benchmark_cli.sh benchmark --all > BENCHMARKS.md 2>&1
+          # Run benchmarks - stdout is markdown, stderr is logs
+          bash ./scripts/benchmark_cli.sh benchmark --all > BENCHMARKS.md 2>benchmark.log
+
+          # Show log for debugging
+          cat benchmark.log
 
       - name: Commit and push
         run: |
