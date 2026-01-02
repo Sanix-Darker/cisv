@@ -114,9 +114,19 @@ struct RowCollector {
 static void field_cb(void *user, const char *data, size_t len) {
     auto *rc = reinterpret_cast<RowCollector *>(user);
 
-    // Apply all transforms (C and JS)
+    // Fast path: no transforms - avoid unnecessary string copies
+    bool has_c_transforms = rc->pipeline && rc->pipeline->count > 0;
+    bool has_js_transforms = !rc->js_transforms.empty();
+
+    if (!has_c_transforms && !has_js_transforms) {
+        rc->current.emplace_back(data, len);
+        rc->current_field_index++;
+        return;
+    }
+
+    // Slow path: apply transforms
     std::string transformed = rc->applyTransforms(data, len, rc->current_field_index);
-    rc->current.emplace_back(transformed);
+    rc->current.emplace_back(std::move(transformed));
     rc->current_field_index++;
 }
 
