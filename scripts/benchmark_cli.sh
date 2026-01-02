@@ -237,8 +237,19 @@ RUST_EOF
 
 build_cisv() {
     log "Building cisv..."
-    make clean >/dev/null 2>&1 || true
+    # Only clean core and cli, not PHP extension
+    make -C core clean >/dev/null 2>&1 || true
+    make -C cli clean >/dev/null 2>&1 || true
     make all >/dev/null 2>&1
+
+    # Rebuild PHP extension if phpize is available (since make clean might have deleted it)
+    if command_exists phpize && [ -d "./bindings/php" ]; then
+        local php_ext="${PROJECT_ROOT}/bindings/php/modules/cisv.so"
+        if [ ! -f "$php_ext" ]; then
+            log "  Rebuilding PHP extension..."
+            build_php_extension
+        fi
+    fi
 }
 
 install_dependencies() {
