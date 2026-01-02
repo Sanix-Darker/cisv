@@ -12,7 +12,7 @@ permissions:
 
 env:
   NODE_VERSION: '23.x'
-  CACHE_KEY_PREFIX: 'cisv-v1'
+  CACHE_KEY_PREFIX: 'cisv-v2'
 
 jobs:
   setup:
@@ -70,7 +70,7 @@ jobs:
           npm run test:build
 
   c-tests:
-    name: C Native Tests
+    name: C Core Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -89,8 +89,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake valgrind
 
-      - name: Run C test suite
-        run: make test-c
+      - name: Build core library
+        run: make core
+
+      - name: Build and run tests
+        run: |
+          cd core
+          make test
+          LD_LIBRARY_PATH=build ./build/test_core
 
   cli-build-test:
     name: CLI Build & Test
@@ -103,26 +109,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install node-gyp
-        run: npm install -g node-gyp
-
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
           path: |
-            build/
-            cisv_bin
-          key: ${{ env.CACHE_KEY_PREFIX }}-cli-${{ matrix.os }}-${{ hashFiles('lib/**', 'npm/binding.gyp', 'Makefile') }}
+            core/build/
+            cli/build/
+          key: ${{ env.CACHE_KEY_PREFIX }}-cli-${{ matrix.os }}-${{ hashFiles('core/**', 'cli/**', 'Makefile') }}
 
       - name: Build CLI
         run: |
           make clean
-          make cli
+          make all
 
       - name: Test CLI functionality
         run: |
@@ -131,19 +129,19 @@ jobs:
           1,test,100
           2,demo,200
           EOF
-          ./cisv_bin --version
-          ./cisv_bin --help
-          test "$(./cisv_bin -c test.csv | tr -d '[:space:]')" = "3"
-          ./cisv_bin test.csv
-          ./cisv_bin -s 0,2 test.csv
-          ./cisv_bin --head 1 test.csv
+          LD_LIBRARY_PATH=core/build cli/build/cisv --version
+          LD_LIBRARY_PATH=core/build cli/build/cisv --help
+          test "$(LD_LIBRARY_PATH=core/build cli/build/cisv -c test.csv | tr -d '[:space:]')" = "3"
+          LD_LIBRARY_PATH=core/build cli/build/cisv test.csv
+          LD_LIBRARY_PATH=core/build cli/build/cisv -s 0,2 test.csv
+          LD_LIBRARY_PATH=core/build cli/build/cisv --head 1 test.csv
           rm -f test.csv
 
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
-          name: cisv_bin-${{ matrix.os }}
-          path: cisv_bin
+          name: cisv-cli-${{ matrix.os }}
+          path: cli/build/cisv
           retention-days: 7
 
   memory-check:
@@ -157,24 +155,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
       - name: Install memory checking tools
         run: |
           sudo apt-get update
           sudo apt-get install -y valgrind cppcheck clang-tools
 
-      - name: Install node-gyp
-        run: npm install -g node-gyp
-
       - name: Build with debug symbols
         run: |
           make clean
-          make build
-          CFLAGS="-g -O0" make cli
+          CFLAGS="-g -O0" make all
 
       - name: Create test data
         run: |
@@ -186,14 +175,15 @@ jobs:
 
       - name: Run Valgrind tests
         run: |
+          export LD_LIBRARY_PATH=core/build
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-            --verbose --log-file=valgrind-version.log ./cisv_bin --version
+            --verbose --log-file=valgrind-version.log cli/build/cisv --version
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-            --log-file=valgrind-basic.log ./cisv_bin memtest.csv
+            --log-file=valgrind-basic.log cli/build/cisv memtest.csv
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-            --log-file=valgrind-count.log ./cisv_bin -c memtest.csv
+            --log-file=valgrind-count.log cli/build/cisv -c memtest.csv
           valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
-            --log-file=valgrind-select.log ./cisv_bin -s 0,2 memtest.csv
+            --log-file=valgrind-select.log cli/build/cisv -s 0,2 memtest.csv
 
       - name: Check for memory leaks
         run: |
@@ -243,23 +233,22 @@ jobs:
         run: |
           npm install -g node-gyp
           sudo apt-get update
-          sudo apt-get install -y bc time python3 # should be removed later
+          sudo apt-get install -y bc time python3
 
       - name: Build modules
         run: |
           make clean
-          cd ./npm/ && npm ci && npm install -g node-gyp node-addon-api && npm install && \
-          node-gyp configure build CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
-          cd ../ && make cli
+          make all
+          cd npm && npm ci && npm run build
 
       - name: Run benchmarks
         run: |
-          # Set environment to disable colors
           export TERM=dumb
           export NO_COLOR=1
           export CI=true
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
+          export LD_LIBRARY_PATH=core/build
 
           bash ./scripts/benchmark_cli.sh install
           bash ./scripts/benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
@@ -269,9 +258,7 @@ jobs:
           echo "DATE: $(date)" >> BENCHMARKS.md
           echo "COMMIT: $GITHUB_SHA" >> BENCHMARKS.md
           echo "\`\`\`" >> BENCHMARKS.md
-
           echo "---" >> BENCHMARKS.md
-
           echo "" >> BENCHMARKS.md
           cat benchmark.log >> BENCHMARKS.md
           echo "" >> BENCHMARKS.md
