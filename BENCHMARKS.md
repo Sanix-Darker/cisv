@@ -1,115 +1,127 @@
-Running CLI benchmarks...
-Running Node.js benchmarks...
-
-make: Entering directory '/home/runner/work/cisv/cisv/bindings/nodejs/build'
-  CC(target) Release/obj.target/nothing/node_modules/node-addon-api/nothing.o
-rm -f Release/obj.target/node_modules/node-addon-api/nothing.a Release/obj.target/node_modules/node-addon-api/nothing.a.ar-file-list; mkdir -p `dirname Release/obj.target/node_modules/node-addon-api/nothing.a`
-ar crs Release/obj.target/node_modules/node-addon-api/nothing.a @Release/obj.target/node_modules/node-addon-api/nothing.a.ar-file-list
-  COPY Release/nothing.a
-  CXX(target) Release/obj.target/cisv/cisv/cisv_addon.o
-  CC(target) Release/obj.target/cisv/../../core/src/parser.o
-  CC(target) Release/obj.target/cisv/../../core/src/writer.o
-  CC(target) Release/obj.target/cisv/../../core/src/transformer.o
-  SOLINK_MODULE(target) Release/obj.target/cisv.node
-  COPY Release/cisv.node
-make: Leaving directory '/home/runner/work/cisv/cisv/bindings/nodejs/build'
-
-make: Entering directory '/home/runner/work/cisv/cisv/bindings/nodejs/build'
-  CC(target) Release/obj.target/nothing/node_modules/node-addon-api/nothing.o
-rm -f Release/obj.target/node_modules/node-addon-api/nothing.a Release/obj.target/node_modules/node-addon-api/nothing.a.ar-file-list; mkdir -p `dirname Release/obj.target/node_modules/node-addon-api/nothing.a`
-ar crs Release/obj.target/node_modules/node-addon-api/nothing.a @Release/obj.target/node_modules/node-addon-api/nothing.a.ar-file-list
-  COPY Release/nothing.a
-  CXX(target) Release/obj.target/cisv/cisv/cisv_addon.o
-  CC(target) Release/obj.target/cisv/../../core/src/parser.o
-  CC(target) Release/obj.target/cisv/../../core/src/writer.o
-  CC(target) Release/obj.target/cisv/../../core/src/transformer.o
-  SOLINK_MODULE(target) Release/obj.target/cisv.node
-  COPY Release/cisv.node
-make: Leaving directory '/home/runner/work/cisv/cisv/bindings/nodejs/build'
-Running Python benchmarks...
 # CISV Benchmark Report
 
-> **Generated:** 2026-01-02 15:51:12 UTC
-> **Commit:** 38b0135297d6edbfd177c2f8b5925632f629a90d
-> **Test File:** 85.50 MB, 1000001 rows
+## Test Configuration
 
-## Summary
-
-CISV is a high-performance CSV parser with SIMD optimizations. This benchmark compares it against other popular CSV tools.
-
----
-
-## CLI Benchmarks
-
-### Row Counting
-
-Counting all rows in the CSV file.
-
-| Tool | Time (s) | Speed (MB/s) | Status |
-|------|----------|--------------|--------|
-| cisv | 0.0149 | 5738.26 | OK (3/3) |
-| rust-csv | 0.1683 | 508.02 | OK (3/3) |
-| wc -l | 0.0161 | 5310.56 | OK (3/3) |
-| csvkit | 2.0654 | 41.40 | OK (3/3) |
-| miller | 0.7497 | 114.05 | OK (3/3) |
-
-### Column Selection
-
-Selecting columns 0, 2, 3 from the CSV file.
-
-| Tool | Time (s) | Speed (MB/s) | Status |
-|------|----------|--------------|--------|
-| cisv | 0.3420 | 250.00 | OK (3/3) |
-| rust-csv | 0.2222 | 384.79 | OK (3/3) |
-| csvkit | 2.1556 | 39.66 | OK (3/3) |
-| miller | 1.0618 | 80.52 | OK (3/3) |
+| Parameter | Value |
+|-----------|-------|
+| **Generated** | 2026-01-02 16:05:43 UTC |
+| **Commit** | 6d3c0254b113e7132a068fcf0401863e55321993 |
+| **File Size** | 85.50 MB |
+| **Row Count** | 1000001 |
+| **Iterations** | 5 |
+| **Platform** | Linux x86_64 |
 
 ---
 
-## Node.js Binding Benchmarks
+## Executive Summary
 
-Parsing the same CSV file using the Node.js binding.
-
-| Parser | Time (s) | Speed (MB/s) | Status |
-|--------|----------|--------------|--------|
-| cisv-node | - | - | Not tested |
-| papaparse | - | - | Not tested |
-| csv-parse | - | - | Not tested |
-| fast-csv | - | - | Not tested |
+CISV is a high-performance CSV parser written in C with SIMD optimizations (AVX-512, AVX2, SSE2). This benchmark compares CISV against popular CSV parsing tools across different languages and use cases.
 
 ---
 
-## Python Binding Benchmarks
+## 1. CLI Tools Comparison
 
-Parsing the same CSV file using the Python binding.
+### 1.1 Row Counting Performance
 
-| Parser | Time (s) | Speed (MB/s) | Status |
-|--------|----------|--------------|--------|
-| cisv-python | - | - | Not tested |
-| pandas | 1.5118 | 56.56 | OK |
-| csv-stdlib | 1.6430 | 52.04 | OK |
+Task: Count all rows in a 85.50 MB CSV file with 1000001 rows.
 
----
+| Tool | Time (s) | Speed (MB/s) | Runs |
+|------|----------|--------------|------|
+| **cisv** | 0.0145 | 5896.55 | 5/5 |
+| rust-csv | 0.1523 | 561.39 | 5/5 |
+| wc -l | 0.0151 | 5662.25 | 5/5 |
+| csvkit | 2.0333 | 42.05 | 5/5 |
+| miller | 0.7396 | 115.60 | 5/5 |
 
-## Performance Analysis
+### 1.2 Column Selection Performance
 
-### Ranking by Speed (Row Counting)
+Task: Select columns 0, 2, 3 from the CSV file.
 
-1. **cisv** - 5738.26 MB/s
-2. **rust-csv** - 508.02 MB/s
-3. **wc -l** - 5310.56 MB/s
-4. **csvkit** - 41.40 MB/s
-5. **miller** - 114.05 MB/s
-
-### Notes
-
-- **cisv**: Native C implementation with SIMD optimizations (AVX-512/AVX2/SSE2)
-- **rust-csv**: Rust CSV library with optimized parsing
-- **wc -l**: Simple line counting (no CSV parsing)
-- **csvkit**: Python-based CSV toolkit
-- **miller**: Feature-rich data processing tool
+| Tool | Time (s) | Speed (MB/s) | Runs |
+|------|----------|--------------|------|
+| **cisv** | 0.3439 | 248.62 | 5/5 |
+| rust-csv | 0.2237 | 382.21 | 5/5 |
+| csvkit | 2.1418 | 39.92 | 5/5 |
+| miller | 1.1099 | 77.03 | 5/5 |
 
 ---
 
-*Benchmark conducted with 3 iterations per test.*
-Benchmark complete!
+## 2. Node.js Binding Comparison
+
+Task: Parse the entire CSV file using Node.js bindings.
+
+| Parser | Time (s) | Speed (MB/s) | Runs |
+|--------|----------|--------------|------|
+| **cisv** | 4.3404 | 19.70 | 5/5 |
+| papaparse | 1.3798 | 61.97 | 5/5 |
+| csv-parse | 3.7051 | 23.08 | 5/5 |
+| fast-csv | 6.5850 | 12.98 | 5/5 |
+
+---
+
+## 3. Python Binding Comparison
+
+Task: Parse the entire CSV file using Python bindings.
+
+| Parser | Time (s) | Speed (MB/s) | Runs |
+|--------|----------|--------------|------|
+| **cisv** | - | - | - |
+| pandas | 1.4686 | 58.22 | 5/5 |
+| csv (stdlib) | 1.6515 | 51.77 | 5/5 |
+
+---
+
+## 4. PHP Binding Comparison
+
+Task: Parse the entire CSV file using PHP.
+
+| Parser | Time (s) | Speed (MB/s) | Runs |
+|--------|----------|--------------|------|
+| fgetcsv | 4.8992 | 17.45 | 5/5 |
+| str_getcsv | 4.8420 | 17.66 | 5/5 |
+| league/csv | - | - | - |
+
+---
+
+## 5. Performance Analysis
+
+### Speed Rankings (Row Counting)
+
+1. **cisv (C)** - 5896.55 MB/s
+2. **wc -l (coreutils)** - 5662.25 MB/s
+3. **rust-csv (Rust)** - 561.39 MB/s
+4. **miller (Go)** - 115.60 MB/s
+5. **csvkit (Python)** - 42.05 MB/s
+
+### Key Observations
+
+- **CISV CLI** uses native C with SIMD optimizations for maximum throughput
+- **rust-csv** provides excellent performance with memory safety guarantees
+- **wc -l** is fast but only counts lines, not CSV-aware
+- **csvkit/miller** trade performance for features and flexibility
+
+### Technology Notes
+
+| Tool | Language | Features |
+|------|----------|----------|
+| cisv | C | SIMD (AVX-512/AVX2/SSE2), zero-copy parsing |
+| rust-csv | Rust | Memory-safe, streaming |
+| wc -l | C | Line counting only |
+| csvkit | Python | Full CSV toolkit |
+| miller | Go | Data transformation |
+| papaparse | JavaScript | Browser/Node compatible |
+| pandas | Python/C | DataFrame operations |
+
+---
+
+## Methodology
+
+- Each test was run **5 times** and averaged
+- Tests used a **85.50 MB** CSV file with **1000001** rows
+- All tests ran on the same machine sequentially
+- Warm-up runs were not performed (cold start)
+- Times include file I/O and parsing
+
+---
+
+*Report generated by CISV Benchmark Suite*
