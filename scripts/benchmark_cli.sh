@@ -110,6 +110,46 @@ install_php_league_csv() {
     cd "$PROJECT_ROOT"
 }
 
+build_php_extension() {
+    log "Building cisv PHP extension..."
+    if [ ! -d "./bindings/php" ]; then
+        log "  PHP extension source not found, skipping"
+        return
+    fi
+
+    # Check for php-dev
+    if ! command_exists phpize; then
+        log "  phpize not found, installing php-dev..."
+        if command_exists apt-get; then
+            sudo apt-get install -y php-dev >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if ! command_exists phpize; then
+        log "  phpize still not available, skipping PHP extension build"
+        return
+    fi
+
+    cd ./bindings/php
+
+    # Clean previous build
+    make clean >/dev/null 2>&1 || true
+    rm -f configure >/dev/null 2>&1 || true
+
+    # Build extension
+    phpize >/dev/null 2>&1 && \
+    ./configure --enable-cisv >/dev/null 2>&1 && \
+    make >/dev/null 2>&1
+
+    if [ -f "modules/cisv.so" ]; then
+        log "  PHP extension built successfully"
+    else
+        log "  PHP extension build failed"
+    fi
+
+    cd "$PROJECT_ROOT"
+}
+
 install_python_deps() {
     log "Installing Python dependencies..."
     pip3 install --quiet polars pyarrow pandas >/dev/null 2>&1 || true
@@ -194,6 +234,7 @@ install_dependencies() {
     install_csvkit
     install_xsv
     install_php_league_csv
+    build_php_extension
     install_python_deps
     log "Dependencies installed."
 }
@@ -604,12 +645,13 @@ PYEOF
 }
 
 # ============================================================================
-# PHP BENCHMARKS (7 parsers)
+# PHP BENCHMARKS (8 parsers)
 # ============================================================================
 
 run_php_benchmarks() {
     local file="$1"
     local abs_file="${PROJECT_ROOT}/${file}"
+    local php_ext="${PROJECT_ROOT}/bindings/php/modules/cisv.so"
 
     if ! command_exists php; then
         log "Skipping PHP benchmarks (php not available)"
@@ -618,8 +660,55 @@ run_php_benchmarks() {
 
     log "Running PHP benchmarks..."
 
-    # PHP native fgetcsv benchmark
+    # cisv PHP extension benchmark (parse)
     local result
+    if [ -f "$php_ext" ]; then
+        result=$(BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+\$file = getenv('BENCH_FILE');
+\$iterations = 5;
+\$totalTime = 0;
+
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$parser = new CisvParser();
+    \$rows = \$parser->parseFile(\$file);
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
+}
+
+echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    else
+        result="FAILED|0"
+    fi
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_cisv"]="$result"
+    log "    cisv (parse): $result"
+
+    # cisv PHP extension benchmark (count) - shows raw C performance
+    if [ -f "$php_ext" ]; then
+        result=$(BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+\$file = getenv('BENCH_FILE');
+\$iterations = 5;
+\$totalTime = 0;
+
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$count = CisvParser::countRows(\$file);
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
+}
+
+echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    else
+        result="FAILED|0"
+    fi
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_cisv-count"]="$result"
+    log "    cisv (count): $result"
+
+    # PHP native fgetcsv benchmark
     result=$(BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
 \$iterations = 5;
@@ -909,6 +998,8 @@ Task: Parse the entire CSV file using PHP parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
+| **cisv (parse)** $(format_result "php_cisv" "$file_size_mb")
+| **cisv (count)** $(format_result "php_cisv-count" "$file_size_mb")
 | fgetcsv $(format_result "php_fgetcsv" "$file_size_mb")
 | str_getcsv $(format_result "php_str_getcsv" "$file_size_mb")
 | SplFileObject $(format_result "php_splfileobject" "$file_size_mb")
@@ -916,6 +1007,9 @@ Task: Parse the entire CSV file using PHP parsers.
 | explode $(format_result "php_explode" "$file_size_mb")
 | preg_split $(format_result "php_preg_split" "$file_size_mb")
 | array_map $(format_result "php_array_map" "$file_size_mb")
+
+> **Note:** cisv (count) shows native C performance without PHP array creation overhead.
+> cisv (parse) includes the cost of converting C data to PHP arrays.
 
 ---
 
