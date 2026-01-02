@@ -130,21 +130,36 @@ build_php_extension() {
         return
     fi
 
+    # Build core library first (required for linking)
+    log "  Building core library for PHP extension..."
+    make core >/dev/null 2>&1 || {
+        log "  Failed to build core library"
+        return
+    }
+
     cd ./bindings/php
 
-    # Clean previous build
+    # Clean previous build thoroughly
     make clean >/dev/null 2>&1 || true
-    rm -f configure >/dev/null 2>&1 || true
+    rm -f configure aclocal.m4 config.h config.h.in config.guess config.sub >/dev/null 2>&1 || true
+    rm -f configure.ac install-sh ltmain.sh Makefile.global missing mkinstalldirs >/dev/null 2>&1 || true
+    rm -rf autom4te.cache build .deps modules .libs >/dev/null 2>&1 || true
+    rm -f src/*.lo src/*.o >/dev/null 2>&1 || true
 
     # Build extension
-    phpize >/dev/null 2>&1 && \
-    ./configure --enable-cisv >/dev/null 2>&1 && \
-    make >/dev/null 2>&1
+    log "  Running phpize..."
+    phpize >/dev/null 2>&1 || { log "  phpize failed"; cd "$PROJECT_ROOT"; return; }
+
+    log "  Running configure..."
+    ./configure --enable-cisv >/dev/null 2>&1 || { log "  configure failed"; cd "$PROJECT_ROOT"; return; }
+
+    log "  Running make..."
+    make >/dev/null 2>&1 || { log "  make failed"; cd "$PROJECT_ROOT"; return; }
 
     if [ -f "modules/cisv.so" ]; then
         log "  PHP extension built successfully"
     else
-        log "  PHP extension build failed"
+        log "  PHP extension build failed - modules/cisv.so not found"
     fi
 
     cd "$PROJECT_ROOT"
@@ -660,10 +675,13 @@ run_php_benchmarks() {
 
     log "Running PHP benchmarks..."
 
+    # Set library path for cisv
+    local lib_path="${PROJECT_ROOT}/core/build"
+
     # cisv PHP extension benchmark (parse)
     local result
     if [ -f "$php_ext" ]; then
-        result=$(BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+        result=$(LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
 \$file = getenv('BENCH_FILE');
 \$iterations = 5;
 \$totalTime = 0;
@@ -679,6 +697,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
 echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     else
+        log "    cisv extension not found at $php_ext"
         result="FAILED|0"
     fi
     [ -z "$result" ] && result="FAILED|0"
@@ -687,7 +706,7 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
 
     # cisv PHP extension benchmark (count) - shows raw C performance
     if [ -f "$php_ext" ]; then
-        result=$(BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+        result=$(LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
 \$file = getenv('BENCH_FILE');
 \$iterations = 5;
 \$totalTime = 0;
