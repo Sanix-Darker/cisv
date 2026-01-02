@@ -1,7 +1,7 @@
 # CISV - High-Performance CSV Parser
 # Root Makefile - Orchestrates all modules
 
-.PHONY: all core cli nodejs php clean test install help
+.PHONY: all core cli nodejs python php clean test install help
 
 # Default target
 all: core cli
@@ -21,6 +21,11 @@ nodejs:
 	@echo "Building Node.js binding..."
 	cd bindings/nodejs && npm install
 
+# Build Python binding
+python: core
+	@echo "Building Python binding..."
+	$(MAKE) -C bindings/python build
+
 # Build PHP extension (requires phpize)
 php: core
 	@echo "Building PHP extension..."
@@ -31,7 +36,7 @@ test: test-core test-cli test-nodejs
 
 test-core: core
 	@echo "Running core tests..."
-	@cd core && LD_LIBRARY_PATH=build ./build/test_core
+	@cd core && make test
 
 test-cli: cli
 	@echo "Running CLI tests..."
@@ -45,7 +50,8 @@ test-nodejs: nodejs
 clean:
 	$(MAKE) -C core clean
 	$(MAKE) -C cli clean
-	cd bindings/nodejs && rm -rf build node_modules
+	cd bindings/nodejs && rm -rf build node_modules 2>/dev/null || true
+	$(MAKE) -C bindings/python clean 2>/dev/null || true
 	$(MAKE) -C bindings/php clean 2>/dev/null || true
 	rm -rf build_cmake
 
@@ -89,6 +95,7 @@ help:
 	@echo "  core         Build core C library"
 	@echo "  cli          Build CLI tool"
 	@echo "  nodejs       Build Node.js binding"
+	@echo "  python       Build Python binding"
 	@echo "  php          Build PHP extension"
 	@echo ""
 	@echo "  test         Run all tests"

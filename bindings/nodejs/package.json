@@ -1,31 +1,50 @@
 {
   "name": "cisv",
-  "version": "0.0.8",
-  "description": "High-performance CSV parser with SIMD optimizations",
+  "version": "0.0.7",
+  "description": "The csv parser on steroids.",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
   "types": "./types/cisv.d.ts",
   "exports": {
     ".": {
-      "import": "./lib/index.mjs",
-      "require": "./lib/index.js"
+      "import": "./cisv/index.mjs",
+      "require": "./cisv/index.js"
     }
   },
   "scripts": {
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
-    "test": "mocha ./tests/*.test.js",
-    "lint": "clang-format -i src/*.cc"
+    "test": "mocha ./tests/*.test.js && bash ../scripts/test_transform.sh",
+    "test:build": "npm run build && npm run test",
+    "benchmark-js": "node ./benchmark.js",
+    "benchmark-core": "bash ../scripts/benchmark_cli_reader.sh",
+    "lint": "clang-format -i cisv/*.{cc,h}",
+    "pretest:typescript": "tsc --project tsconfig.json --noEmit",
+    "build:types": "tsc --project tsconfig.json --declaration --emitDeclarationOnly",
+    "test:all": "npm run test && npm run test:typescript",
+    "test:coverage": "nyc mocha test/*.test.js",
+    "test:perf": "node test/performance.test.js"
   },
   "dependencies": {
     "node-addon-api": "^8.5.0",
     "node-gyp-build": "^4.8.4"
   },
   "devDependencies": {
+    "but-csv": "^2.0.14",
+    "d3-dsv": "^3.0.1",
+    "udsv": "^0.7.3",
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.7.1",
+    "benchmark": "^2.1.4",
     "chai": "^6.2.0",
-    "mocha": "^11.7.4"
+    "csv-parse": "^6.0.0",
+    "fast-csv": "^5.0.2",
+    "mocha": "^11.7.4",
+    "neat-csv": "^7.0.0",
+    "nyc": "^17.1.0",
+    "papaparse": "^5.5.3",
+    "ts-mocha": "^11.1.0",
+    "typescript": "^5.8.3"
   },
   "gypfile": true,
   "keywords": [
@@ -35,9 +54,5 @@
     "simd",
     "native"
   ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Sanix-Darker/cisv.git"
-  }
+  "license": "MIT"
 }

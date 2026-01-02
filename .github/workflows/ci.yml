@@ -28,21 +28,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: 'npm/package-lock.json'
+          cache-dependency-path: 'bindings/nodejs/package-lock.json'
 
       - name: Generate cache keys
         id: cache-keys
-        run: echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('npm/package-lock.json') }}" >> $GITHUB_OUTPUT
+        run: echo "node=${{ env.CACHE_KEY_PREFIX }}-node-${{ hashFiles('bindings/nodejs/package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: |
-          cd npm
+          cd bindings/nodejs
           npm ci
 
       - name: Cache node_modules
         uses: actions/cache/save@v4
         with:
-          path: npm/node_modules
+          path: bindings/nodejs/node_modules
           key: ${{ steps.cache-keys.outputs.node }}
 
   npm-tests:
@@ -61,12 +61,12 @@ jobs:
       - name: Restore dependencies
         uses: actions/cache/restore@v4
         with:
-          path: npm/node_modules
+          path: bindings/nodejs/node_modules
           key: ${{ needs.setup.outputs.cache-key }}
 
       - name: Build and test
         run: |
-          cd npm
+          cd bindings/nodejs
           npm run test:build
 
   c-tests:
@@ -223,7 +223,7 @@ jobs:
       - name: Restore node_modules
         uses: actions/cache/restore@v4
         with:
-          path: npm/node_modules
+          path: bindings/nodejs/node_modules
           key: ${{ needs.setup.outputs.cache-key }}
 
       - name: Install dependencies
@@ -236,7 +236,7 @@ jobs:
         run: |
           make clean
           make all
-          cd npm && npm ci && npm run build
+          cd bindings/nodejs && npm ci && npm run build
 
       - name: Run benchmarks
         run: |
