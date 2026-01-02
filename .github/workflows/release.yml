@@ -39,9 +39,9 @@ jobs:
         shell: bash
         run: |
           npm install -g node-gyp node-addon-api
-          cd npm
+          cd bindings/nodejs
           npm install
-          cd ..
+          cd ../..
 
       - name: Build core library and CLI
         shell: bash
@@ -62,12 +62,12 @@ jobs:
       - name: Build Node.js addon
         shell: bash
         run: |
-          cd npm
+          cd bindings/nodejs
           npm run build
-          cd ..
+          cd ../..
 
           ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}-${{ matrix.arch }}.node"
-          cp npm/build/Release/cisv.node "$ADDON_OUTPUT"
+          cp bindings/nodejs/build/Release/cisv.node "$ADDON_OUTPUT"
           echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
 
       - name: Create minimal package
@@ -118,18 +118,18 @@ jobs:
 
       - name: Prepare npm package
         run: |
-          cd npm
+          cd bindings/nodejs
           npm version ${VERSION#v} --no-git-tag-version
           npm install
 
       - name: Build and test
         run: |
-          cd npm
+          cd bindings/nodejs
           npm run build
 
       - name: Publish to npm
         run: |
-          cd npm
+          cd bindings/nodejs
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -61,7 +61,7 @@ describe('CSV Parser Core Functionality', () => {
 
       // RFC 4180: doubled quotes ("") inside quoted fields become single quote
       assert.strictEqual(rows[3][1], 'Alex "The Boss"', 'Should handle escaped quotes');
-      assert.strictEqual(rows[3][3], 'alex@test.com');
+      assert.strictEqual(rows[3][2], 'alex@test.com');
     });
 
     it('should handle large files efficiently', () => {

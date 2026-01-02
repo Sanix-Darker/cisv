@@ -3,15 +3,15 @@
     {
       "target_name": "cisv",
       "sources": [
-        "src/addon.cc",
+        "cisv/cisv_addon.cc",
         "../../core/src/parser.c",
         "../../core/src/writer.c",
         "../../core/src/transformer.c"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
-        "../../core/include",
-        "src/"
+        "../../core/include/",
+        "cisv/"
       ],
       "dependencies": [
         "<!(node -p \"require('node-addon-api').gyp\")"
