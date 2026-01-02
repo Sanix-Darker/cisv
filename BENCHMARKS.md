@@ -4,8 +4,8 @@
 
 | Parameter | Value |
 |-----------|-------|
-| **Generated** | 2026-01-02 16:05:43 UTC |
-| **Commit** | 6d3c0254b113e7132a068fcf0401863e55321993 |
+| **Generated** | 2026-01-02 16:48:00 UTC |
+| **Commit** | 3922066065776476134ff9f58a94589dbec6bea5 |
 | **File Size** | 85.50 MB |
 | **Row Count** | 1000001 |
 | **Iterations** | 5 |
@@ -27,11 +27,13 @@ Task: Count all rows in a 85.50 MB CSV file with 1000001 rows.
 
 | Tool | Time (s) | Speed (MB/s) | Runs |
 |------|----------|--------------|------|
-| **cisv** | 0.0145 | 5896.55 | 5/5 |
-| rust-csv | 0.1523 | 561.39 | 5/5 |
-| wc -l | 0.0151 | 5662.25 | 5/5 |
-| csvkit | 2.0333 | 42.05 | 5/5 |
-| miller | 0.7396 | 115.60 | 5/5 |
+| **cisv** | 0.0172 | 4970.93 | 5/5 |
+| rust-csv | 0.1556 | 549.49 | 5/5 |
+| xsv | 0.1226 | 697.39 | 5/5 |
+| wc -l | 0.0230 | 3717.39 | 5/5 |
+| awk | 0.1239 | 690.07 | 5/5 |
+| miller | 0.7582 | 112.77 | 5/5 |
+| csvkit | 2.1425 | 39.91 | 5/5 |
 
 ### 1.2 Column Selection Performance
 
@@ -39,78 +41,79 @@ Task: Select columns 0, 2, 3 from the CSV file.
 
 | Tool | Time (s) | Speed (MB/s) | Runs |
 |------|----------|--------------|------|
-| **cisv** | 0.3439 | 248.62 | 5/5 |
-| rust-csv | 0.2237 | 382.21 | 5/5 |
-| csvkit | 2.1418 | 39.92 | 5/5 |
-| miller | 1.1099 | 77.03 | 5/5 |
+| **cisv** | 0.3425 | 249.64 | 5/5 |
+| rust-csv | 0.2208 | 387.23 | 5/5 |
+| xsv | 0.1720 | 497.09 | 5/5 |
+| awk | 1.1485 | 74.44 | 5/5 |
+| cut | 0.1772 | 482.51 | 5/5 |
+| miller | 1.0833 | 78.93 | 5/5 |
+| csvkit | 2.1762 | 39.29 | 5/5 |
 
 ---
 
 ## 2. Node.js Binding Comparison
 
-Task: Parse the entire CSV file using Node.js bindings.
+Task: Parse the entire CSV file using Node.js parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
-| **cisv** | 4.3404 | 19.70 | 5/5 |
-| papaparse | 1.3798 | 61.97 | 5/5 |
-| csv-parse | 3.7051 | 23.08 | 5/5 |
-| fast-csv | 6.5850 | 12.98 | 5/5 |
+| **cisv (parse)** | 4.4936 | 19.03 | 5/5 |
+| **cisv (count)** | 0.0122 | 7008.20 | 5/5 |
+| papaparse | 1.3600 | 62.87 | 5/5 |
+| csv-parse | 3.7558 | 22.76 | 5/5 |
+| fast-csv | 6.7725 | 12.62 | 5/5 |
+| csv-parser | 2.4340 | 35.13 | 5/5 |
+| d3-dsv | 0.8235 | 103.83 | 5/5 |
+| csv-string | 1.3343 | 64.08 | 5/5 |
+
+> **Note:** cisv (count) shows native C performance without JS object creation overhead.
+> cisv (parse) includes the cost of converting C data to JavaScript arrays.
 
 ---
 
 ## 3. Python Binding Comparison
 
-Task: Parse the entire CSV file using Python bindings.
+Task: Parse the entire CSV file using Python parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
-| **cisv** | - | - | - |
-| pandas | 1.4686 | 58.22 | 5/5 |
-| csv (stdlib) | 1.6515 | 51.77 | 5/5 |
+| **cisv** | 0.0110 | 7772.73 | 5/5 |
+| polars | 0.0732 | 1168.03 | 5/5 |
+| pyarrow | 0.0860 | 994.19 | 5/5 |
+| pandas | 1.5485 | 55.21 | 5/5 |
+| csv (stdlib) | 1.7213 | 49.67 | 5/5 |
+| DictReader | 2.1542 | 39.69 | 5/5 |
+| numpy | 3.1586 | 27.07 | 5/5 |
 
 ---
 
 ## 4. PHP Binding Comparison
 
-Task: Parse the entire CSV file using PHP.
+Task: Parse the entire CSV file using PHP parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
-| fgetcsv | 4.8992 | 17.45 | 5/5 |
-| str_getcsv | 4.8420 | 17.66 | 5/5 |
-| league/csv | - | - | - |
+| fgetcsv | 4.9114 | 17.41 | 5/5 |
+| str_getcsv | 4.8675 | 17.57 | 5/5 |
+| SplFileObject | 5.2536 | 16.27 | 5/5 |
+| league/csv | 12.7720 | 6.69 | 5/5 |
+| explode | 0.4140 | 206.52 | 5/5 |
+| preg_split | 0.5643 | 151.52 | 5/5 |
+| array_map | 4.7684 | 17.93 | 5/5 |
 
 ---
 
-## 5. Performance Analysis
+## 5. Technology Notes
 
-### Speed Rankings (Row Counting)
-
-1. **cisv (C)** - 5896.55 MB/s
-2. **wc -l (coreutils)** - 5662.25 MB/s
-3. **rust-csv (Rust)** - 561.39 MB/s
-4. **miller (Go)** - 115.60 MB/s
-5. **csvkit (Python)** - 42.05 MB/s
-
-### Key Observations
-
-- **CISV CLI** uses native C with SIMD optimizations for maximum throughput
-- **rust-csv** provides excellent performance with memory safety guarantees
-- **wc -l** is fast but only counts lines, not CSV-aware
-- **csvkit/miller** trade performance for features and flexibility
-
-### Technology Notes
-
-| Tool | Language | Features |
-|------|----------|----------|
+| Tool | Language | Key Features |
+|------|----------|--------------|
 | cisv | C | SIMD (AVX-512/AVX2/SSE2), zero-copy parsing |
-| rust-csv | Rust | Memory-safe, streaming |
-| wc -l | C | Line counting only |
-| csvkit | Python | Full CSV toolkit |
-| miller | Go | Data transformation |
-| papaparse | JavaScript | Browser/Node compatible |
-| pandas | Python/C | DataFrame operations |
+| rust-csv | Rust | Memory-safe, streaming, Serde support |
+| xsv | Rust | Full CSV toolkit, parallel processing |
+| polars | Rust/Python | DataFrame, parallel, lazy evaluation |
+| pyarrow | C++/Python | Apache Arrow, columnar format |
+| papaparse | JavaScript | Browser/Node, streaming, auto-detect |
+| league/csv | PHP | RFC 4180 compliant, streaming |
 
 ---
 
