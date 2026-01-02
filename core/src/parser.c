@@ -275,6 +275,17 @@ static void parse_avx512(cisv_parser *p) {
                 } else {
                     yield_quoted_field(p);
                     p->state = S_NORMAL;
+                    // Skip delimiter/newline immediately after closing quote
+                    if (p->cur < p->end && *p->cur == p->delimiter) {
+                        p->cur++;
+                    } else if (p->cur < p->end && *p->cur == '\n') {
+                        p->cur++;
+                        yield_row(p);
+                    } else if (p->cur < p->end && *p->cur == '\r' &&
+                               p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                        p->cur += 2;
+                        yield_row(p);
+                    }
                     p->field_start = p->cur;
                 }
             } else {
@@ -413,6 +424,17 @@ static void parse_avx2(cisv_parser *p) {
                 } else {
                     yield_quoted_field(p);
                     p->state = S_NORMAL;
+                    // Skip delimiter/newline immediately after closing quote
+                    if (p->cur < p->end && *p->cur == p->delimiter) {
+                        p->cur++;
+                    } else if (p->cur < p->end && *p->cur == '\n') {
+                        p->cur++;
+                        yield_row(p);
+                    } else if (p->cur < p->end && *p->cur == '\r' &&
+                               p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                        p->cur += 2;
+                        yield_row(p);
+                    }
                     p->field_start = p->cur;
                 }
             } else {
@@ -530,6 +552,17 @@ static void parse_scalar(cisv_parser *p) {
                 } else {
                     yield_quoted_field(p);
                     p->state = S_NORMAL;
+                    // Skip delimiter/newline immediately after closing quote
+                    if (p->cur < p->end && *p->cur == p->delimiter) {
+                        p->cur++;
+                    } else if (p->cur < p->end && *p->cur == '\n') {
+                        p->cur++;
+                        yield_row(p);
+                    } else if (p->cur < p->end && *p->cur == '\r' &&
+                               p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                        p->cur += 2;
+                        yield_row(p);
+                    }
                     p->field_start = p->cur;
                 }
             } else {
