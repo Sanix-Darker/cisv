@@ -230,35 +230,20 @@ jobs:
         run: |
           npm install -g node-gyp
           sudo apt-get update
-          sudo apt-get install -y bc time python3
-
-      - name: Build modules
-        run: |
-          make clean
-          make all
-          cd bindings/nodejs && npm ci && npm run build
+          sudo apt-get install -y bc time python3 python3-pip
+          pip3 install pandas --quiet || true
 
       - name: Run benchmarks
         run: |
-          export TERM=dumb
-          export NO_COLOR=1
           export CI=true
           export GITHUB_SHA="${{ github.sha }}"
           export GITHUB_REF_NAME="${{ github.ref_name }}"
-          export LD_LIBRARY_PATH=core/build
 
+          # Install benchmark dependencies (rust-csv, miller, csvkit)
           bash ./scripts/benchmark_cli.sh install
-          bash ./scripts/benchmark_cli.sh benchmark --all 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee benchmark.log
 
-          echo "## BENCHMARK RESULTS" > BENCHMARKS.md
-          echo "\`\`\`" >> BENCHMARKS.md
-          echo "DATE: $(date)" >> BENCHMARKS.md
-          echo "COMMIT: $GITHUB_SHA" >> BENCHMARKS.md
-          echo "\`\`\`" >> BENCHMARKS.md
-          echo "---" >> BENCHMARKS.md
-          echo "" >> BENCHMARKS.md
-          cat benchmark.log >> BENCHMARKS.md
-          echo "" >> BENCHMARKS.md
+          # Run benchmarks and generate markdown report
+          bash ./scripts/benchmark_cli.sh benchmark --all > BENCHMARKS.md 2>&1
 
       - name: Commit and push
         run: |
@@ -275,12 +260,11 @@ jobs:
             const fs = require('fs');
             if (fs.existsSync('BENCHMARKS.md')) {
               const content = fs.readFileSync('BENCHMARKS.md', 'utf8');
-              const lines = content.split('\n');
-              let summary = '## BENCHMARK RESULTS\n\n';
-              summary += '> Benchmarks completed successfully!\n\n';
-              const dateLines = lines.filter(l => l.includes('Date:') || l.includes('Commit:')).slice(0, 2);
-              summary += dateLines.join('\n') + '\n\n';
-              summary += '>> Full results: [BENCHMARKS.md](../blob/${{ github.head_ref }}/BENCHMARKS.md)\n';
+              // Extract first 50 lines for summary
+              const lines = content.split('\n').slice(0, 50);
+              let summary = lines.join('\n');
+              summary += '\n\n---\n\n';
+              summary += '> Full results: [BENCHMARKS.md](../blob/${{ github.head_ref }}/BENCHMARKS.md)\n';
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
