@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        arch: [amd64, arm64]
+        arch: [amd64]
         include:
           - os: ubuntu-latest
             pkg_os: ubuntu
@@ -39,51 +39,57 @@ jobs:
         shell: bash
         run: |
           npm install -g node-gyp node-addon-api
-          # Install npm dependencies in the npm directory
           cd npm
           npm install
           cd ..
 
-      - name: Build CLI binary
+      - name: Build core library and CLI
         shell: bash
         run: |
           OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-latest//')
           ARCH="${{ matrix.arch }}"
           EXT=""
 
-          # Build cisv with version info
+          # Build core and CLI
           make clean
-          make build
-          CFLAGS="-DCISV_VERSION=\"${VERSION}\" -O3 -march=native" make cli
+          make all
 
+          # Create output with version info
           OUTPUT="cisv-${{ matrix.pkg_os }}-${ARCH}${EXT}"
-          mv cisv_bin "$OUTPUT"
+          cp cli/build/cisv "$OUTPUT"
           echo "OUTPUT_FILE=$OUTPUT" >> $GITHUB_ENV
 
       - name: Build Node.js addon
         shell: bash
         run: |
-          # Build from npm directory
           cd npm
           npm run build
           cd ..
 
-          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}-${ARCH}.node"
-          cp build/Release/cisv.node "$ADDON_OUTPUT"
+          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}-${{ matrix.arch }}.node"
+          cp npm/build/Release/cisv.node "$ADDON_OUTPUT"
           echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
 
       - name: Create minimal package
         shell: bash
         run: |
-          # Create directory structure
-          mkdir -p cisv-package/cisv
+          mkdir -p cisv-package/include
+          mkdir -p cisv-package/lib
           mkdir -p cisv-package/bin
 
-          # Copy only necessary files
-          cp -r lib/* cisv-package/cisv/
-          cp LICENSE cisv-package/
-          cp README.md cisv-package/
-          cp "$OUTPUT_FILE" cisv-package/bin/cisv
+          # Copy headers
+          cp -r core/include/cisv cisv-package/include/
+
+          # Copy libraries
+          cp core/build/libcisv.a cisv-package/lib/
+          cp core/build/libcisv.so cisv-package/lib/
+
+          # Copy binary
+          cp cli/build/cisv cisv-package/bin/
+
+          # Copy docs
+          cp LICENSE cisv-package/ 2>/dev/null || true
+          cp README.md cisv-package/ 2>/dev/null || true
 
           # Create tarball
           tar czf cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz -C cisv-package .
@@ -112,13 +118,8 @@ jobs:
 
       - name: Prepare npm package
         run: |
-          # Work in the npm directory
           cd npm
-
-          # Update package version
           npm version ${VERSION#v} --no-git-tag-version
-
-          # Install dependencies
           npm install
 
       - name: Build and test
