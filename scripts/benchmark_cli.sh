@@ -18,6 +18,13 @@ PROJECT_ROOT="${PWD}"
 
 # Results storage
 declare -A RESULTS
+declare -A VALIDATIONS
+
+# Expected values for validation (set during test file generation)
+EXPECTED_ROW_COUNT=0
+EXPECTED_FIELD_COUNT=7
+EXPECTED_FIRST_ID="0"
+EXPECTED_HEADERS="id,name,email,address,phone,date,amount"
 
 # All logging goes to stderr, only markdown to stdout
 log() {
@@ -300,6 +307,231 @@ run_benchmark() {
 }
 
 # ============================================================================
+# VALIDATION FUNCTIONS
+# ============================================================================
+
+# Validate cisv CLI count result
+validate_cli_count() {
+    local file="$1"
+    local cisv_bin="${PROJECT_ROOT}/cli/build/cisv"
+
+    if [ ! -x "$cisv_bin" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local count=$(LD_LIBRARY_PATH="${PROJECT_ROOT}/core/build" "$cisv_bin" -c "$file" 2>/dev/null | tr -d '[:space:]')
+
+    if [ "$count" = "$EXPECTED_ROW_COUNT" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:expected=$EXPECTED_ROW_COUNT,got=$count"
+    fi
+}
+
+# Validate cisv CLI parse result (check headers and first row)
+validate_cli_parse() {
+    local file="$1"
+    local cisv_bin="${PROJECT_ROOT}/cli/build/cisv"
+
+    if [ ! -x "$cisv_bin" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    # Get first 2 lines and verify structure
+    local output=$(LD_LIBRARY_PATH="${PROJECT_ROOT}/core/build" "$cisv_bin" --head 2 "$file" 2>/dev/null)
+    local first_line=$(echo "$output" | head -1)
+    local second_line=$(echo "$output" | sed -n '2p')
+    local first_id=$(echo "$second_line" | cut -d',' -f1)
+
+    if [ "$first_line" = "$EXPECTED_HEADERS" ] && [ "$first_id" = "$EXPECTED_FIRST_ID" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:headers_or_data_mismatch"
+    fi
+}
+
+# Validate Node.js cisv count result
+validate_nodejs_count() {
+    local file="$1"
+
+    if [ ! -f "./bindings/nodejs/cisv/index.js" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local count=$(cd ./bindings/nodejs && node -e "
+const { cisvParser } = require('./cisv/index.js');
+console.log(cisvParser.countRows('$file'));
+" 2>/dev/null)
+
+    if [ "$count" = "$EXPECTED_ROW_COUNT" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:expected=$EXPECTED_ROW_COUNT,got=$count"
+    fi
+}
+
+# Validate Node.js cisv parse result
+validate_nodejs_parse() {
+    local file="$1"
+
+    if [ ! -f "./bindings/nodejs/cisv/index.js" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local result=$(cd ./bindings/nodejs && node -e "
+const { cisvParser } = require('./cisv/index.js');
+const p = new cisvParser();
+const rows = p.parseSync('$file');
+const rowCount = rows.length;
+const fieldCount = rows[0] ? rows[0].length : 0;
+const firstId = rows[1] ? rows[1][0] : '';
+const headers = rows[0] ? rows[0].join(',') : '';
+console.log(rowCount + '|' + fieldCount + '|' + firstId + '|' + headers);
+" 2>/dev/null)
+
+    local row_count=$(echo "$result" | cut -d'|' -f1)
+    local field_count=$(echo "$result" | cut -d'|' -f2)
+    local first_id=$(echo "$result" | cut -d'|' -f3)
+    local headers=$(echo "$result" | cut -d'|' -f4)
+
+    if [ "$row_count" = "$EXPECTED_ROW_COUNT" ] && [ "$field_count" = "$EXPECTED_FIELD_COUNT" ] && \
+       [ "$first_id" = "$EXPECTED_FIRST_ID" ] && [ "$headers" = "$EXPECTED_HEADERS" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:rows=$row_count,fields=$field_count"
+    fi
+}
+
+# Validate Python cisv count result
+validate_python_count() {
+    local file="$1"
+    local lib_path="${PROJECT_ROOT}/core/build/libcisv.so"
+
+    if [ ! -f "$lib_path" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local count=$(python3 << PYEOF 2>/dev/null
+import ctypes
+lib = ctypes.CDLL("$lib_path")
+lib.cisv_parser_count_rows.argtypes = [ctypes.c_char_p]
+lib.cisv_parser_count_rows.restype = ctypes.c_size_t
+print(lib.cisv_parser_count_rows(b"$file"))
+PYEOF
+)
+
+    if [ "$count" = "$EXPECTED_ROW_COUNT" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:expected=$EXPECTED_ROW_COUNT,got=$count"
+    fi
+}
+
+# Validate PHP cisv count result
+validate_php_count() {
+    local file="$1"
+    local php_ext="${PROJECT_ROOT}/bindings/php/modules/cisv.so"
+    local lib_path="${PROJECT_ROOT}/core/build"
+
+    if [ ! -f "$php_ext" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local count=$(LD_LIBRARY_PATH="$lib_path" php -d "extension=$php_ext" -r "
+echo CisvParser::countRows('$file');
+" 2>/dev/null)
+
+    if [ "$count" = "$EXPECTED_ROW_COUNT" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:expected=$EXPECTED_ROW_COUNT,got=$count"
+    fi
+}
+
+# Validate PHP cisv parse result
+validate_php_parse() {
+    local file="$1"
+    local php_ext="${PROJECT_ROOT}/bindings/php/modules/cisv.so"
+    local lib_path="${PROJECT_ROOT}/core/build"
+
+    if [ ! -f "$php_ext" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local result=$(LD_LIBRARY_PATH="$lib_path" php -d "extension=$php_ext" -r "
+\$parser = new CisvParser();
+\$rows = \$parser->parseFile('$file');
+\$rowCount = count(\$rows);
+\$fieldCount = isset(\$rows[0]) ? count(\$rows[0]) : 0;
+\$firstId = isset(\$rows[1][0]) ? \$rows[1][0] : '';
+\$headers = isset(\$rows[0]) ? implode(',', \$rows[0]) : '';
+echo \$rowCount . '|' . \$fieldCount . '|' . \$firstId . '|' . \$headers;
+" 2>/dev/null)
+
+    local row_count=$(echo "$result" | cut -d'|' -f1)
+    local field_count=$(echo "$result" | cut -d'|' -f2)
+    local first_id=$(echo "$result" | cut -d'|' -f3)
+    local headers=$(echo "$result" | cut -d'|' -f4)
+
+    if [ "$row_count" = "$EXPECTED_ROW_COUNT" ] && [ "$field_count" = "$EXPECTED_FIELD_COUNT" ] && \
+       [ "$first_id" = "$EXPECTED_FIRST_ID" ] && [ "$headers" = "$EXPECTED_HEADERS" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:rows=$row_count,fields=$field_count"
+    fi
+}
+
+# Run all validations
+run_validations() {
+    local file="$1"
+    local abs_file="${PROJECT_ROOT}/${file}"
+
+    log "Running validation checks..."
+
+    VALIDATIONS["cli_count"]=$(validate_cli_count "$abs_file")
+    log "  CLI count: ${VALIDATIONS[cli_count]}"
+
+    VALIDATIONS["cli_parse"]=$(validate_cli_parse "$abs_file")
+    log "  CLI parse: ${VALIDATIONS[cli_parse]}"
+
+    VALIDATIONS["nodejs_count"]=$(validate_nodejs_count "$abs_file")
+    log "  Node.js count: ${VALIDATIONS[nodejs_count]}"
+
+    VALIDATIONS["nodejs_parse"]=$(validate_nodejs_parse "$abs_file")
+    log "  Node.js parse: ${VALIDATIONS[nodejs_parse]}"
+
+    VALIDATIONS["python_count"]=$(validate_python_count "$abs_file")
+    log "  Python count: ${VALIDATIONS[python_count]}"
+
+    VALIDATIONS["php_count"]=$(validate_php_count "$abs_file")
+    log "  PHP count: ${VALIDATIONS[php_count]}"
+
+    VALIDATIONS["php_parse"]=$(validate_php_parse "$abs_file")
+    log "  PHP parse: ${VALIDATIONS[php_parse]}"
+}
+
+# Format validation result for markdown
+format_validation() {
+    local key="$1"
+    local result="${VALIDATIONS[$key]:-SKIP}"
+
+    if [[ "$result" == "PASS" ]]; then
+        echo "✓"
+    elif [[ "$result" == "SKIP" ]]; then
+        echo "-"
+    else
+        echo "✗"
+    fi
+}
+
+# ============================================================================
 # TEST DATA GENERATION
 # ============================================================================
 
@@ -328,6 +560,8 @@ generate_test_files() {
         log "Generating large.csv (1M rows)..."
         generate_csv 1000000 "large.csv"
     fi
+    # Set expected row count (1M data rows + 1 header row)
+    EXPECTED_ROW_COUNT=1000001
 }
 
 # ============================================================================
@@ -927,6 +1161,24 @@ format_result() {
     fi
 }
 
+# Format result with validation checkmark for cisv entries
+format_result_validated() {
+    local key="$1"
+    local file_size_mb="$2"
+    local validation_key="$3"
+    local result="${RESULTS[$key]:-FAILED|0}"
+    local time=$(echo "$result" | cut -d'|' -f1)
+    local runs=$(echo "$result" | cut -d'|' -f2)
+    local valid=$(format_validation "$validation_key")
+
+    if [ "$time" = "FAILED" ] || [ -z "$time" ] || [ "$time" = "0" ]; then
+        echo "| - | - | - | - |"
+    else
+        local speed=$(awk "BEGIN {printf \"%.2f\", $file_size_mb / $time}")
+        echo "| $time | $speed | $runs/$ITERATIONS | $valid |"
+    fi
+}
+
 generate_markdown_report() {
     local file="$1"
     local file_size_mb=$(get_file_size_mb "$file")
@@ -960,29 +1212,29 @@ CISV is a high-performance CSV parser written in C with SIMD optimizations (AVX-
 
 Task: Count all rows in a ${file_size_mb} MB CSV file with ${row_count} rows.
 
-| Tool | Time (s) | Speed (MB/s) | Runs |
-|------|----------|--------------|------|
-| **cisv** $(format_result "count_cisv" "$file_size_mb")
-| rust-csv $(format_result "count_rust-csv" "$file_size_mb")
-| xsv $(format_result "count_xsv" "$file_size_mb")
-| wc -l $(format_result "count_wc" "$file_size_mb")
-| awk $(format_result "count_awk" "$file_size_mb")
-| miller $(format_result "count_miller" "$file_size_mb")
-| csvkit $(format_result "count_csvkit" "$file_size_mb")
+| Tool | Time (s) | Speed (MB/s) | Runs | Valid |
+|------|----------|--------------|------|-------|
+| **cisv** $(format_result_validated "count_cisv" "$file_size_mb" "cli_count")
+| rust-csv $(format_result "count_rust-csv" "$file_size_mb") - |
+| xsv $(format_result "count_xsv" "$file_size_mb") - |
+| wc -l $(format_result "count_wc" "$file_size_mb") - |
+| awk $(format_result "count_awk" "$file_size_mb") - |
+| miller $(format_result "count_miller" "$file_size_mb") - |
+| csvkit $(format_result "count_csvkit" "$file_size_mb") - |
 
 ### 1.2 Column Selection Performance
 
 Task: Select columns 0, 2, 3 from the CSV file.
 
-| Tool | Time (s) | Speed (MB/s) | Runs |
-|------|----------|--------------|------|
-| **cisv** $(format_result "select_cisv" "$file_size_mb")
-| rust-csv $(format_result "select_rust-csv" "$file_size_mb")
-| xsv $(format_result "select_xsv" "$file_size_mb")
-| awk $(format_result "select_awk" "$file_size_mb")
-| cut $(format_result "select_cut" "$file_size_mb")
-| miller $(format_result "select_miller" "$file_size_mb")
-| csvkit $(format_result "select_csvkit" "$file_size_mb")
+| Tool | Time (s) | Speed (MB/s) | Runs | Valid |
+|------|----------|--------------|------|-------|
+| **cisv** $(format_result_validated "select_cisv" "$file_size_mb" "cli_parse")
+| rust-csv $(format_result "select_rust-csv" "$file_size_mb") - |
+| xsv $(format_result "select_xsv" "$file_size_mb") - |
+| awk $(format_result "select_awk" "$file_size_mb") - |
+| cut $(format_result "select_cut" "$file_size_mb") - |
+| miller $(format_result "select_miller" "$file_size_mb") - |
+| csvkit $(format_result "select_csvkit" "$file_size_mb") - |
 
 ---
 
@@ -990,16 +1242,16 @@ Task: Select columns 0, 2, 3 from the CSV file.
 
 Task: Parse the entire CSV file using Node.js parsers.
 
-| Parser | Time (s) | Speed (MB/s) | Runs |
-|--------|----------|--------------|------|
-| **cisv (parse)** $(format_result "nodejs_cisv" "$file_size_mb")
-| **cisv (count)** $(format_result "nodejs_cisv-count" "$file_size_mb")
-| papaparse $(format_result "nodejs_papaparse" "$file_size_mb")
-| csv-parse $(format_result "nodejs_csv-parse" "$file_size_mb")
-| fast-csv $(format_result "nodejs_fast-csv" "$file_size_mb")
-| csv-parser $(format_result "nodejs_csv-parser" "$file_size_mb")
-| d3-dsv $(format_result "nodejs_d3-dsv" "$file_size_mb")
-| csv-string $(format_result "nodejs_csv-string" "$file_size_mb")
+| Parser | Time (s) | Speed (MB/s) | Runs | Valid |
+|--------|----------|--------------|------|-------|
+| **cisv (parse)** $(format_result_validated "nodejs_cisv" "$file_size_mb" "nodejs_parse")
+| **cisv (count)** $(format_result_validated "nodejs_cisv-count" "$file_size_mb" "nodejs_count")
+| papaparse $(format_result "nodejs_papaparse" "$file_size_mb") - |
+| csv-parse $(format_result "nodejs_csv-parse" "$file_size_mb") - |
+| fast-csv $(format_result "nodejs_fast-csv" "$file_size_mb") - |
+| csv-parser $(format_result "nodejs_csv-parser" "$file_size_mb") - |
+| d3-dsv $(format_result "nodejs_d3-dsv" "$file_size_mb") - |
+| csv-string $(format_result "nodejs_csv-string" "$file_size_mb") - |
 
 > **Note:** cisv (count) shows native C performance without JS object creation overhead.
 > cisv (parse) includes the cost of converting C data to JavaScript arrays.
@@ -1010,15 +1262,15 @@ Task: Parse the entire CSV file using Node.js parsers.
 
 Task: Parse the entire CSV file using Python parsers.
 
-| Parser | Time (s) | Speed (MB/s) | Runs |
-|--------|----------|--------------|------|
-| **cisv** $(format_result "python_cisv" "$file_size_mb")
-| polars $(format_result "python_polars" "$file_size_mb")
-| pyarrow $(format_result "python_pyarrow" "$file_size_mb")
-| pandas $(format_result "python_pandas" "$file_size_mb")
-| csv (stdlib) $(format_result "python_csv-stdlib" "$file_size_mb")
-| DictReader $(format_result "python_dictreader" "$file_size_mb")
-| numpy $(format_result "python_numpy" "$file_size_mb")
+| Parser | Time (s) | Speed (MB/s) | Runs | Valid |
+|--------|----------|--------------|------|-------|
+| **cisv** $(format_result_validated "python_cisv" "$file_size_mb" "python_count")
+| polars $(format_result "python_polars" "$file_size_mb") - |
+| pyarrow $(format_result "python_pyarrow" "$file_size_mb") - |
+| pandas $(format_result "python_pandas" "$file_size_mb") - |
+| csv (stdlib) $(format_result "python_csv-stdlib" "$file_size_mb") - |
+| DictReader $(format_result "python_dictreader" "$file_size_mb") - |
+| numpy $(format_result "python_numpy" "$file_size_mb") - |
 
 ---
 
@@ -1026,17 +1278,17 @@ Task: Parse the entire CSV file using Python parsers.
 
 Task: Parse the entire CSV file using PHP parsers.
 
-| Parser | Time (s) | Speed (MB/s) | Runs |
-|--------|----------|--------------|------|
-| **cisv (parse)** $(format_result "php_cisv" "$file_size_mb")
-| **cisv (count)** $(format_result "php_cisv-count" "$file_size_mb")
-| fgetcsv $(format_result "php_fgetcsv" "$file_size_mb")
-| str_getcsv $(format_result "php_str_getcsv" "$file_size_mb")
-| SplFileObject $(format_result "php_splfileobject" "$file_size_mb")
-| league/csv $(format_result "php_league-csv" "$file_size_mb")
-| explode $(format_result "php_explode" "$file_size_mb")
-| preg_split $(format_result "php_preg_split" "$file_size_mb")
-| array_map $(format_result "php_array_map" "$file_size_mb")
+| Parser | Time (s) | Speed (MB/s) | Runs | Valid |
+|--------|----------|--------------|------|-------|
+| **cisv (parse)** $(format_result_validated "php_cisv" "$file_size_mb" "php_parse")
+| **cisv (count)** $(format_result_validated "php_cisv-count" "$file_size_mb" "php_count")
+| fgetcsv $(format_result "php_fgetcsv" "$file_size_mb") - |
+| str_getcsv $(format_result "php_str_getcsv" "$file_size_mb") - |
+| SplFileObject $(format_result "php_splfileobject" "$file_size_mb") - |
+| league/csv $(format_result "php_league-csv" "$file_size_mb") - |
+| explode $(format_result "php_explode" "$file_size_mb") - |
+| preg_split $(format_result "php_preg_split" "$file_size_mb") - |
+| array_map $(format_result "php_array_map" "$file_size_mb") - |
 
 > **Note:** cisv (count) shows native C performance without PHP array creation overhead.
 > cisv (parse) includes the cost of converting C data to PHP arrays.
@@ -1064,6 +1316,36 @@ Task: Parse the entire CSV file using PHP parsers.
 - All tests ran on the same machine sequentially
 - Warm-up runs were not performed (cold start)
 - Times include file I/O and parsing
+
+---
+
+## Validation
+
+The **Valid** column shows whether CISV correctly parsed the data:
+
+| Symbol | Meaning |
+|--------|---------|
+| ✓ | Validation passed - data parsed correctly |
+| ✗ | Validation failed - data mismatch detected |
+| - | Not validated (third-party tool) |
+
+### Validation Checks Performed
+
+For each CISV binding, the following validations are performed:
+
+1. **Row Count**: Verify the parser returns exactly **${row_count}** rows (including header)
+2. **Field Count**: Verify each row contains **${EXPECTED_FIELD_COUNT}** fields
+3. **Header Verification**: Confirm headers match: \`${EXPECTED_HEADERS}\`
+4. **Data Integrity**: Verify first data row starts with expected ID value
+
+### Validation Results Summary
+
+| Binding | Count | Parse |
+|---------|-------|-------|
+| CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") |
+| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") |
+| Python | $(format_validation "python_count") | - |
+| PHP | $(format_validation "php_count") | $(format_validation "php_parse") |
 
 ---
 
@@ -1145,6 +1427,9 @@ main() {
                 run_nodejs_benchmarks "$file"
                 run_python_benchmarks "$file"
                 run_php_benchmarks "$file"
+
+                # Run validation checks for cisv
+                run_validations "$file"
 
                 # Output markdown to stdout
                 generate_markdown_report "$file"
