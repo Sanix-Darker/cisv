@@ -14,10 +14,10 @@
   "scripts": {
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
-    "test": "mocha ./tests/*.test.js && bash ../scripts/test_transform.sh",
+    "test": "mocha ./tests/*.test.js && bash ../../scripts/test_transform.sh",
     "test:build": "npm run build && npm run test",
     "benchmark-js": "node ./benchmark.js",
-    "benchmark-core": "bash ../scripts/benchmark_cli_reader.sh",
+    "benchmark-core": "bash ../../scripts/benchmark_cli_reader.sh",
     "lint": "clang-format -i cisv/*.{cc,h}",
     "pretest:typescript": "tsc --project tsconfig.json --noEmit",
     "build:types": "tsc --project tsconfig.json --declaration --emitDeclarationOnly",
