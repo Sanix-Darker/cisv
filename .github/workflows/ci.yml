@@ -230,13 +230,20 @@ jobs:
         run: |
           npm install -g node-gyp
           sudo apt-get update
-          sudo apt-get install -y bc time python3 python3-pip php-cli
-          pip3 install pandas --quiet || true
+          sudo apt-get install -y bc time python3 python3-pip php-cli composer
+
+          # Install Python dependencies for benchmarks
+          pip3 install pandas polars pyarrow --quiet || true
 
           # Install Node.js comparison libraries
           cd bindings/nodejs
-          npm install papaparse csv-parse fast-csv --save-dev || true
+          npm install papaparse csv-parse fast-csv csv-parser d3-dsv csv-string --save-dev || true
           cd ../..
+
+          # Install PHP league/csv via composer
+          mkdir -p /tmp/csv_bench && cd /tmp/csv_bench
+          composer require league/csv --quiet || true
+          cd -
 
       - name: Run benchmarks
         run: |

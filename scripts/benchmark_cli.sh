@@ -14,6 +14,7 @@ ITERATIONS=5
 SIZES=("large")
 FORCE_REGENERATE=false
 NO_CLEANUP=false
+PROJECT_ROOT="${PWD}"
 
 # Results storage
 declare -A RESULTS
@@ -82,6 +83,38 @@ install_csvkit() {
     fi
 }
 
+install_xsv() {
+    if ! command_exists xsv; then
+        log "Installing xsv..."
+        if command_exists cargo; then
+            cargo install xsv >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+install_php_league_csv() {
+    log "Installing PHP league/csv..."
+    mkdir -p /tmp/csv_bench
+    cd /tmp/csv_bench
+    if [ ! -f "vendor/autoload.php" ]; then
+        if command_exists composer; then
+            composer require league/csv >/dev/null 2>&1 || true
+        else
+            # Download composer if not available
+            curl -sS https://getcomposer.org/installer 2>/dev/null | php -- --quiet >/dev/null 2>&1 || true
+            if [ -f "composer.phar" ]; then
+                php composer.phar require league/csv >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+    cd "$PROJECT_ROOT"
+}
+
+install_python_deps() {
+    log "Installing Python dependencies..."
+    pip3 install --quiet polars pyarrow pandas >/dev/null 2>&1 || true
+}
+
 build_rust_csv_tools() {
     log "Building rust-csv benchmark tools..."
     mkdir -p benchmark/rust-csv-bench
@@ -144,7 +177,7 @@ fn main() {
 RUST_EOF
 
     cargo build --release >/dev/null 2>&1
-    cd ../..
+    cd "$PROJECT_ROOT"
 }
 
 build_cisv() {
@@ -159,6 +192,9 @@ install_dependencies() {
     build_rust_csv_tools
     install_miller
     install_csvkit
+    install_xsv
+    install_php_league_csv
+    install_python_deps
     log "Dependencies installed."
 }
 
@@ -228,42 +264,47 @@ generate_test_files() {
 }
 
 # ============================================================================
-# CLI BENCHMARKS
+# CLI BENCHMARKS (7 tools)
 # ============================================================================
 
 run_cli_benchmarks() {
     local file="$1"
 
-    export LD_LIBRARY_PATH="${PWD}/core/build:${LD_LIBRARY_PATH:-}"
-    local CISV_BIN="${PWD}/cli/build/cisv"
+    export LD_LIBRARY_PATH="${PROJECT_ROOT}/core/build:${LD_LIBRARY_PATH:-}"
+    local CISV_BIN="${PROJECT_ROOT}/cli/build/cisv"
     local RUST_COUNT="./benchmark/rust-csv-bench/target/release/csv-bench"
     local RUST_SELECT="./benchmark/rust-csv-bench/target/release/csv-select"
 
     log "Running CLI benchmarks..."
 
-    # Row counting
+    # Row counting (7 tools)
     log "  Row counting tests..."
     [ -x "$CISV_BIN" ] && RESULTS["count_cisv"]=$(run_benchmark "$CISV_BIN -c" "$file")
     [ -x "$RUST_COUNT" ] && RESULTS["count_rust-csv"]=$(run_benchmark "$RUST_COUNT" "$file")
-    RESULTS["count_wc_-l"]=$(run_benchmark "wc -l" "$file")
-    command_exists csvstat && RESULTS["count_csvkit"]=$(run_benchmark "csvstat --count" "$file")
+    command_exists xsv && RESULTS["count_xsv"]=$(run_benchmark "xsv count" "$file")
+    RESULTS["count_wc"]=$(run_benchmark "wc -l" "$file")
+    RESULTS["count_awk"]=$(run_benchmark "awk 'END{print NR}'" "$file")
     command_exists mlr && RESULTS["count_miller"]=$(run_benchmark "mlr --csv count" "$file")
+    command_exists csvstat && RESULTS["count_csvkit"]=$(run_benchmark "csvstat --count" "$file")
 
-    # Column selection
+    # Column selection (7 tools)
     log "  Column selection tests..."
     [ -x "$CISV_BIN" ] && RESULTS["select_cisv"]=$(run_benchmark "$CISV_BIN -s 0,2,3" "$file")
     [ -x "$RUST_SELECT" ] && RESULTS["select_rust-csv"]=$(run_benchmark "$RUST_SELECT" "$file" "0,2,3")
-    command_exists csvcut && RESULTS["select_csvkit"]=$(run_benchmark "csvcut -c 1,3,4" "$file")
+    command_exists xsv && RESULTS["select_xsv"]=$(run_benchmark "xsv select 1,3,4" "$file")
+    RESULTS["select_awk"]=$(run_benchmark "awk -F',' '{print \$1,\$3,\$4}'" "$file")
+    RESULTS["select_cut"]=$(run_benchmark "cut -d',' -f1,3,4" "$file")
     command_exists mlr && RESULTS["select_miller"]=$(run_benchmark "mlr --csv cut -f id,email,address" "$file")
+    command_exists csvcut && RESULTS["select_csvkit"]=$(run_benchmark "csvcut -c 1,3,4" "$file")
 }
 
 # ============================================================================
-# NODE.JS BENCHMARKS
+# NODE.JS BENCHMARKS (7 parsers)
 # ============================================================================
 
 run_nodejs_benchmarks() {
     local file="$1"
-    local abs_file="${PWD}/${file}"
+    local abs_file="${PROJECT_ROOT}/${file}"
 
     if [ ! -f "./bindings/nodejs/package.json" ] || ! command_exists npm; then
         log "Skipping Node.js benchmarks (not available)"
@@ -277,9 +318,11 @@ run_nodejs_benchmarks() {
         cd ./bindings/nodejs
         npm install >/dev/null 2>&1
         npm run build >/dev/null 2>&1
+        # Install additional parsers for comparison
+        npm install papaparse csv-parse fast-csv csv-parser d3-dsv csv-string --save-dev >/dev/null 2>&1 || true
     )
 
-    # Create benchmark script in the nodejs directory
+    # Create benchmark script
     cat > ./bindings/nodejs/_bench.js << 'JSEOF'
 const fs = require('fs');
 const file = process.argv[2];
@@ -297,6 +340,10 @@ async function benchmark() {
                 const { cisvParser } = require('./cisv/index.js');
                 const p = new cisvParser();
                 p.parseSync(file);
+            } else if (parser === 'cisv-count') {
+                // Pure C row counting - shows raw library performance
+                const { cisvParser } = require('./cisv/index.js');
+                cisvParser.countRows(file);
             } else if (parser === 'papaparse') {
                 const Papa = require('papaparse');
                 const content = fs.readFileSync(file, 'utf8');
@@ -314,6 +361,24 @@ async function benchmark() {
                         .on('end', resolve)
                         .on('error', reject);
                 });
+            } else if (parser === 'csv-parser') {
+                const csvParser = require('csv-parser');
+                await new Promise((resolve, reject) => {
+                    const rows = [];
+                    fs.createReadStream(file)
+                        .pipe(csvParser())
+                        .on('data', row => rows.push(row))
+                        .on('end', resolve)
+                        .on('error', reject);
+                });
+            } else if (parser === 'd3-dsv') {
+                const d3 = require('d3-dsv');
+                const content = fs.readFileSync(file, 'utf8');
+                d3.csvParse(content);
+            } else if (parser === 'csv-string') {
+                const CSV = require('csv-string');
+                const content = fs.readFileSync(file, 'utf8');
+                CSV.parse(content);
             }
             const end = process.hrtime.bigint();
             totalTime += Number(end - start) / 1e9;
@@ -331,8 +396,8 @@ async function benchmark() {
 benchmark();
 JSEOF
 
-    # Run benchmarks
-    for parser in "cisv" "papaparse" "csv-parse" "fast-csv"; do
+    # Run benchmarks for 8 parsers (including cisv-count to show raw C performance)
+    for parser in "cisv" "cisv-count" "papaparse" "csv-parse" "fast-csv" "csv-parser" "d3-dsv" "csv-string"; do
         local result
         result=$(cd ./bindings/nodejs && node _bench.js "$abs_file" "$parser" 2>/dev/null) || result="FAILED|0"
         [ -z "$result" ] && result="FAILED|0"
@@ -344,12 +409,13 @@ JSEOF
 }
 
 # ============================================================================
-# PYTHON BENCHMARKS
+# PYTHON BENCHMARKS (7 parsers)
 # ============================================================================
 
 run_python_benchmarks() {
     local file="$1"
-    local abs_file="${PWD}/${file}"
+    local abs_file="${PROJECT_ROOT}/${file}"
+    local lib_path="${PROJECT_ROOT}/core/build/libcisv.so"
 
     if ! command_exists python3; then
         log "Skipping Python benchmarks (python3 not available)"
@@ -358,28 +424,33 @@ run_python_benchmarks() {
 
     log "Running Python benchmarks..."
 
-    export LD_LIBRARY_PATH="${PWD}/core/build:${LD_LIBRARY_PATH:-}"
-
-    # cisv-python benchmark
+    # cisv-python benchmark (using direct ctypes loading with explicit path)
     local result
     result=$(python3 << PYEOF 2>/dev/null
 import time
-import sys
+import ctypes
 import os
 
-# Add bindings path
-sys.path.insert(0, '${PWD}/bindings/python')
-os.environ['LD_LIBRARY_PATH'] = '${PWD}/core/build:' + os.environ.get('LD_LIBRARY_PATH', '')
-
 try:
-    from cisv import parse_file
+    # Direct load with explicit path - this is the key fix
+    lib_path = "${lib_path}"
+    if not os.path.exists(lib_path):
+        print("FAILED|0")
+        exit()
+
+    lib = ctypes.CDLL(lib_path)
+
+    # Define function signatures
+    lib.cisv_parser_count_rows.argtypes = [ctypes.c_char_p]
+    lib.cisv_parser_count_rows.restype = ctypes.c_size_t
+
     iterations = 5
     total_time = 0
     success = 0
 
     for _ in range(iterations):
         start = time.perf_counter()
-        rows = parse_file('${abs_file}')
+        count = lib.cisv_parser_count_rows(b"${abs_file}")
         end = time.perf_counter()
         total_time += end - start
         success += 1
@@ -390,8 +461,54 @@ except Exception as e:
 PYEOF
 ) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
-    RESULTS["python_cisv-python"]="$result"
-    log "    cisv-python: $result"
+    RESULTS["python_cisv"]="$result"
+    log "    cisv: $result"
+
+    # polars benchmark (fastest Python CSV parser)
+    result=$(python3 << PYEOF 2>/dev/null
+import time
+try:
+    import polars as pl
+    iterations = 5
+    total_time = 0
+
+    for _ in range(iterations):
+        start = time.perf_counter()
+        df = pl.read_csv('${abs_file}')
+        end = time.perf_counter()
+        total_time += end - start
+
+    print(f"{total_time/iterations:.4f}|{iterations}")
+except:
+    print("FAILED|0")
+PYEOF
+) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["python_polars"]="$result"
+    log "    polars: $result"
+
+    # pyarrow benchmark
+    result=$(python3 << PYEOF 2>/dev/null
+import time
+try:
+    import pyarrow.csv as pa_csv
+    iterations = 5
+    total_time = 0
+
+    for _ in range(iterations):
+        start = time.perf_counter()
+        table = pa_csv.read_csv('${abs_file}')
+        end = time.perf_counter()
+        total_time += end - start
+
+    print(f"{total_time/iterations:.4f}|{iterations}")
+except:
+    print("FAILED|0")
+PYEOF
+) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["python_pyarrow"]="$result"
+    log "    pyarrow: $result"
 
     # pandas benchmark
     result=$(python3 << PYEOF 2>/dev/null
@@ -438,15 +555,61 @@ PYEOF
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["python_csv-stdlib"]="$result"
     log "    csv-stdlib: $result"
+
+    # DictReader benchmark
+    result=$(python3 << PYEOF 2>/dev/null
+import time
+import csv
+
+iterations = 5
+total_time = 0
+
+for _ in range(iterations):
+    start = time.perf_counter()
+    with open('${abs_file}', 'r') as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    end = time.perf_counter()
+    total_time += end - start
+
+print(f"{total_time/iterations:.4f}|{iterations}")
+PYEOF
+) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["python_dictreader"]="$result"
+    log "    dictreader: $result"
+
+    # numpy genfromtxt benchmark
+    result=$(python3 << PYEOF 2>/dev/null
+import time
+try:
+    import numpy as np
+    iterations = 5
+    total_time = 0
+
+    for _ in range(iterations):
+        start = time.perf_counter()
+        data = np.genfromtxt('${abs_file}', delimiter=',', dtype=str, skip_header=1)
+        end = time.perf_counter()
+        total_time += end - start
+
+    print(f"{total_time/iterations:.4f}|{iterations}")
+except:
+    print("FAILED|0")
+PYEOF
+) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["python_numpy"]="$result"
+    log "    numpy: $result"
 }
 
 # ============================================================================
-# PHP BENCHMARKS
+# PHP BENCHMARKS (7 parsers)
 # ============================================================================
 
 run_php_benchmarks() {
     local file="$1"
-    local abs_file="${PWD}/${file}"
+    local abs_file="${PROJECT_ROOT}/${file}"
 
     if ! command_exists php; then
         log "Skipping PHP benchmarks (php not available)"
@@ -457,28 +620,6 @@ run_php_benchmarks() {
 
     # PHP native fgetcsv benchmark
     local result
-    result=$(php << 'PHPEOF' 2>/dev/null
-<?php
-$file = $argv[1] ?? getenv('BENCH_FILE');
-$iterations = 5;
-$totalTime = 0;
-
-for ($i = 0; $i < $iterations; $i++) {
-    $start = microtime(true);
-    $handle = fopen($file, 'r');
-    $rows = [];
-    while (($row = fgetcsv($handle)) !== false) {
-        $rows[] = $row;
-    }
-    fclose($handle);
-    $end = microtime(true);
-    $totalTime += ($end - $start);
-}
-
-echo number_format($totalTime / $iterations, 4) . "|" . $iterations;
-PHPEOF
-) || result="FAILED|0"
-    # Run with file argument
     result=$(BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
 \$iterations = 5;
@@ -502,7 +643,7 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     RESULTS["php_fgetcsv"]="$result"
     log "    fgetcsv: $result"
 
-    # PHP str_getcsv benchmark (parse string)
+    # PHP str_getcsv benchmark
     result=$(BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
 \$iterations = 5;
@@ -526,18 +667,38 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     RESULTS["php_str_getcsv"]="$result"
     log "    str_getcsv: $result"
 
-    # PHP League CSV benchmark (if available)
+    # PHP SplFileObject benchmark
     result=$(BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
+\$iterations = 5;
+\$totalTime = 0;
 
-// Check if League CSV is available
-if (!class_exists('League\Csv\Reader')) {
-    echo 'FAILED|0';
-    exit;
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$spl = new SplFileObject(\$file);
+    \$spl->setFlags(SplFileObject::READ_CSV);
+    \$rows = [];
+    foreach (\$spl as \$row) {
+        \$rows[] = \$row;
+    }
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
 }
+
+echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_splfileobject"]="$result"
+    log "    SplFileObject: $result"
+
+    # PHP League CSV benchmark (from composer)
+    if [ -f "/tmp/csv_bench/vendor/autoload.php" ]; then
+        result=$(BENCH_FILE="$abs_file" php -r "
+require '/tmp/csv_bench/vendor/autoload.php';
 
 use League\Csv\Reader;
 
+\$file = getenv('BENCH_FILE');
 \$iterations = 5;
 \$totalTime = 0;
 
@@ -552,9 +713,80 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
 
 echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
+    else
+        result="FAILED|0"
+    fi
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_league-csv"]="$result"
     log "    league-csv: $result"
+
+    # PHP explode benchmark (simple but fast)
+    result=$(BENCH_FILE="$abs_file" php -r "
+\$file = getenv('BENCH_FILE');
+\$iterations = 5;
+\$totalTime = 0;
+
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$content = file_get_contents(\$file);
+    \$lines = explode(\"\n\", \$content);
+    \$rows = [];
+    foreach (\$lines as \$line) {
+        if (\$line) \$rows[] = explode(',', \$line);
+    }
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
+}
+
+echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_explode"]="$result"
+    log "    explode: $result"
+
+    # PHP preg_split benchmark
+    result=$(BENCH_FILE="$abs_file" php -r "
+\$file = getenv('BENCH_FILE');
+\$iterations = 5;
+\$totalTime = 0;
+
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$content = file_get_contents(\$file);
+    \$lines = preg_split('/\r?\n/', \$content);
+    \$rows = [];
+    foreach (\$lines as \$line) {
+        if (\$line) \$rows[] = preg_split('/,/', \$line);
+    }
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
+}
+
+echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_preg_split"]="$result"
+    log "    preg_split: $result"
+
+    # PHP array_map + str_getcsv benchmark
+    result=$(BENCH_FILE="$abs_file" php -r "
+\$file = getenv('BENCH_FILE');
+\$iterations = 5;
+\$totalTime = 0;
+
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$content = file(\$file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    \$rows = array_map('str_getcsv', \$content);
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
+}
+
+echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_array_map"]="$result"
+    log "    array_map: $result"
 }
 
 # ============================================================================
@@ -613,9 +845,11 @@ Task: Count all rows in a ${file_size_mb} MB CSV file with ${row_count} rows.
 |------|----------|--------------|------|
 | **cisv** $(format_result "count_cisv" "$file_size_mb")
 | rust-csv $(format_result "count_rust-csv" "$file_size_mb")
-| wc -l $(format_result "count_wc_-l" "$file_size_mb")
-| csvkit $(format_result "count_csvkit" "$file_size_mb")
+| xsv $(format_result "count_xsv" "$file_size_mb")
+| wc -l $(format_result "count_wc" "$file_size_mb")
+| awk $(format_result "count_awk" "$file_size_mb")
 | miller $(format_result "count_miller" "$file_size_mb")
+| csvkit $(format_result "count_csvkit" "$file_size_mb")
 
 ### 1.2 Column Selection Performance
 
@@ -625,97 +859,77 @@ Task: Select columns 0, 2, 3 from the CSV file.
 |------|----------|--------------|------|
 | **cisv** $(format_result "select_cisv" "$file_size_mb")
 | rust-csv $(format_result "select_rust-csv" "$file_size_mb")
-| csvkit $(format_result "select_csvkit" "$file_size_mb")
+| xsv $(format_result "select_xsv" "$file_size_mb")
+| awk $(format_result "select_awk" "$file_size_mb")
+| cut $(format_result "select_cut" "$file_size_mb")
 | miller $(format_result "select_miller" "$file_size_mb")
+| csvkit $(format_result "select_csvkit" "$file_size_mb")
 
 ---
 
 ## 2. Node.js Binding Comparison
 
-Task: Parse the entire CSV file using Node.js bindings.
+Task: Parse the entire CSV file using Node.js parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
-| **cisv** $(format_result "nodejs_cisv" "$file_size_mb")
+| **cisv (parse)** $(format_result "nodejs_cisv" "$file_size_mb")
+| **cisv (count)** $(format_result "nodejs_cisv-count" "$file_size_mb")
 | papaparse $(format_result "nodejs_papaparse" "$file_size_mb")
 | csv-parse $(format_result "nodejs_csv-parse" "$file_size_mb")
 | fast-csv $(format_result "nodejs_fast-csv" "$file_size_mb")
+| csv-parser $(format_result "nodejs_csv-parser" "$file_size_mb")
+| d3-dsv $(format_result "nodejs_d3-dsv" "$file_size_mb")
+| csv-string $(format_result "nodejs_csv-string" "$file_size_mb")
+
+> **Note:** cisv (count) shows native C performance without JS object creation overhead.
+> cisv (parse) includes the cost of converting C data to JavaScript arrays.
 
 ---
 
 ## 3. Python Binding Comparison
 
-Task: Parse the entire CSV file using Python bindings.
+Task: Parse the entire CSV file using Python parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
-| **cisv** $(format_result "python_cisv-python" "$file_size_mb")
+| **cisv** $(format_result "python_cisv" "$file_size_mb")
+| polars $(format_result "python_polars" "$file_size_mb")
+| pyarrow $(format_result "python_pyarrow" "$file_size_mb")
 | pandas $(format_result "python_pandas" "$file_size_mb")
 | csv (stdlib) $(format_result "python_csv-stdlib" "$file_size_mb")
+| DictReader $(format_result "python_dictreader" "$file_size_mb")
+| numpy $(format_result "python_numpy" "$file_size_mb")
 
 ---
 
 ## 4. PHP Binding Comparison
 
-Task: Parse the entire CSV file using PHP.
+Task: Parse the entire CSV file using PHP parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs |
 |--------|----------|--------------|------|
 | fgetcsv $(format_result "php_fgetcsv" "$file_size_mb")
 | str_getcsv $(format_result "php_str_getcsv" "$file_size_mb")
+| SplFileObject $(format_result "php_splfileobject" "$file_size_mb")
 | league/csv $(format_result "php_league-csv" "$file_size_mb")
+| explode $(format_result "php_explode" "$file_size_mb")
+| preg_split $(format_result "php_preg_split" "$file_size_mb")
+| array_map $(format_result "php_array_map" "$file_size_mb")
 
 ---
 
-## 5. Performance Analysis
+## 5. Technology Notes
 
-### Speed Rankings (Row Counting)
-
-EOF
-
-    # Generate rankings
-    local rank=1
-    local tools=("count_cisv:cisv (C)" "count_rust-csv:rust-csv (Rust)" "count_wc_-l:wc -l (coreutils)" "count_csvkit:csvkit (Python)" "count_miller:miller (Go)")
-
-    # Create temp file for sorting
-    local tmpfile=$(mktemp)
-    for entry in "${tools[@]}"; do
-        local key="${entry%%:*}"
-        local name="${entry#*:}"
-        local result="${RESULTS[$key]:-FAILED|0}"
-        local time=$(echo "$result" | cut -d'|' -f1)
-        if [ "$time" != "FAILED" ] && [ -n "$time" ] && [ "$time" != "0" ]; then
-            local speed=$(awk "BEGIN {printf \"%.2f\", $file_size_mb / $time}")
-            echo "$speed|$name" >> "$tmpfile"
-        fi
-    done
-
-    sort -t'|' -k1 -rn "$tmpfile" | while IFS='|' read -r speed name; do
-        echo "${rank}. **${name}** - ${speed} MB/s"
-        rank=$((rank + 1))
-    done
-    rm -f "$tmpfile"
-
-    cat << EOF
-
-### Key Observations
-
-- **CISV CLI** uses native C with SIMD optimizations for maximum throughput
-- **rust-csv** provides excellent performance with memory safety guarantees
-- **wc -l** is fast but only counts lines, not CSV-aware
-- **csvkit/miller** trade performance for features and flexibility
-
-### Technology Notes
-
-| Tool | Language | Features |
-|------|----------|----------|
+| Tool | Language | Key Features |
+|------|----------|--------------|
 | cisv | C | SIMD (AVX-512/AVX2/SSE2), zero-copy parsing |
-| rust-csv | Rust | Memory-safe, streaming |
-| wc -l | C | Line counting only |
-| csvkit | Python | Full CSV toolkit |
-| miller | Go | Data transformation |
-| papaparse | JavaScript | Browser/Node compatible |
-| pandas | Python/C | DataFrame operations |
+| rust-csv | Rust | Memory-safe, streaming, Serde support |
+| xsv | Rust | Full CSV toolkit, parallel processing |
+| polars | Rust/Python | DataFrame, parallel, lazy evaluation |
+| pyarrow | C++/Python | Apache Arrow, columnar format |
+| papaparse | JavaScript | Browser/Node, streaming, auto-detect |
+| league/csv | PHP | RFC 4180 compliant, streaming |
 
 ---
 
