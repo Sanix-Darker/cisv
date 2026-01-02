@@ -1,372 +1,165 @@
-## BENCHMARK RESULTS
-```
-DATE: Sat Nov 15 23:12:29 UTC 2025
-COMMIT: 752907ed67518d2a566eb1686cdd1312d81cf7dc
-```
+# CISV Benchmark Report
+
+## Test Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| **Generated** | 2026-01-02 19:14:36 UTC |
+| **Commit** | 038e6b3dfcfdb4c8b0a2e3234b31d8dba6b100f8 |
+| **File Size** | 85.50 MB |
+| **Row Count** | 1000001 |
+| **Iterations** | 5 |
+| **Platform** | Linux x86_64 |
+
 ---
 
-Generating test CSV files...
-Creating large.csv (1M rows)...
-  Progress: 0%
-  Progress: 10%
-  Progress: 20%
-  Progress: 30%
-  Progress: 40%
-  Progress: 50%
-  Progress: 60%
-  Progress: 70%
-  Progress: 80%
-  Progress: 90%
+## Executive Summary
 
-## CLI BENCHMARKS
+CISV is a high-performance CSV parser written in C with SIMD optimizations (AVX-512, AVX2, SSE2). This benchmark compares CISV against popular CSV parsing tools across different languages and use cases.
 
+---
 
-### Testing with large.csv
+## 1. CLI Tools Comparison
 
-File info: 108.19 MB, 1000001 rows
+### 1.1 Row Counting Performance
 
-#### ROW COUNTING TEST
+Task: Count all rows in a 85.50 MB CSV file with 1000001 rows.
 
-```
+| Tool | Time (s) | Speed (MB/s) | Runs | Valid |
+|------|----------|--------------|------|-------|
+| **cisv** | 0.0159 | 5377.36 | 5/5 | ✓ |
+| rust-csv | 0.1387 | 616.44 | 5/5 | - |
+| xsv | 0.1030 | 830.10 | 5/5 | - |
+| wc -l | 0.0189 | 4523.81 | 5/5 | - |
+| awk | 0.0994 | 860.16 | 5/5 | - |
+| miller | 0.8414 | 101.62 | 5/5 | - |
+| csvkit | 2.6871 | 31.82 | 5/5 | - |
 
+### 1.2 Column Selection Performance
 
--> cisv
-  Run 1: 0.0219536s
-  Run 2: 0.0210238s
-  Run 3: 0.0209265s
-  Average Time: 0.0213 seconds
-  Successful runs: 3/3
+Task: Select columns 0, 2, 3 from the CSV file.
 
--> rust-csv
-  Run 1: 0.183442s
-  Run 2: 0.188875s
-  Run 3: 0.189518s
-  Average Time: 0.1873 seconds
-  Successful runs: 3/3
+| Tool | Time (s) | Speed (MB/s) | Runs | Valid |
+|------|----------|--------------|------|-------|
+| **cisv** | 0.3175 | 269.29 | 5/5 | ✓ |
+| rust-csv | 0.2039 | 419.32 | 5/5 | - |
+| xsv | 0.1496 | 571.52 | 5/5 | - |
+| awk | 1.0488 | 81.52 | 5/5 | - |
+| cut | 0.1970 | 434.01 | 5/5 | - |
+| miller | 1.2720 | 67.22 | 5/5 | - |
+| csvkit | 2.1732 | 39.34 | 5/5 | - |
 
--> wc -l
-  Run 1: 0.02283s
-  Run 2: 0.0224392s
-  Run 3: 0.0219481s
-  Average Time: 0.0224 seconds
-  Successful runs: 3/3
+---
 
--> csvkit
-  Run 1: 2.42971s
-  Run 2: 2.34041s
-  Run 3: 2.34619s
-  Average Time: 2.3721 seconds
-  Successful runs: 3/3
+## 2. Node.js Binding Comparison
 
--> miller
-  Run 1 failed with exit code 127
-  Run 2 failed with exit code 127
-  Run 3 failed with exit code 127
-  All runs failed for miller
+Task: Parse the entire CSV file using Node.js parsers.
 
-```
+| Parser | Time (s) | Speed (MB/s) | Runs | Valid |
+|--------|----------|--------------|------|-------|
+| **cisv (parse)** | 5.2278 | 16.35 | 5/5 | ✓ |
+| **cisv (count)** | 0.0113 | 7566.37 | 5/5 | ✓ |
+| papaparse | 1.6164 | 52.90 | 5/5 | - |
+| csv-parse | 3.8491 | 22.21 | 5/5 | - |
+| fast-csv | 7.4359 | 11.50 | 5/5 | - |
+| csv-parser | 2.5170 | 33.97 | 5/5 | - |
+| d3-dsv | 0.8963 | 95.39 | 5/5 | - |
+| csv-string | 1.4985 | 57.06 | 5/5 | - |
 
-=== Sorted Results: Row Counting - large.csv ===
+> **Note:** cisv (count) shows native C performance without JS object creation overhead.
+> cisv (parse) includes the cost of converting C data to JavaScript arrays.
 
-Sorted by Speed (MB/s) - Fastest First:
-| Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
-|----------------------|--------------|--------------|----------------|
-| cisv                 |      5079.34 |       0.0213 |          46.95 |
-| wc -l                |      4829.91 |       0.0224 |          44.64 |
-| rust-csv             |       577.63 |       0.1873 |           5.34 |
-| csvkit               |        45.61 |       2.3721 |           0.42 |
+---
 
+## 3. Python Binding Comparison
 
-Sorted by Operations/sec - Most Operations First:
-| Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
-|----------------------|--------------|--------------|----------------|
-| cisv                 |      5079.34 |       0.0213 |          46.95 |
-| wc -l                |      4829.91 |       0.0224 |          44.64 |
-| rust-csv             |       577.63 |       0.1873 |           5.34 |
-| csvkit               |        45.61 |       2.3721 |           0.42 |
+Task: Parse the entire CSV file using Python parsers.
 
-#### COLUMN SELECTION TEST (COLUMNS 0,2,3)
+| Parser | Time (s) | Speed (MB/s) | Runs | Valid |
+|--------|----------|--------------|------|-------|
+| **cisv** | 0.0111 | 7702.70 | 5/5 | ✓ |
+| polars | 0.0883 | 968.29 | 5/5 | - |
+| pyarrow | 0.1078 | 793.14 | 5/5 | - |
+| pandas | 1.7146 | 49.87 | 5/5 | - |
+| csv (stdlib) | 2.4705 | 34.61 | 5/5 | - |
+| DictReader | 1.9549 | 43.74 | 5/5 | - |
+| numpy | 3.1222 | 27.38 | 5/5 | - |
 
-```
+---
 
+## 4. PHP Binding Comparison
 
--> cisv
-  Run 1: 0.459149s
-  Run 2: 0.432704s
-  Run 3: 0.432262s
-  Average Time: 0.4414 seconds
-  Successful runs: 3/3
+Task: Parse the entire CSV file using PHP parsers.
 
--> rust-csv
-  Run 1: 0.321084s
-  Run 2: 0.331566s
-  Run 3: 0.326894s
-  Average Time: 0.3265 seconds
-  Successful runs: 3/3
+| Parser | Time (s) | Speed (MB/s) | Runs | Valid |
+|--------|----------|--------------|------|-------|
+| **cisv (parse)** | 0.3691 | 231.64 | 5/5 | ✓ |
+| **cisv (count)** | 0.0108 | 7916.67 | 5/5 | ✓ |
+| fgetcsv | 4.7036 | 18.18 | 5/5 | - |
+| str_getcsv | 4.6191 | 18.51 | 5/5 | - |
+| SplFileObject | 5.1316 | 16.66 | 5/5 | - |
+| league/csv | 12.8754 | 6.64 | 5/5 | - |
+| explode | 0.4093 | 208.89 | 5/5 | - |
+| preg_split | 0.6349 | 134.67 | 5/5 | - |
+| array_map | 4.6629 | 18.34 | 5/5 | - |
 
--> csvkit
-  Run 1: 2.57627s
-  Run 2: 2.59093s
-  Run 3: 2.63323s
-  Average Time: 2.6001 seconds
-  Successful runs: 3/3
+> **Note:** cisv (count) shows native C performance without PHP array creation overhead.
+> cisv (parse) includes the cost of converting C data to PHP arrays.
 
--> miller
-  Run 1 failed with exit code 127
-  Run 2 failed with exit code 127
-  Run 3 failed with exit code 127
-  All runs failed for miller
+---
 
-```
+## 5. Technology Notes
 
-=== Sorted Results: Column Selection - large.csv ===
+| Tool | Language | Key Features |
+|------|----------|--------------|
+| cisv | C | SIMD (AVX-512/AVX2/SSE2), zero-copy parsing |
+| rust-csv | Rust | Memory-safe, streaming, Serde support |
+| xsv | Rust | Full CSV toolkit, parallel processing |
+| polars | Rust/Python | DataFrame, parallel, lazy evaluation |
+| pyarrow | C++/Python | Apache Arrow, columnar format |
+| papaparse | JavaScript | Browser/Node, streaming, auto-detect |
+| league/csv | PHP | RFC 4180 compliant, streaming |
 
-Sorted by Speed (MB/s) - Fastest First:
-| Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
-|----------------------|--------------|--------------|----------------|
-| rust-csv             |       331.36 |       0.3265 |           3.06 |
-| cisv                 |       245.11 |       0.4414 |           2.27 |
-| csvkit               |        41.61 |       2.6001 |           0.38 |
+---
 
+## Methodology
 
-Sorted by Operations/sec - Most Operations First:
-| Library              | Speed (MB/s) | Avg Time (s) | Operations/sec |
-|----------------------|--------------|--------------|----------------|
-| rust-csv             |       331.36 |       0.3265 |           3.06 |
-| cisv                 |       245.11 |       0.4414 |           2.27 |
-| csvkit               |        41.61 |       2.6001 |           0.38 |
+- Each test was run **5 times** and averaged
+- Tests used a **85.50 MB** CSV file with **1000001** rows
+- All tests ran on the same machine sequentially
+- Warm-up runs were not performed (cold start)
+- Times include file I/O and parsing
 
-## NPM Benchmarks
+---
 
+## Validation
 
-> cisv@0.0.7 benchmark-js
-> node ./benchmark.js
+The **Valid** column shows whether CISV correctly parsed the data:
 
-Failed to load cisvParser from the specified paths.
- Using benchmark file: /home/runner/work/cisv/cisv/fixtures/data.csv
-Starting benchmark with file: /home/runner/work/cisv/cisv/fixtures/data.csv
-All tests will retrieve row index: 4
+| Symbol | Meaning |
+|--------|---------|
+| ✓ | Validation passed - data parsed correctly |
+| ✗ | Validation failed - data mismatch detected |
+| - | Not validated (third-party tool) |
 
-File size: 0.00 MB
-Sample of target row: [ '4', 'Dana White', 'dana.white@email.com', 'Chicago' ]
+### Validation Checks Performed
 
+For each CISV binding, the following validations are performed:
 
---- Running: Sync (Parse only) Benchmarks ---
-```
-  cisv (sync): 
-    Speed: 0.00 MB/s | Avg Time: 0.00 ms | Ops/sec: 0
-    (cooling down...)
+1. **Row Count**: Verify the parser returns exactly **1000001** rows (including header)
+2. **Field Count**: Verify each row contains **7** fields
+3. **Header Verification**: Confirm headers match: `id,name,email,address,phone,date,amount`
+4. **Data Integrity**: Verify first data row starts with expected ID value
 
-```
-```
-  csv-parse (sync) x 39,806 ops/sec ±0.83% (99 runs sampled)
-    Speed: 18.41 MB/s | Avg Time: 0.03 ms | Ops/sec: 39806
-    (cooling down...)
+### Validation Results Summary
 
-```
-```
-  papaparse (sync) x 60,796 ops/sec ±1.42% (93 runs sampled)
-    Speed: 28.12 MB/s | Avg Time: 0.02 ms | Ops/sec: 60796
-    (cooling down...)
+| Binding | Count | Parse |
+|---------|-------|-------|
+| CLI | ✓ | ✓ |
+| Node.js | ✓ | ✓ |
+| Python | ✓ | ✓ |
+| PHP | ✓ | ✓ |
 
-```
-```
-  udsv (sync) x 152,948 ops/sec ±0.39% (97 runs sampled)
-    Speed: 70.74 MB/s | Avg Time: 0.01 ms | Ops/sec: 152948
-    (cooling down...)
+---
 
-```
-```
-  d3-dsv (sync) x 210,703 ops/sec ±0.24% (98 runs sampled)
-    Speed: 97.46 MB/s | Avg Time: 0.00 ms | Ops/sec: 210703
-    (cooling down...)
-
-```
-
- Fastest Sync is d3-dsv (sync)
-
-A benchmark test failed and was caught: Event {
-  timeStamp: 1763248326798,
-  type: 'error',
-  target: Benchmark {
-    name: 'cisv (sync)',
-    options: {
-      async: false,
-      defer: false,
-      delay: 0.005,
-      id: undefined,
-      initCount: 1,
-      maxTime: 5,
-      minSamples: 5,
-      minTime: 0.05,
-      name: undefined,
-      onAbort: undefined,
-      onComplete: undefined,
-      onCycle: undefined,
-      onError: undefined,
-      onReset: undefined,
-      onStart: undefined
-    },
-    async: false,
-    defer: false,
-    delay: 0.005,
-    initCount: 1,
-    maxTime: 5,
-    minSamples: 5,
-    minTime: 0.05,
-    id: 1,
-    fn: [Function (anonymous)],
-    stats: {
-      moe: 0,
-      rme: 0,
-      sem: 0,
-      deviation: 0,
-      mean: 0,
-      sample: [],
-      variance: 0
-    },
-    times: { cycle: 0, elapsed: 0, period: 0, timeStamp: 0 },
-    running: false,
-    count: 0,
-    compiled: [Function: anonymous],
-    f17632483267361: [Function (anonymous)],
-    cycles: 0,
-    error: TypeError: cisvParser is not a constructor
-        at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
-        at Benchmark.eval (eval at createCompiled (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1725:16), <anonymous>:5:124)
-        at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1644:22)
-        at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1818:20)
-        at cycle (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2007:49)
-        at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2114:13)
-        at execute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:860:74)
-        at invoke (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:970:20)
-        at compute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1966:7)
-        at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2119:11),
-    aborted: true
-  },
-  currentTarget: Suite {
-    '0': Benchmark {
-      name: 'cisv (sync)',
-      options: [Object],
-      async: false,
-      defer: false,
-      delay: 0.005,
-      initCount: 1,
-      maxTime: 5,
-      minSamples: 5,
-      minTime: 0.05,
-      id: 1,
-      fn: [Function (anonymous)],
-      stats: [Object],
-      times: [Object],
-      running: false,
-      count: 0,
-      compiled: [Function: anonymous],
-      f17632483267361: [Function (anonymous)],
-      cycles: 0,
-      error: TypeError: cisvParser is not a constructor
-          at Benchmark.<anonymous> (/home/runner/work/cisv/cisv/npm/benchmark.js:113:28)
-          at Benchmark.eval (eval at createCompiled (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1725:16), <anonymous>:5:124)
-          at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1644:22)
-          at clock (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1818:20)
-          at cycle (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2007:49)
-          at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2114:13)
-          at execute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:860:74)
-          at invoke (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:970:20)
-          at compute (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:1966:7)
-          at Benchmark.run (/home/runner/work/cisv/cisv/npm/node_modules/benchmark/benchmark.js:2119:11),
-      aborted: true
-    },
-    '1': Benchmark {
-      name: 'csv-parse (sync)',
-      options: [Object],
-      async: false,
-      defer: false,
-      delay: 0.005,
-      initCount: 1,
-      maxTime: 5,
-      minSamples: 5,
-      minTime: 0.05,
-      id: 2,
-      fn: [Function (anonymous)],
-      stats: [Object],
-      times: [Object],
-      running: false,
-      count: 2035,
-      compiled: [Function: anonymous],
-      cycles: 7,
-      hz: 39805.58822284531
-    },
-    '2': Benchmark {
-      name: 'papaparse (sync)',
-      options: [Object],
-      async: false,
-      defer: false,
-      delay: 0.005,
-      initCount: 1,
-      maxTime: 5,
-      minSamples: 5,
-      minTime: 0.05,
-      id: 3,
-      fn: [Function (anonymous)],
-      stats: [Object],
-      times: [Object],
-      running: false,
-      count: 3212,
-      compiled: [Function: anonymous],
-      cycles: 6,
-      hz: 60795.64608013495
-    },
-    '3': Benchmark {
-      name: 'udsv (sync)',
-      options: [Object],
-      async: false,
-      defer: false,
-      delay: 0.005,
-      initCount: 1,
-      maxTime: 5,
-      minSamples: 5,
-      minTime: 0.05,
-      id: 4,
-      fn: [Function (anonymous)],
-      stats: [Object],
-      times: [Object],
-      running: false,
-      count: 7787,
-      compiled: [Function: anonymous],
-      cycles: 8,
-      hz: 152947.67502081575
-    },
-    '4': Benchmark {
-      name: 'd3-dsv (sync)',
-      options: [Object],
-      async: false,
-      defer: false,
-      delay: 0.005,
-      initCount: 1,
-      maxTime: 5,
-      minSamples: 5,
-      minTime: 0.05,
-      id: 5,
-      fn: [Function (anonymous)],
-      stats: [Object],
-      times: [Object],
-      running: false,
-      count: 10705,
-      compiled: [Function: anonymous],
-      cycles: 7,
-      hz: 210703.3372539758
-    },
-    name: 'Sync (Parse only) Benchmark',
-    options: { name: undefined },
-    length: 5,
-    events: { cycle: [Array], error: [Array], complete: [Array] },
-    running: false
-  },
-  result: undefined
-}
-
-Cleaning up test files...
-
-Benchmark complete!
-
+*Report generated by CISV Benchmark Suite*
