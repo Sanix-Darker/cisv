@@ -89,14 +89,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake valgrind
 
-      - name: Build core library
-        run: make core
-
-      - name: Build and run tests
+      - name: Build and run core tests
         run: |
+          make core
           cd core
           make test
-          LD_LIBRARY_PATH=build ./build/test_core
 
   cli-build-test:
     name: CLI Build & Test

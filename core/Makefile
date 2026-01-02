@@ -72,7 +72,7 @@ test: $(TEST_BIN)
 	@./$(TEST_BIN)
 
 $(TEST_BIN): $(TEST_SRCS) $(STATIC_LIB)
-	$(CC) $(CFLAGS) -I$(INC_DIR) -o $@ $(TEST_SRCS) -L$(BUILD_DIR) -lcisv -lm -lpthread
+	$(CC) $(CFLAGS) -I$(INC_DIR) -o $@ $(TEST_SRCS) $(STATIC_LIB) -lm -lpthread
 
 test-debug: $(OBJS_DEBUG)
 	$(CC) $(CFLAGS_DEBUG) -I$(INC_DIR) -o $(BUILD_DIR)/test_core_debug \
