@@ -401,10 +401,26 @@ generate_test_files() {
 #     # sudo apt-get install miller csvkit -y
 # }
 
+build_cisv() {
+    print_msg "$YELLOW" "Building cisv..."
+    if [ -f "Makefile" ]; then
+        make clean && make all
+        print_msg "$GREEN" "✓ cisv built successfully"
+    else
+        print_msg "$RED" "Error: Makefile not found"
+        return 1
+    fi
+}
+
 run_cli_benchmarks() {
-    # install_cli_tools
+    # Build cisv first
+    build_cisv
 
     print_msg "$BLUE" "\n## CLI BENCHMARKS\n"
+
+    # Set library path for cisv
+    export LD_LIBRARY_PATH="${PWD}/core/build:${LD_LIBRARY_PATH:-}"
+    local CISV_BIN="${PWD}/cli/build/cisv"
 
     for size in "${SIZES[@]}"; do
         if [ ! -f "${size}.csv" ]; then
@@ -425,7 +441,7 @@ run_cli_benchmarks() {
         print_msg "$RED" ""
         # -------
         # bench for cisv:
-        benchmark "cisv" "./cisv_bin -c" "${size}.csv"
+        benchmark "cisv" "$CISV_BIN -c" "${size}.csv"
 
         benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-bench" "${size}.csv"
 
@@ -445,7 +461,7 @@ run_cli_benchmarks() {
 
         # -------
         # bench for cisv:
-        benchmark "cisv" "./cisv_bin -s 0,2,3" "${size}.csv"
+        benchmark "cisv" "$CISV_BIN -s 0,2,3" "${size}.csv"
 
         benchmark "rust-csv" "./benchmark/rust-csv-bench/target/release/csv-select" "${size}.csv" "0,2,3"
 
@@ -462,11 +478,15 @@ run_cli_benchmarks() {
 
 run_npm_benchmarks() {
     print_msg "$BLUE" "\n## NPM Benchmarks\n"
-    if [ -f "./npm/package.json" ] && command_exists npm; then
-        cd ./npm && npm run benchmark-js
+    if [ -f "./bindings/nodejs/package.json" ] && command_exists npm; then
+        cd ./bindings/nodejs
+        npm install
+        npm run build
+        npm run benchmark-js
+        cd ../..
     else
         print_msg "$RED" "Error: package.json not found or npm not installed"
-        exit 1
+        print_msg "$YELLOW" "Skipping npm benchmarks..."
     fi
 }
 
