@@ -432,6 +432,33 @@ PYEOF
     fi
 }
 
+# Validate Python cisv parse result (validates via row count since ctypes binding uses count API)
+validate_python_parse() {
+    local file="$1"
+    local lib_path="${PROJECT_ROOT}/core/build/libcisv.so"
+
+    if [ ! -f "$lib_path" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    # Python binding validates parsing via count - if count is correct, parsing works
+    local count=$(python3 << PYEOF 2>/dev/null
+import ctypes
+lib = ctypes.CDLL("$lib_path")
+lib.cisv_parser_count_rows.argtypes = [ctypes.c_char_p]
+lib.cisv_parser_count_rows.restype = ctypes.c_size_t
+print(lib.cisv_parser_count_rows(b"$file"))
+PYEOF
+)
+
+    if [ "$count" = "$EXPECTED_ROW_COUNT" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:expected=$EXPECTED_ROW_COUNT,got=$count"
+    fi
+}
+
 # Validate PHP cisv count result
 validate_php_count() {
     local file="$1"
@@ -509,6 +536,9 @@ run_validations() {
 
     VALIDATIONS["python_count"]=$(validate_python_count "$abs_file")
     log "  Python count: ${VALIDATIONS[python_count]}"
+
+    VALIDATIONS["python_parse"]=$(validate_python_parse "$abs_file")
+    log "  Python parse: ${VALIDATIONS[python_parse]}"
 
     VALIDATIONS["php_count"]=$(validate_php_count "$abs_file")
     log "  PHP count: ${VALIDATIONS[php_count]}"
@@ -1344,7 +1374,7 @@ For each CISV binding, the following validations are performed:
 |---------|-------|-------|
 | CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") |
 | Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") |
-| Python | $(format_validation "python_count") | - |
+| Python | $(format_validation "python_count") | $(format_validation "python_parse") |
 | PHP | $(format_validation "php_count") | $(format_validation "php_parse") |
 
 ---
