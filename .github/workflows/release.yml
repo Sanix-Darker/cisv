@@ -38,10 +38,7 @@ jobs:
       - name: Install build dependencies
         shell: bash
         run: |
-          npm install -g node-gyp node-addon-api
-          cd bindings/nodejs
-          npm install
-          cd ../..
+          npm install -g node-gyp
 
       - name: Build core library and CLI
         shell: bash
@@ -63,6 +60,7 @@ jobs:
         shell: bash
         run: |
           cd bindings/nodejs
+          npm install
           npm run build
           cd ../..
 
