@@ -1,15 +1,40 @@
 version: 2
 updates:
+  # Node.js binding
   - package-ecosystem: "npm"
-    directory: "/npm/"
+    directory: "/bindings/nodejs/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 15
+    open-pull-requests-limit: 10
     commit-message:
-      prefix: "deps"
+      prefix: "deps(nodejs)"
     labels:
       - "dependencies"
+      - "nodejs"
     rebase-strategy: "auto"
 
-# TODO:
-# upcomming for pip,composer,...
+  # Python binding
+  - package-ecosystem: "pip"
+    directory: "/bindings/python/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(python)"
+    labels:
+      - "dependencies"
+      - "python"
+    rebase-strategy: "auto"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
+    labels:
+      - "dependencies"
+      - "ci"
+    rebase-strategy: "auto"
