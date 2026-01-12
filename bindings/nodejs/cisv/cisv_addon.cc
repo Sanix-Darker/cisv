@@ -84,8 +84,15 @@ struct RowCollector {
                     if (js_result.IsString()) {
                         result = js_result.As<Napi::String>().Utf8Value();
                     }
+                } catch (const Napi::Error& e) {
+                    // Keep original result but log the error
+                    fprintf(stderr, "CISV: JS transform error for field %d: %s\n",
+                            field_index, e.Message().c_str());
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "CISV: C++ exception in JS transform: %s\n", e.what());
                 } catch (...) {
-                    // Keep original result if JS transform fails
+                    fprintf(stderr, "CISV: Unknown exception in JS transform for field %d\n",
+                            field_index);
                 }
             }
 
@@ -101,8 +108,13 @@ struct RowCollector {
                     if (js_result.IsString()) {
                         result = js_result.As<Napi::String>().Utf8Value();
                     }
+                } catch (const Napi::Error& e) {
+                    // Keep original result but log the error
+                    fprintf(stderr, "CISV: JS transform error (all fields): %s\n", e.Message().c_str());
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "CISV: C++ exception in JS transform: %s\n", e.what());
                 } catch (...) {
-                    // Keep original result if JS transform fails
+                    fprintf(stderr, "CISV: Unknown exception in JS transform (all fields)\n");
                 }
             }
         }
@@ -467,15 +479,25 @@ public:
 
         if (info[0].IsBuffer()) {
             auto buf = info[0].As<Napi::Buffer<uint8_t>>();
-            cisv_parser_write(parser_, buf.Data(), buf.Length());
-            total_bytes_ += buf.Length();
+            size_t buf_len = buf.Length();
+            // Check for overflow before adding to total_bytes_
+            if (buf_len > SIZE_MAX - total_bytes_) {
+                throw Napi::Error::New(env, "Total bytes would overflow");
+            }
+            cisv_parser_write(parser_, buf.Data(), buf_len);
+            total_bytes_ += buf_len;
             return;
         }
 
         if (info[0].IsString()) {
             std::string chunk = info[0].As<Napi::String>();
-            cisv_parser_write(parser_, reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size());
-            total_bytes_ += chunk.size();
+            size_t chunk_size = chunk.size();
+            // Check for overflow before adding to total_bytes_
+            if (chunk_size > SIZE_MAX - total_bytes_) {
+                throw Napi::Error::New(env, "Total bytes would overflow");
+            }
+            cisv_parser_write(parser_, reinterpret_cast<const uint8_t*>(chunk.data()), chunk_size);
+            total_bytes_ += chunk_size;
             return;
         }
 
@@ -485,9 +507,10 @@ public:
     void End(const Napi::CallbackInfo &info) {
         if (!is_destroyed_) {
             cisv_parser_end(parser_);
-            // Clear the environment reference after ending
-            // FIXME: the transformer may need this
-            // rc_->env = nullptr;
+            // Clear the environment reference after ending to prevent stale references
+            rc_->env = nullptr;
+            // Note: JS transforms stored in rc_->js_transforms remain valid
+            // as they are Persistent references managed by the addon lifecycle
         }
     }
 
@@ -564,6 +587,9 @@ public:
             if (info.Length() >= 3 && info[2].IsObject()) {
                 Napi::Object context_obj = info[2].As<Napi::Object>();
                 ctx = (cisv_transform_context_t*)calloc(1, sizeof(cisv_transform_context_t));
+                if (!ctx) {
+                    throw Napi::Error::New(env, "Memory allocation failed for transform context");
+                }
 
                 // Extract context properties if they exist
                 if (context_obj.Has("key")) {
@@ -571,6 +597,10 @@ public:
                     if (key_val.IsString()) {
                         std::string key = key_val.As<Napi::String>();
                         ctx->key = strdup(key.c_str());
+                        if (!ctx->key) {
+                            free(ctx);
+                            throw Napi::Error::New(env, "Memory allocation failed for key");
+                        }
                         ctx->key_len = key.length();
                     }
                 }
@@ -580,6 +610,11 @@ public:
                     if (iv_val.IsString()) {
                         std::string iv = iv_val.As<Napi::String>();
                         ctx->iv = strdup(iv.c_str());
+                        if (!ctx->iv) {
+                            if (ctx->key) free((void*)ctx->key);
+                            free(ctx);
+                            throw Napi::Error::New(env, "Memory allocation failed for iv");
+                        }
                         ctx->iv_len = iv.length();
                     }
                 }
@@ -663,6 +698,9 @@ Napi::Value TransformByName(const Napi::CallbackInfo &info) {
         if (info.Length() >= 3 && info[2].IsObject()) {
             Napi::Object context_obj = info[2].As<Napi::Object>();
             ctx = (cisv_transform_context_t*)calloc(1, sizeof(cisv_transform_context_t));
+            if (!ctx) {
+                throw Napi::Error::New(env, "Memory allocation failed for transform context");
+            }
 
             // Extract context properties if they exist
             if (context_obj.Has("key")) {
@@ -670,6 +708,10 @@ Napi::Value TransformByName(const Napi::CallbackInfo &info) {
                 if (key_val.IsString()) {
                     std::string key = key_val.As<Napi::String>();
                     ctx->key = strdup(key.c_str());
+                    if (!ctx->key) {
+                        free(ctx);
+                        throw Napi::Error::New(env, "Memory allocation failed for key");
+                    }
                     ctx->key_len = key.length();
                 }
             }
@@ -679,6 +721,11 @@ Napi::Value TransformByName(const Napi::CallbackInfo &info) {
                 if (iv_val.IsString()) {
                     std::string iv = iv_val.As<Napi::String>();
                     ctx->iv = strdup(iv.c_str());
+                    if (!ctx->iv) {
+                        if (ctx->key) free((void*)ctx->key);
+                        free(ctx);
+                        throw Napi::Error::New(env, "Memory allocation failed for iv");
+                    }
                     ctx->iv_len = iv.length();
                 }
             }
@@ -732,14 +779,31 @@ void SetHeaderFields(const Napi::CallbackInfo &info) {
         throw Napi::Error::New(env, "Memory allocation failed");
     }
 
+    // Initialize to NULL for safe cleanup on partial failure
+    for (size_t i = 0; i < field_count; i++) {
+        c_field_names[i] = nullptr;
+    }
+
     for (size_t i = 0; i < field_count; i++) {
         Napi::Value field_val = field_names[i];
         if (!field_val.IsString()) {
+            // Clean up all previously allocated strings
+            for (size_t j = 0; j < i; j++) {
+                if (c_field_names[j]) free((void*)c_field_names[j]);
+            }
             free(c_field_names);
             throw Napi::TypeError::New(env, "Field names must be strings");
         }
         std::string field_str = field_val.As<Napi::String>();
         c_field_names[i] = strdup(field_str.c_str());
+        if (!c_field_names[i]) {
+            // Clean up all previously allocated strings
+            for (size_t j = 0; j < i; j++) {
+                if (c_field_names[j]) free((void*)c_field_names[j]);
+            }
+            free(c_field_names);
+            throw Napi::Error::New(env, "Memory allocation failed for field name");
+        }
     }
 
     // Ensure pipeline exists

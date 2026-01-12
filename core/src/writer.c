@@ -96,6 +96,10 @@ static inline int needs_quoting(const char *data, size_t len, char delim, char q
 }
 
 static int ensure_buffer_space(cisv_writer *writer, size_t needed) {
+    // Check for overflow before addition
+    if (needed > SIZE_MAX - writer->buffer_pos) {
+        return -2;  // Would overflow
+    }
     if (writer->buffer_pos + needed > writer->buffer_size) {
         if (cisv_writer_flush(writer) < 0) {
             return -1;
@@ -113,6 +117,10 @@ static void buffer_write(cisv_writer *writer, const void *data, size_t len) {
 }
 
 static int write_quoted_field(cisv_writer *writer, const char *data, size_t len) {
+    // Check for overflow: max_size = len * 2 + 2
+    if (len > (SIZE_MAX - 2) / 2) {
+        return -1;  // Field too large, would overflow
+    }
     size_t max_size = len * 2 + 2;
 
     int space_result = ensure_buffer_space(writer, max_size);
