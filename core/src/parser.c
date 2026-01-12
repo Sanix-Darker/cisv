@@ -85,19 +85,23 @@ void cisv_config_init(cisv_config *config) {
 }
 
 // Ensure quote buffer has enough space
-static inline void ensure_quote_buffer(cisv_parser *p, size_t needed) {
+static inline bool ensure_quote_buffer(cisv_parser *p, size_t needed) {
     if (p->quote_buffer_pos + needed > p->quote_buffer_size) {
         size_t new_size = (p->quote_buffer_size + needed) * 2;
-        p->quote_buffer = realloc(p->quote_buffer, new_size);
+        void *tmp = realloc(p->quote_buffer, new_size);
+        if (!tmp) return false;
+        p->quote_buffer = tmp;
         p->quote_buffer_size = new_size;
     }
+    return true;
 }
 
 // Append to quote buffer
-static inline void append_to_quote_buffer(cisv_parser *p, const uint8_t *data, size_t len) {
-    ensure_quote_buffer(p, len);
+static inline bool append_to_quote_buffer(cisv_parser *p, const uint8_t *data, size_t len) {
+    if (!ensure_quote_buffer(p, len)) return false;
     memcpy(p->quote_buffer + p->quote_buffer_pos, data, len);
     p->quote_buffer_pos += len;
+    return true;
 }
 
 // Inline hot-path functions
