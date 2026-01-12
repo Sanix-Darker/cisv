@@ -17,6 +17,8 @@
 #define HASH_TABLE_LOAD_FACTOR 2  // Hash table size = field_count * 2
 
 // FNV-1a hash function for strings (fast, good distribution)
+// PERF: __attribute__((pure)) allows compiler to deduplicate calls with same args
+__attribute__((pure))
 static inline uint32_t fnv1a_hash(const char *str) {
     uint32_t hash = 2166136261u;  // FNV offset basis
     while (*str) {

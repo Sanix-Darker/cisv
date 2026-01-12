@@ -112,7 +112,11 @@ static inline uint64_t swar_has_special(uint64_t word, char delim, char quote) {
 // SIMD-accelerated whitespace trimming
 #ifdef __AVX2__
 // Skip leading whitespace using AVX2 - processes 32 bytes at a time
-static inline const uint8_t *skip_ws_avx2(const uint8_t *start, const uint8_t *end) {
+// PERF: __restrict hints allow better optimization by promising no aliasing
+static inline const uint8_t * __restrict skip_ws_avx2(
+    const uint8_t * __restrict start,
+    const uint8_t * __restrict end
+) {
     const __m256i space = _mm256_set1_epi8(' ');
     const __m256i tab = _mm256_set1_epi8('\t');
     const __m256i cr = _mm256_set1_epi8('\r');
@@ -148,7 +152,11 @@ static inline const uint8_t *skip_ws_avx2(const uint8_t *start, const uint8_t *e
 }
 
 // Find last non-whitespace using AVX2 - scans backwards
-static inline const uint8_t *rskip_ws_avx2(const uint8_t *start, const uint8_t *end) {
+// PERF: __restrict hints allow better optimization by promising no aliasing
+static inline const uint8_t * __restrict rskip_ws_avx2(
+    const uint8_t * __restrict start,
+    const uint8_t * __restrict end
+) {
     const __m256i space = _mm256_set1_epi8(' ');
     const __m256i tab = _mm256_set1_epi8('\t');
     const __m256i cr = _mm256_set1_epi8('\r');
@@ -412,6 +420,8 @@ static void parse_scalar(cisv_parser *p);
 
 #ifdef __AVX512F__
 // AVX-512 ultra-fast path
+// PERF: __attribute__((hot)) tells compiler this is frequently called
+__attribute__((hot))
 static void parse_avx512(cisv_parser *p) {
     const __m512i delim_v = _mm512_set1_epi8(p->delimiter);
     const __m512i quote_v = _mm512_set1_epi8(p->quote);
@@ -578,6 +588,8 @@ static void parse_avx512(cisv_parser *p) {
 
 #ifdef __AVX2__
 // AVX2 fast path
+// PERF: __attribute__((hot)) tells compiler this is frequently called
+__attribute__((hot))
 static void parse_avx2(cisv_parser *p) {
     const __m256i delim_v = _mm256_set1_epi8(p->delimiter);
     const __m256i quote_v = _mm256_set1_epi8(p->quote);
@@ -1190,4 +1202,162 @@ void cisv_parser_end(cisv_parser *p) {
 
 int cisv_parser_get_line_number(const cisv_parser *p) {
     return p ? p->line_num : 0;
+}
+
+// =============================================================================
+// Parallel Chunk Processing Implementation (1 Billion Row Challenge technique)
+// =============================================================================
+
+cisv_mmap_file_t *cisv_mmap_open(const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return NULL;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        return NULL;
+    }
+
+    if (st.st_size == 0) {
+        close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+
+    int flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    flags |= MAP_POPULATE;
+#endif
+
+    uint8_t *data = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, flags, fd, 0);
+    if (data == MAP_FAILED) {
+        close(fd);
+        return NULL;
+    }
+
+    // Advise kernel for sequential access
+    madvise(data, st.st_size, MADV_SEQUENTIAL | MADV_WILLNEED);
+
+    cisv_mmap_file_t *file = malloc(sizeof(cisv_mmap_file_t));
+    if (!file) {
+        munmap(data, st.st_size);
+        close(fd);
+        return NULL;
+    }
+
+    file->data = data;
+    file->size = st.st_size;
+    file->fd = fd;
+
+    return file;
+}
+
+void cisv_mmap_close(cisv_mmap_file_t *file) {
+    if (!file) return;
+    if (file->data) munmap(file->data, file->size);
+    if (file->fd >= 0) close(file->fd);
+    free(file);
+}
+
+cisv_chunk_t *cisv_split_chunks(
+    const cisv_mmap_file_t *file,
+    int num_chunks,
+    int *chunk_count
+) {
+    if (!file || !file->data || num_chunks <= 0 || !chunk_count) {
+        return NULL;
+    }
+
+    // Clamp to reasonable chunk count
+    if (num_chunks > 256) num_chunks = 256;
+
+    // Calculate approximate chunk size
+    size_t chunk_size = file->size / num_chunks;
+    if (chunk_size < 4096) {
+        // File too small for requested chunks
+        num_chunks = 1;
+        chunk_size = file->size;
+    }
+
+    cisv_chunk_t *chunks = calloc(num_chunks, sizeof(cisv_chunk_t));
+    if (!chunks) return NULL;
+
+    const uint8_t *data = file->data;
+    const uint8_t *end = file->data + file->size;
+    const uint8_t *chunk_start = data;
+    int actual_chunks = 0;
+
+    for (int i = 0; i < num_chunks && chunk_start < end; i++) {
+        const uint8_t *target_end;
+
+        if (i == num_chunks - 1) {
+            // Last chunk gets everything remaining
+            target_end = end;
+        } else {
+            // Find newline near target boundary
+            target_end = chunk_start + chunk_size;
+            if (target_end > end) target_end = end;
+
+            // Search forward for newline (row boundary)
+            while (target_end < end && *target_end != '\n') {
+                target_end++;
+            }
+            if (target_end < end) {
+                target_end++;  // Include the newline
+            }
+        }
+
+        // Count rows in this chunk (using SWAR for speed)
+        size_t row_count = 0;
+        const uint8_t *p = chunk_start;
+
+        // SWAR newline counting
+        while (p + 8 <= target_end) {
+            uint64_t word;
+            memcpy(&word, p, sizeof(word));
+            uint64_t nl_mask = swar_has_byte(word, '\n');
+            if (nl_mask) {
+                row_count += __builtin_popcountll(nl_mask) / 8;
+            }
+            p += 8;
+        }
+
+        // Remainder
+        while (p < target_end) {
+            if (*p++ == '\n') row_count++;
+        }
+
+        chunks[actual_chunks].start = chunk_start;
+        chunks[actual_chunks].end = target_end;
+        chunks[actual_chunks].row_count = row_count;
+        chunks[actual_chunks].chunk_index = actual_chunks;
+
+        chunk_start = target_end;
+        actual_chunks++;
+    }
+
+    *chunk_count = actual_chunks;
+    return chunks;
+}
+
+int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
+    if (!p || !chunk || !chunk->start) return -1;
+
+    // Reset parser state for new chunk
+    p->cur = chunk->start;
+    p->end = chunk->end;
+    p->field_start = p->cur;
+    p->state = S_NORMAL;
+    p->quote_buffer_pos = 0;
+    p->current_row_fields = 0;
+
+#ifdef __AVX512F__
+    parse_avx512(p);
+#elif defined(__AVX2__)
+    parse_avx2(p);
+#else
+    parse_scalar(p);
+#endif
+
+    return 0;
 }

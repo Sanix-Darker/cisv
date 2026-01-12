@@ -1,4 +1,27 @@
 cmake_minimum_required(VERSION 3.14)
+project(cisv C CXX)
+
+# =============================================================================
+# Profile-Guided Optimization (PGO) Support
+# Usage:
+#   1. cmake -DCISV_PGO_GENERATE=ON .. && make
+#   2. Run representative workload
+#   3. cmake -DCISV_PGO_USE=ON .. && make
+# =============================================================================
+option(CISV_PGO_GENERATE "Generate PGO profile data" OFF)
+option(CISV_PGO_USE "Use PGO profile data for optimization" OFF)
+
+if(CISV_PGO_GENERATE)
+    message(STATUS "PGO: Generating profile data")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-generate")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-generate")
+endif()
+
+if(CISV_PGO_USE)
+    message(STATUS "PGO: Using profile data for optimization")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-use -fprofile-correction")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-use -fprofile-correction")
+endif()
 
 # Core library sources
 set(CISV_SOURCES
