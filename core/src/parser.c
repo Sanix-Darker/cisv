@@ -460,7 +460,8 @@ static void parse_avx2(cisv_parser *p) {
 static void parse_scalar(cisv_parser *p) {
     while (p->cur + 8 <= p->end) {
         if (p->state == S_NORMAL) {
-            uint64_t word = *(uint64_t*)p->cur;
+            uint64_t word;
+            memcpy(&word, p->cur, sizeof(word));
 
             uint64_t has_delim = 0, has_nl = 0, has_quote = 0;
             for (int i = 0; i < 8; i++) {
