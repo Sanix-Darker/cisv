@@ -1,0 +1,22 @@
+name: Update Packagist
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'composer.json'
+      - 'bindings/php/**'
+  release:
+    types: [published]
+
+jobs:
+  packagist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Packagist
+        run: |
+          curl -XPOST \
+            -H 'Content-Type: application/json' \
+            -d '{"repository":{"url":"https://packagist.org/packages/sanix-darker/cisv"}}' \
+            "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}"
