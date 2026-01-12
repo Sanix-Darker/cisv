@@ -26,6 +26,19 @@ updates:
       - "python"
     rebase-strategy: "auto"
 
+  # PHP binding (root composer.json)
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(php)"
+    labels:
+      - "dependencies"
+      - "php"
+    rebase-strategy: "auto"
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
