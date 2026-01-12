@@ -135,7 +135,7 @@ jobs:
           rm -f test.csv
 
       - name: Upload CLI binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cisv-cli-${{ matrix.os }}
           path: cli/build/cisv
@@ -194,7 +194,7 @@ jobs:
 
       - name: Upload memory check logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: memory-check-logs
           path: valgrind-*.log
