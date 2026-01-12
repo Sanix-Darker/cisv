@@ -133,7 +133,10 @@ class CisvParser:
 
     def _on_field(self, user: ctypes.c_void_p, data: ctypes.c_char_p, length: int):
         """Called for each field."""
-        field = data[:length].decode('utf-8', errors='replace')
+        # Use ctypes.string_at to safely copy data before pointer is invalidated
+        # The data pointer is only valid during this callback
+        field_bytes = ctypes.string_at(data, length)
+        field = field_bytes.decode('utf-8', errors='replace')
         self._current_row.append(field)
 
     def _on_row(self, user: ctypes.c_void_p):
@@ -150,6 +153,7 @@ class CisvParser:
         config = CisvConfig()
         self._lib.cisv_config_init(ctypes.byref(config))
 
+        # c_char expects bytes of length 1, not a slice
         config.delimiter = self._delimiter.encode('utf-8')[0:1]
         config.quote = self._quote.encode('utf-8')[0:1]
         if self._escape:
