@@ -17,8 +17,9 @@
         "<!(node -p \"require('node-addon-api').gyp\")"
       ],
       "cflags!": [ "-fno-exceptions" ],
-      "cflags": ["-O3", "-mavx2"],
+      "cflags": ["-O3"],
       "cflags_cc!": [ "-fno-exceptions" ],
+      "cflags_cc": ["-O3"],
       "defines": [
         "NAPI_DISABLE_CPP_EXCEPTIONS",
         "NAPI_VERSION=6"
@@ -29,27 +30,39 @@
             "-O3",
             "-march=native",
             "-mtune=native",
-            "-ffast-math"
+            "-ffast-math",
+            "-funroll-loops",
+            "-fomit-frame-pointer",
+            "-flto"
           ],
           "cflags_cc": [
             "-O3",
             "-march=native",
             "-mtune=native",
-            "-ffast-math"
-          ]
+            "-ffast-math",
+            "-funroll-loops",
+            "-fomit-frame-pointer",
+            "-flto"
+          ],
+          "ldflags": ["-flto"]
         }],
         ["OS=='mac'", {
           "xcode_settings": {
             "GCC_OPTIMIZATION_LEVEL": "3",
+            "LLVM_LTO": "YES",
             "OTHER_CFLAGS": [
               "-march=native",
               "-mtune=native",
-              "-ffast-math"
+              "-ffast-math",
+              "-funroll-loops",
+              "-fomit-frame-pointer"
             ],
             "OTHER_CPLUSPLUSFLAGS": [
               "-march=native",
               "-mtune=native",
-              "-ffast-math"
+              "-ffast-math",
+              "-funroll-loops",
+              "-fomit-frame-pointer"
             ]
           }
         }]

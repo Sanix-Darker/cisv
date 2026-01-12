@@ -50,20 +50,20 @@ FieldCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_char_p, ctypes.
 RowCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 ErrorCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p)
 
-# Config structure
+# Config structure - must match cisv_config in parser.h exactly
 class CisvConfig(ctypes.Structure):
     _fields_ = [
         ('delimiter', ctypes.c_char),
         ('quote', ctypes.c_char),
         ('escape', ctypes.c_char),
+        ('skip_empty_lines', ctypes.c_bool),
         ('comment', ctypes.c_char),
-        ('trim', ctypes.c_int),
-        ('skip_empty_lines', ctypes.c_int),
-        ('relaxed', ctypes.c_int),
-        ('skip_lines_with_error', ctypes.c_int),
+        ('trim', ctypes.c_bool),
+        ('relaxed', ctypes.c_bool),
         ('max_row_size', ctypes.c_size_t),
         ('from_line', ctypes.c_int),
         ('to_line', ctypes.c_int),
+        ('skip_lines_with_error', ctypes.c_bool),
         ('field_cb', FieldCallback),
         ('row_cb', RowCallback),
         ('error_cb', ErrorCallback),
@@ -160,8 +160,8 @@ class CisvParser:
             config.escape = self._escape.encode('utf-8')[0:1]
         if self._comment:
             config.comment = self._comment.encode('utf-8')[0:1]
-        config.trim = 1 if self._trim else 0
-        config.skip_empty_lines = 1 if self._skip_empty_lines else 0
+        config.trim = self._trim
+        config.skip_empty_lines = self._skip_empty_lines
 
         config.field_cb = self._field_cb
         config.row_cb = self._row_cb
