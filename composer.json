@@ -1,6 +1,6 @@
 {
     "name": "sanix-darker/cisv",
-    "description": "High-performance CSV parser with SIMD optimizations for PHP",
+    "description": "High-performance CSV parser with SIMD optimizations (AVX-512/AVX2) for PHP - 10-50x faster than fgetcsv",
     "type": "php-ext",
     "license": "MIT",
     "keywords": [
@@ -11,7 +11,9 @@
         "avx2",
         "avx512",
         "high-performance",
-        "fast"
+        "fast",
+        "tsv",
+        "delimiter"
     ],
     "authors": [
         {
@@ -22,7 +24,8 @@
     "homepage": "https://github.com/Sanix-Darker/cisv",
     "support": {
         "issues": "https://github.com/Sanix-Darker/cisv/issues",
-        "source": "https://github.com/Sanix-Darker/cisv"
+        "source": "https://github.com/Sanix-Darker/cisv",
+        "docs": "https://github.com/Sanix-Darker/cisv/blob/master/bindings/php/README.md"
     },
     "require": {
         "php": ">=7.4"
@@ -37,18 +40,48 @@
         "files": ["bindings/php/stubs/cisv.php"]
     },
     "scripts": {
+        "post-install-cmd": [
+            "@php -r \"echo PHP_EOL . '\\033[33m[CISV] Native extension requires compilation.\\033[0m' . PHP_EOL;\""
+        ],
+        "post-update-cmd": [
+            "@php -r \"echo PHP_EOL . '\\033[33m[CISV] Run: composer build-ext && sudo make -C vendor/sanix-darker/cisv/bindings/php install\\033[0m' . PHP_EOL;\""
+        ],
+        "check-deps": [
+            "@php -r \"if(!shell_exec('which phpize')) { echo 'ERROR: phpize not found. Install php-dev package.' . PHP_EOL; exit(1); }\"",
+            "@php -r \"if(!shell_exec('which make')) { echo 'ERROR: make not found. Install build-essential.' . PHP_EOL; exit(1); }\""
+        ],
         "build-core": [
-            "cd core && make"
+            "echo 'Building CISV core library...'",
+            "make -C core clean all"
         ],
         "build-ext": [
+            "@check-deps",
             "@build-core",
-            "cd bindings/php && phpize && ./configure --enable-cisv && make clean && make"
+            "echo 'Building PHP extension...'",
+            "cd bindings/php && phpize && ./configure --enable-cisv && make clean && make",
+            "echo ''",
+            "echo '✓ Build complete! Extension at: bindings/php/modules/cisv.so'",
+            "echo ''",
+            "echo 'To install system-wide: sudo make -C bindings/php install'",
+            "echo 'To load temporarily:    php -d extension=bindings/php/modules/cisv.so your_script.php'"
         ],
         "install-ext": [
             "@build-ext",
-            "cd bindings/php && sudo make install"
+            "sudo make -C bindings/php install",
+            "echo ''",
+            "echo '✓ Extension installed! Add to php.ini: extension=cisv.so'"
         ],
-        "test": "phpunit"
+        "test": "phpunit",
+        "test-ext": [
+            "@php -d extension=bindings/php/modules/cisv.so -r \"echo class_exists('CisvParser') ? '✓ Extension loaded successfully!' : '✗ Extension not loaded'; echo PHP_EOL;\""
+        ]
+    },
+    "scripts-descriptions": {
+        "build-core": "Build the CISV core C library",
+        "build-ext": "Build the PHP extension (requires php-dev and build tools)",
+        "install-ext": "Build and install the extension system-wide (requires sudo)",
+        "test-ext": "Test if the extension loads correctly",
+        "check-deps": "Check if required build tools are installed"
     },
     "config": {
         "sort-packages": true
