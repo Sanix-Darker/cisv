@@ -9,6 +9,109 @@
 
 namespace {
 
+// =============================================================================
+// SECURITY: UTF-8 validation to prevent V8 crashes on invalid input
+// Invalid UTF-8 data can cause Napi::String::New to throw or crash
+// =============================================================================
+static bool isValidUtf8(const char* data, size_t len) {
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data);
+    size_t i = 0;
+
+    while (i < len) {
+        unsigned char c = bytes[i];
+
+        if (c < 0x80) {
+            // ASCII: single byte (0x00-0x7F)
+            i++;
+        } else if ((c & 0xE0) == 0xC0) {
+            // 2-byte sequence (0xC0-0xDF)
+            if (i + 1 >= len) return false;
+            if ((bytes[i + 1] & 0xC0) != 0x80) return false;
+            // Overlong check: C0-C1 are invalid
+            if (c < 0xC2) return false;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            // 3-byte sequence (0xE0-0xEF)
+            if (i + 2 >= len) return false;
+            if ((bytes[i + 1] & 0xC0) != 0x80) return false;
+            if ((bytes[i + 2] & 0xC0) != 0x80) return false;
+            // Overlong check for E0
+            if (c == 0xE0 && bytes[i + 1] < 0xA0) return false;
+            // Surrogate check (U+D800-U+DFFF)
+            if (c == 0xED && bytes[i + 1] >= 0xA0) return false;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            // 4-byte sequence (0xF0-0xF7)
+            if (i + 3 >= len) return false;
+            if ((bytes[i + 1] & 0xC0) != 0x80) return false;
+            if ((bytes[i + 2] & 0xC0) != 0x80) return false;
+            if ((bytes[i + 3] & 0xC0) != 0x80) return false;
+            // Overlong check for F0
+            if (c == 0xF0 && bytes[i + 1] < 0x90) return false;
+            // Check for code points > U+10FFFF
+            if (c == 0xF4 && bytes[i + 1] >= 0x90) return false;
+            if (c > 0xF4) return false;
+            i += 4;
+        } else {
+            // Invalid leading byte
+            return false;
+        }
+    }
+    return true;
+}
+
+// Create Napi::String with UTF-8 validation (safe version)
+// Falls back to replacement character representation for invalid UTF-8
+static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
+    if (isValidUtf8(data, len)) {
+        return Napi::String::New(env, data, len);
+    }
+
+    // Invalid UTF-8 - replace invalid bytes with replacement character
+    // This prevents V8 crashes while preserving data visibility
+    std::string safe_str;
+    safe_str.reserve(len);
+
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data);
+    size_t i = 0;
+
+    while (i < len) {
+        unsigned char c = bytes[i];
+
+        if (c < 0x80) {
+            safe_str += static_cast<char>(c);
+            i++;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < len &&
+                   (bytes[i + 1] & 0xC0) == 0x80 && c >= 0xC2) {
+            safe_str += static_cast<char>(c);
+            safe_str += static_cast<char>(bytes[i + 1]);
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < len &&
+                   (bytes[i + 1] & 0xC0) == 0x80 &&
+                   (bytes[i + 2] & 0xC0) == 0x80) {
+            safe_str += static_cast<char>(c);
+            safe_str += static_cast<char>(bytes[i + 1]);
+            safe_str += static_cast<char>(bytes[i + 2]);
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0 && i + 3 < len &&
+                   (bytes[i + 1] & 0xC0) == 0x80 &&
+                   (bytes[i + 2] & 0xC0) == 0x80 &&
+                   (bytes[i + 3] & 0xC0) == 0x80 && c <= 0xF4) {
+            safe_str += static_cast<char>(c);
+            safe_str += static_cast<char>(bytes[i + 1]);
+            safe_str += static_cast<char>(bytes[i + 2]);
+            safe_str += static_cast<char>(bytes[i + 3]);
+            i += 4;
+        } else {
+            // Invalid byte - use UTF-8 replacement character U+FFFD
+            safe_str += "\xEF\xBF\xBD";
+            i++;
+        }
+    }
+
+    return Napi::String::New(env, safe_str);
+}
+
 // Extended RowCollector that handles transforms
 struct RowCollector {
     std::vector<std::string> current;
@@ -33,6 +136,13 @@ struct RowCollector {
         if (pipeline) {
             cisv_transform_pipeline_destroy(pipeline);
             pipeline = nullptr;
+        }
+        // SECURITY FIX: Properly release all persistent references to prevent memory leak
+        // Napi::Persistent references must be Reset() before being destroyed
+        for (auto& pair : js_transforms) {
+            if (!pair.second.IsEmpty()) {
+                pair.second.Reset();  // Release the persistent handle
+            }
         }
         js_transforms.clear();
         rows.clear();
@@ -76,7 +186,8 @@ struct RowCollector {
             auto it = js_transforms.find(field_index);
             if (it != js_transforms.end() && !it->second.IsEmpty()) {
                 try {
-                    Napi::String input = Napi::String::New(env, result);
+                    // SECURITY: Use safe string creation to handle invalid UTF-8
+                    Napi::String input = SafeNewString(env, result.c_str(), result.length());
                     Napi::Number field = Napi::Number::New(env, field_index);
 
                     Napi::Value js_result = it->second.Call({input, field});
@@ -100,7 +211,8 @@ struct RowCollector {
             auto it_all = js_transforms.find(-1);
             if (it_all != js_transforms.end() && !it_all->second.IsEmpty()) {
                 try {
-                    Napi::String input = Napi::String::New(env, result);
+                    // SECURITY: Use safe string creation to handle invalid UTF-8
+                    Napi::String input = SafeNewString(env, result.c_str(), result.length());
                     Napi::Number field = Napi::Number::New(env, field_index);
 
                     Napi::Value js_result = it_all->second.Call({input, field});
@@ -1055,7 +1167,9 @@ private:
         for (size_t i = 0; i < rc_->rows.size(); ++i) {
             Napi::Array row = Napi::Array::New(env, rc_->rows[i].size());
             for (size_t j = 0; j < rc_->rows[i].size(); ++j) {
-                row[j] = Napi::String::New(env, rc_->rows[i][j]);
+                // SECURITY: Use safe string creation to handle invalid UTF-8 in CSV data
+                const std::string& field = rc_->rows[i][j];
+                row[j] = SafeNewString(env, field.c_str(), field.length());
             }
             rows[i] = row;
         }

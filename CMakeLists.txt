@@ -17,9 +17,19 @@ option(CISV_BUILD_CLI "Build CLI tool" ON)
 option(CISV_BUILD_TESTS "Build tests" ON)
 option(CISV_ENABLE_SIMD "Enable SIMD optimizations" ON)
 
-# Compiler flags
-set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
+# Compiler flags - optimized for maximum performance
+set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer")
 set(CMAKE_C_FLAGS_DEBUG "-g -O0")
+
+# Enable Link-Time Optimization for Release builds
+include(CheckIPOSupported)
+check_ipo_supported(RESULT LTO_SUPPORTED OUTPUT LTO_ERROR)
+if(LTO_SUPPORTED)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    message(STATUS "LTO enabled for Release builds")
+else()
+    message(STATUS "LTO not supported: ${LTO_ERROR}")
+endif()
 
 if(CISV_ENABLE_SIMD)
     include(CheckCCompilerFlag)
