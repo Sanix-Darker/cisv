@@ -91,6 +91,19 @@ typedef struct {
     // Header field names for mapping
     char **header_fields;
     size_t header_count;
+
+    // Pre-indexed transforms by field (O(1) lookup optimization)
+    // transforms_by_field[field_index] = array of transform indices
+    size_t **transforms_by_field;      // Array of arrays holding transform indices
+    size_t *transforms_by_field_count; // Count of transforms per field
+    size_t transforms_by_field_size;   // Size of transforms_by_field array
+    size_t *global_transforms;         // Transforms that apply to all fields (field_index=-1)
+    size_t global_transforms_count;    // Count of global transforms
+    int index_dirty;                   // Flag to rebuild index
+
+    // Hash table for O(1) header field name lookup
+    int *header_hash_table;            // Hash table: hash -> field_index (-1 if empty)
+    size_t header_hash_size;           // Size of hash table (power of 2)
 } cisv_transform_pipeline_t;
 
 typedef struct cisv_js_callback {

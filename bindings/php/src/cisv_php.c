@@ -24,6 +24,7 @@
 typedef struct {
     cisv_parser *parser;
     cisv_config config;
+    cisv_transform_pipeline_t *pipeline;  /* Transform pipeline (may be NULL if unused) */
     zval rows;        /* Embedded zval - safer memory management */
     zval current_row; /* Embedded zval - safer memory management */
     zend_object std;
@@ -74,6 +75,9 @@ static zend_object *cisv_parser_create_object(zend_class_entry *ce) {
     /* Initialize config */
     cisv_config_init(&intern->config);
 
+    /* Initialize pipeline to NULL (created lazily if transforms are used) */
+    intern->pipeline = NULL;
+
     /* Initialize embedded zvals - no separate allocation needed */
     array_init(&intern->rows);
     array_init(&intern->current_row);
@@ -88,6 +92,12 @@ static void cisv_parser_free_object(zend_object *obj) {
     if (intern->parser) {
         cisv_parser_destroy(intern->parser);
         intern->parser = NULL;
+    }
+
+    /* SECURITY FIX: Free transform pipeline to prevent memory leak */
+    if (intern->pipeline) {
+        cisv_transform_pipeline_destroy(intern->pipeline);
+        intern->pipeline = NULL;
     }
 
     /* Destroy embedded zvals - no efree needed since they're embedded */
@@ -113,8 +123,19 @@ PHP_METHOD(CisvParser, __construct) {
         zval *val;
 
         if ((val = zend_hash_str_find(Z_ARRVAL_P(options), "delimiter", sizeof("delimiter") - 1)) != NULL) {
-            if (Z_TYPE_P(val) == IS_STRING && Z_STRLEN_P(val) > 0) {
-                intern->config.delimiter = Z_STRVAL_P(val)[0];
+            if (Z_TYPE_P(val) == IS_STRING) {
+                /* SECURITY: Validate delimiter - must be exactly 1 character */
+                if (Z_STRLEN_P(val) != 1) {
+                    zend_throw_exception(zend_ce_exception, "Delimiter must be exactly 1 character", 0);
+                    return;
+                }
+                char delim = Z_STRVAL_P(val)[0];
+                /* SECURITY: Reject invalid delimiter characters */
+                if (delim == '\0' || delim == '\n' || delim == '\r') {
+                    zend_throw_exception(zend_ce_exception, "Invalid delimiter character (NUL, newline, or carriage return not allowed)", 0);
+                    return;
+                }
+                intern->config.delimiter = delim;
             }
         }
 
@@ -225,8 +246,15 @@ PHP_METHOD(CisvParser, setDelimiter) {
         Z_PARAM_STRING(delimiter, delimiter_len)
     ZEND_PARSE_PARAMETERS_END();
 
-    if (delimiter_len == 0) {
-        zend_throw_exception(zend_ce_exception, "Delimiter cannot be empty", 0);
+    /* SECURITY: Validate delimiter - must be exactly 1 character */
+    if (delimiter_len != 1) {
+        zend_throw_exception(zend_ce_exception, "Delimiter must be exactly 1 character", 0);
+        return;
+    }
+
+    /* SECURITY: Reject invalid delimiter characters */
+    if (delimiter[0] == '\0' || delimiter[0] == '\n' || delimiter[0] == '\r') {
+        zend_throw_exception(zend_ce_exception, "Invalid delimiter character (NUL, newline, or carriage return not allowed)", 0);
         return;
     }
 

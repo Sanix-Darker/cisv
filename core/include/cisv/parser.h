@@ -63,6 +63,48 @@ void cisv_parser_end(cisv_parser *parser);
 // Get current line number
 int cisv_parser_get_line_number(const cisv_parser *parser);
 
+// =============================================================================
+// Parallel Chunk Processing API (1 Billion Row Challenge technique)
+// Enables multi-threaded parsing with near-linear scaling
+// =============================================================================
+
+// Chunk structure for parallel processing
+typedef struct {
+    const uint8_t *start;    // Start of chunk data
+    const uint8_t *end;      // End of chunk data (exclusive)
+    size_t row_count;        // Number of complete rows in chunk
+    int chunk_index;         // Chunk index for ordering results
+} cisv_chunk_t;
+
+// Memory-mapped file handle for chunk processing
+typedef struct {
+    uint8_t *data;           // Memory-mapped file data
+    size_t size;             // Total file size
+    int fd;                  // File descriptor
+} cisv_mmap_file_t;
+
+// Open file for parallel processing (memory-maps the file)
+// Returns NULL on failure, sets errno
+cisv_mmap_file_t *cisv_mmap_open(const char *path);
+
+// Close memory-mapped file
+void cisv_mmap_close(cisv_mmap_file_t *file);
+
+// Split file into chunks for parallel processing
+// Chunks are split at row boundaries (newlines)
+// Returns array of chunks (caller must free), sets *chunk_count
+// num_chunks: desired number of chunks (typically = number of threads)
+cisv_chunk_t *cisv_split_chunks(
+    const cisv_mmap_file_t *file,
+    int num_chunks,
+    int *chunk_count
+);
+
+// Parse a single chunk (thread-safe)
+// Each thread should have its own parser instance
+// Returns 0 on success, negative on error
+int cisv_parse_chunk(cisv_parser *parser, const cisv_chunk_t *chunk);
+
 // Platform-specific defines
 #ifdef __linux__
     #define HAS_POSIX_FADVISE 1
