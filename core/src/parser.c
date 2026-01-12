@@ -143,6 +143,10 @@ static inline void yield_quoted_field(cisv_parser *p) {
 
 static inline void yield_row(cisv_parser *p) {
     p->line_num++;
+    // Skip empty rows if skip_empty_lines is enabled
+    if (p->skip_empty_lines && p->current_row_fields == 0) {
+        return;
+    }
     if (p->rcb && p->line_num >= p->from_line &&
         (!p->to_line || p->line_num <= p->to_line)) {
         p->rcb(p->user);
@@ -244,6 +248,17 @@ static void parse_avx512(cisv_parser *p) {
                 yield_quoted_field(p);
                 p->state = S_NORMAL;
                 p->cur++;
+                // Skip delimiter/newline immediately after closing quote
+                if (p->cur < p->end && *p->cur == p->delimiter) {
+                    p->cur++;
+                } else if (p->cur < p->end && *p->cur == '\n') {
+                    p->cur++;
+                    yield_row(p);
+                } else if (p->cur < p->end && *p->cur == '\r' &&
+                           p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                    p->cur += 2;
+                    yield_row(p);
+                }
                 p->field_start = p->cur;
                 break;
             }
@@ -393,6 +408,17 @@ static void parse_avx2(cisv_parser *p) {
                 yield_quoted_field(p);
                 p->state = S_NORMAL;
                 p->cur++;
+                // Skip delimiter/newline immediately after closing quote
+                if (p->cur < p->end && *p->cur == p->delimiter) {
+                    p->cur++;
+                } else if (p->cur < p->end && *p->cur == '\n') {
+                    p->cur++;
+                    yield_row(p);
+                } else if (p->cur < p->end && *p->cur == '\r' &&
+                           p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                    p->cur += 2;
+                    yield_row(p);
+                }
                 p->field_start = p->cur;
                 break;
             }
@@ -517,6 +543,17 @@ static void parse_scalar(cisv_parser *p) {
                         yield_quoted_field(p);
                         p->state = S_NORMAL;
                         p->cur++;
+                        // Skip delimiter/newline immediately after closing quote
+                        if (p->cur < p->end && *p->cur == p->delimiter) {
+                            p->cur++;
+                        } else if (p->cur < p->end && *p->cur == '\n') {
+                            p->cur++;
+                            yield_row(p);
+                        } else if (p->cur < p->end && *p->cur == '\r' &&
+                                   p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                            p->cur += 2;
+                            yield_row(p);
+                        }
                         p->field_start = p->cur;
                         break;
                     }

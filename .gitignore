@@ -1,11 +1,72 @@
-node_modules
-build
-*.csv
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+*.lo
+*.la
+*.dylib
+
+# PHP extension build
+bindings/php/Makefile
+bindings/php/config.h
+bindings/php/config.h.in
+bindings/php/config.log
+bindings/php/config.nice
+bindings/php/config.status
+bindings/php/configure
+bindings/php/configure.ac
+bindings/php/acinclude.m4
+bindings/php/aclocal.m4
+bindings/php/autom4te.cache/
+bindings/php/libtool
+bindings/php/ltmain.sh
+bindings/php/Makefile.fragments
+bindings/php/Makefile.global
+bindings/php/Makefile.objects
+bindings/php/mkinstalldirs
+bindings/php/run-tests.php
+bindings/php/build/
+bindings/php/modules/
+bindings/php/.libs/
+bindings/php/src/.libs/
+bindings/php/src/*.lo
+bindings/php/src/*.dep
+*.la
+
+# Node.js
+node_modules/
 npm-debug.log
-*/*.o
-cisv_bin
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.egg
+
+# Test files
+*.csv
 valgrind_output.log
-benchmark/rust-csv-bench/
 valgrind_report.txt
 digest.txt
 tests/test_native
+cisv_bin
+
+# Benchmarks
+benchmark/rust-csv-bench/
+
+# IDE / Tools
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Composer
+vendor/
+composer.lock
