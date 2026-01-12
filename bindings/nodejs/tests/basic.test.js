@@ -171,8 +171,9 @@ describe('CSV Parser Core Functionality', () => {
       const parser = new cisvParser();
       const rows = parser.parseSync(quotedFile);
 
-      assert.strictEqual(rows[1][2], 'A simple, basic product');
-      assert.strictEqual(rows[2][2], 'Contains "quotes" and, commas');
+      // Column indices: 0=name, 1=description, 2=price
+      assert.strictEqual(rows[1][1], 'A simple, basic product');
+      assert.strictEqual(rows[2][1], 'Contains "quotes" and, commas');
       // Note: Multi-line within quotes may need special handling
     });
   });
