@@ -8,6 +8,8 @@
         "parser",
         "simd",
         "avx",
+        "avx2",
+        "avx512",
         "high-performance",
         "fast"
     ],
@@ -32,22 +34,19 @@
         "ext-cisv": "0.0.8"
     },
     "autoload": {
-        "files": ["stubs/cisv.php"]
+        "files": ["bindings/php/stubs/cisv.php"]
     },
     "scripts": {
         "build-core": [
-            "cd ../../core && make"
+            "cd core && make"
         ],
         "build-ext": [
             "@build-core",
-            "phpize",
-            "./configure --enable-cisv",
-            "make clean",
-            "make"
+            "cd bindings/php && phpize && ./configure --enable-cisv && make clean && make"
         ],
         "install-ext": [
             "@build-ext",
-            "sudo make install"
+            "cd bindings/php && sudo make install"
         ],
         "test": "phpunit"
     },
