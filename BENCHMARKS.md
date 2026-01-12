@@ -4,8 +4,8 @@
 
 | Parameter | Value |
 |-----------|-------|
-| **Generated** | 2026-01-12 10:19:11 UTC |
-| **Commit** | ebcd58a2ddfd05af3071bc5373080265dc8f318a |
+| **Generated** | 2026-01-12 12:16:55 UTC |
+| **Commit** | db29543fda57cd7b16ea457e35e91beb2c5645a1 |
 | **File Size** | 85.50 MB |
 | **Row Count** | 1000001 |
 | **Iterations** | 5 |
@@ -27,13 +27,13 @@ Task: Count all rows in a 85.50 MB CSV file with 1000001 rows.
 
 | Tool | Time (s) | Speed (MB/s) | Runs | Valid |
 |------|----------|--------------|------|-------|
-| **cisv** | 0.0149 | 5738.26 | 5/5 | ✓ |
-| rust-csv | 0.1540 | 555.19 | 5/5 | - |
-| xsv | 0.1116 | 766.13 | 5/5 | - |
-| wc -l | 0.0165 | 5181.82 | 5/5 | - |
-| awk | 0.1224 | 698.53 | 5/5 | - |
-| miller | 0.7560 | 113.10 | 5/5 | - |
-| csvkit | 2.0623 | 41.46 | 5/5 | - |
+| **cisv** | 0.0150 | 5700.00 | 5/5 | ✓ |
+| rust-csv | 0.1534 | 557.37 | 5/5 | - |
+| xsv | 0.1108 | 771.66 | 5/5 | - |
+| wc -l | 0.0171 | 5000.00 | 5/5 | - |
+| awk | 0.1219 | 701.39 | 5/5 | - |
+| miller | 0.8171 | 104.64 | 5/5 | - |
+| csvkit | 2.0586 | 41.53 | 5/5 | - |
 
 ### 1.2 Column Selection Performance
 
@@ -41,13 +41,13 @@ Task: Select columns 0, 2, 3 from the CSV file.
 
 | Tool | Time (s) | Speed (MB/s) | Runs | Valid |
 |------|----------|--------------|------|-------|
-| **cisv** | 0.3374 | 253.41 | 5/5 | ✓ |
-| rust-csv | 0.2184 | 391.48 | 5/5 | - |
-| xsv | 0.1630 | 524.54 | 5/5 | - |
-| awk | 1.1606 | 73.67 | 5/5 | - |
-| cut | 0.1749 | 488.85 | 5/5 | - |
-| miller | 1.1276 | 75.82 | 5/5 | - |
-| csvkit | 2.1503 | 39.76 | 5/5 | - |
+| **cisv** | 0.3436 | 248.84 | 5/5 | ✓ |
+| rust-csv | 0.2203 | 388.11 | 5/5 | - |
+| xsv | 0.1617 | 528.76 | 5/5 | - |
+| awk | 1.1518 | 74.23 | 5/5 | - |
+| cut | 0.1744 | 490.25 | 5/5 | - |
+| miller | 1.0787 | 79.26 | 5/5 | - |
+| csvkit | 2.1564 | 39.65 | 5/5 | - |
 
 ---
 
@@ -57,14 +57,14 @@ Task: Parse the entire CSV file using Node.js parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs | Valid |
 |--------|----------|--------------|------|-------|
-| **cisv (parse)** | 4.3213 | 19.79 | 5/5 | ✓ |
-| **cisv (count)** | 0.0107 | 7990.65 | 5/5 | ✓ |
-| papaparse | 1.3949 | 61.29 | 5/5 | - |
-| csv-parse | 3.7582 | 22.75 | 5/5 | - |
-| fast-csv | 6.5464 | 13.06 | 5/5 | - |
-| csv-parser | 2.4081 | 35.51 | 5/5 | - |
-| d3-dsv | 0.8036 | 106.40 | 5/5 | - |
-| csv-string | 1.3191 | 64.82 | 5/5 | - |
+| **cisv (parse)** | 4.3051 | 19.86 | 5/5 | ✓ |
+| **cisv (count)** | 0.0110 | 7772.73 | 5/5 | ✓ |
+| papaparse | 1.3608 | 62.83 | 5/5 | - |
+| csv-parse | 3.7545 | 22.77 | 5/5 | - |
+| fast-csv | 6.7915 | 12.59 | 5/5 | - |
+| csv-parser | 2.4518 | 34.87 | 5/5 | - |
+| d3-dsv | 0.8228 | 103.91 | 5/5 | - |
+| csv-string | 1.3338 | 64.10 | 5/5 | - |
 
 > **Note:** cisv (count) shows native C performance without JS object creation overhead.
 > cisv (parse) includes the cost of converting C data to JavaScript arrays.
@@ -77,13 +77,13 @@ Task: Parse the entire CSV file using Python parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs | Valid |
 |--------|----------|--------------|------|-------|
-| **cisv** | 0.0099 | 8636.36 | 5/5 | ✓ |
-| polars | 0.0723 | 1182.57 | 5/5 | - |
-| pyarrow | 0.0856 | 998.83 | 5/5 | - |
-| pandas | 1.4367 | 59.51 | 5/5 | - |
-| csv (stdlib) | 1.6745 | 51.06 | 5/5 | - |
-| DictReader | 2.1573 | 39.63 | 5/5 | - |
-| numpy | 3.2461 | 26.34 | 5/5 | - |
+| **cisv** | 0.0098 | 8724.49 | 5/5 | ✓ |
+| polars | 0.0719 | 1189.15 | 5/5 | - |
+| pyarrow | 0.0850 | 1005.88 | 5/5 | - |
+| pandas | 1.6487 | 51.86 | 5/5 | - |
+| csv (stdlib) | 1.6812 | 50.86 | 5/5 | - |
+| DictReader | 2.1566 | 39.65 | 5/5 | - |
+| numpy | 3.2795 | 26.07 | 5/5 | - |
 
 ---
 
@@ -93,15 +93,15 @@ Task: Parse the entire CSV file using PHP parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs | Valid |
 |--------|----------|--------------|------|-------|
-| **cisv (parse)** | 0.3648 | 234.38 | 5/5 | ✓ |
-| **cisv (count)** | 0.0097 | 8814.43 | 5/5 | ✓ |
-| fgetcsv | 4.9785 | 17.17 | 5/5 | - |
-| str_getcsv | 4.7915 | 17.84 | 5/5 | - |
-| SplFileObject | 5.2421 | 16.31 | 5/5 | - |
-| league/csv | 12.9931 | 6.58 | 5/5 | - |
-| explode | 0.4064 | 210.38 | 5/5 | - |
-| preg_split | 0.5509 | 155.20 | 5/5 | - |
-| array_map | 4.7857 | 17.87 | 5/5 | - |
+| **cisv (parse)** | 0.3784 | 225.95 | 5/5 | ✓ |
+| **cisv (count)** | 0.0099 | 8636.36 | 5/5 | ✓ |
+| fgetcsv | 4.9127 | 17.40 | 5/5 | - |
+| str_getcsv | 4.7623 | 17.95 | 5/5 | - |
+| SplFileObject | 5.3542 | 15.97 | 5/5 | - |
+| league/csv | 12.6930 | 6.74 | 5/5 | - |
+| explode | 0.4031 | 212.11 | 5/5 | - |
+| preg_split | 0.5474 | 156.19 | 5/5 | - |
+| array_map | 4.7965 | 17.83 | 5/5 | - |
 
 > **Note:** cisv (count) shows native C performance without PHP array creation overhead.
 > cisv (parse) includes the cost of converting C data to PHP arrays.
