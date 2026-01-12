@@ -265,20 +265,23 @@ cisv_transform_result_t cisv_transform_apply(
         if (t->fn) {
             cisv_transform_result_t new_result = t->fn(result.data, result.len, t->ctx);
 
+            // Track intermediate allocation for cleanup
+            // Only free if: we allocated it (needs_free), it's not the original input,
+            // and the transform returned a different pointer (not in-place modification)
             if (result.needs_free && result.data != data && result.data != new_result.data) {
-                prev_allocated = result.data;
+                // Free previous intermediate result before updating
+                // (safe because new_result already holds the new data)
+                free(result.data);
             }
 
             result = new_result;
-
-            if (prev_allocated) {
-                free(prev_allocated);
-                prev_allocated = NULL;
-            }
         } else if (t->js_callback) {
             continue;
         }
     }
+
+    // Clean up prev_allocated tracking (simplified - now freed inline)
+    (void)prev_allocated;
 
     return result;
 }

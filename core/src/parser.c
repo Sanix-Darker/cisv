@@ -65,6 +65,12 @@ typedef struct cisv_parser {
     uint8_t *quote_buffer __attribute__((aligned(64)));
     size_t quote_buffer_size;
     size_t quote_buffer_pos;
+
+    // Buffer for streaming mode - holds partial unquoted fields across chunks
+    uint8_t *stream_buffer;
+    size_t stream_buffer_size;
+    size_t stream_buffer_pos;
+    bool streaming_mode;
 } cisv_parser;
 
 // Ultra-fast whitespace table with bit manipulation
@@ -84,10 +90,20 @@ void cisv_config_init(cisv_config *config) {
     config->from_line = 1;
 }
 
+// Maximum quote buffer size to prevent DoS (100MB)
+#define MAX_QUOTE_BUFFER_SIZE (100 * 1024 * 1024)
+
 // Ensure quote buffer has enough space
 static inline bool ensure_quote_buffer(cisv_parser *p, size_t needed) {
     if (p->quote_buffer_pos + needed > p->quote_buffer_size) {
-        size_t new_size = (p->quote_buffer_size + needed) * 2;
+        // Check for addition overflow
+        if (needed > SIZE_MAX - p->quote_buffer_size) return false;
+        size_t sum = p->quote_buffer_size + needed;
+        // Check for multiplication overflow
+        if (sum > SIZE_MAX / 2) return false;
+        size_t new_size = sum * 2;
+        // Enforce maximum buffer size to prevent DoS
+        if (new_size > MAX_QUOTE_BUFFER_SIZE) return false;
         void *tmp = realloc(p->quote_buffer, new_size);
         if (!tmp) return false;
         p->quote_buffer = tmp;
@@ -104,9 +120,49 @@ static inline bool append_to_quote_buffer(cisv_parser *p, const uint8_t *data, s
     return true;
 }
 
+// Ensure stream buffer has enough space (for streaming mode partial fields)
+static inline bool ensure_stream_buffer(cisv_parser *p, size_t needed) {
+    if (p->stream_buffer_pos + needed > p->stream_buffer_size) {
+        // Check for overflow
+        if (needed > SIZE_MAX - p->stream_buffer_size) return false;
+        size_t sum = p->stream_buffer_size + needed;
+        if (sum > SIZE_MAX / 2) return false;
+        size_t new_size = sum * 2;
+        if (new_size > MAX_QUOTE_BUFFER_SIZE) return false;
+        void *tmp = realloc(p->stream_buffer, new_size);
+        if (!tmp) return false;
+        p->stream_buffer = tmp;
+        p->stream_buffer_size = new_size;
+    }
+    return true;
+}
+
+// Append to stream buffer
+static inline bool append_to_stream_buffer(cisv_parser *p, const uint8_t *data, size_t len) {
+    if (!ensure_stream_buffer(p, len)) return false;
+    memcpy(p->stream_buffer + p->stream_buffer_pos, data, len);
+    p->stream_buffer_pos += len;
+    return true;
+}
+
 // Inline hot-path functions
 static inline void yield_field(cisv_parser *p, const uint8_t *start, const uint8_t *end) {
     if (!p->fcb) return;
+
+    // In streaming mode, check if we have buffered partial field data
+    if (p->streaming_mode && p->stream_buffer_pos > 0) {
+        // Append current field data to stream buffer and yield from there
+        size_t current_len = end - start;
+        if (current_len > 0) {
+            if (!append_to_stream_buffer(p, start, current_len)) {
+                // Buffer overflow - yield what we have
+                p->stream_buffer_pos = 0;
+                return;
+            }
+        }
+        start = p->stream_buffer;
+        end = p->stream_buffer + p->stream_buffer_pos;
+    }
 
     if (p->trim) {
         while (start < end && is_ws(*start)) start++;
@@ -117,6 +173,11 @@ static inline void yield_field(cisv_parser *p, const uint8_t *start, const uint8
         p->fcb(p->user, (const char*)start, end - start);
         p->fields++;
         p->current_row_fields++;
+    }
+
+    // Clear stream buffer after yielding
+    if (p->streaming_mode) {
+        p->stream_buffer_pos = 0;
     }
 }
 
@@ -649,9 +710,25 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     p->line_num = 0;
     p->current_row_fields = 0;
 
+    // Allocate quote buffer with NULL check
     p->quote_buffer_size = 4096;
     p->quote_buffer = malloc(p->quote_buffer_size);
+    if (!p->quote_buffer) {
+        free(p);
+        return NULL;
+    }
     p->quote_buffer_pos = 0;
+
+    // Allocate stream buffer for streaming mode
+    p->stream_buffer_size = 4096;
+    p->stream_buffer = malloc(p->stream_buffer_size);
+    if (!p->stream_buffer) {
+        free(p->quote_buffer);
+        free(p);
+        return NULL;
+    }
+    p->stream_buffer_pos = 0;
+    p->streaming_mode = false;
 
     return p;
 }
@@ -671,6 +748,7 @@ void cisv_parser_destroy(cisv_parser *p) {
     if (p->base) munmap(p->base, p->size);
     if (p->fd >= 0) close(p->fd);
     if (p->quote_buffer) free(p->quote_buffer);
+    if (p->stream_buffer) free(p->stream_buffer);
     free(p);
 }
 
@@ -793,7 +871,9 @@ size_t cisv_parser_count_rows(const char *path) {
 #else
     size_t i = 0;
     for (; i + 8 <= (size_t)st.st_size; i += 8) {
-        uint64_t word = *(uint64_t*)(base + i);
+        // Use memcpy for safe unaligned access (optimized by compiler)
+        uint64_t word;
+        memcpy(&word, base + i, sizeof(word));
         for (int j = 0; j < 8; j++) {
             count += ((word >> (j*8)) & 0xFF) == '\n';
         }
@@ -819,14 +899,12 @@ size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *c
 }
 
 int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
+    // Enable streaming mode - fields may span chunks
+    p->streaming_mode = true;
+
     p->cur = chunk;
     p->end = chunk + len;
-
-    if (p->state == S_NORMAL && p->current_row_fields == 0) {
-        p->field_start = p->cur;
-    } else {
-        p->field_start = p->cur;
-    }
+    p->field_start = p->cur;
 
 #ifdef __AVX512F__
     parse_avx512(p);
@@ -835,6 +913,16 @@ int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
 #else
     parse_scalar(p);
 #endif
+
+    // After parsing, buffer any partial unquoted field for next chunk
+    // (quoted fields are already handled by quote_buffer)
+    if (p->state == S_NORMAL && p->field_start && p->field_start < p->cur) {
+        // We have a partial field - buffer it for the next write() call
+        size_t partial_len = p->cur - p->field_start;
+        if (partial_len > 0) {
+            append_to_stream_buffer(p, p->field_start, partial_len);
+        }
+    }
 
     return 0;
 }

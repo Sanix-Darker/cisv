@@ -24,8 +24,8 @@
 typedef struct {
     cisv_parser *parser;
     cisv_config config;
-    zval *rows;
-    zval *current_row;
+    zval rows;        /* Embedded zval - safer memory management */
+    zval current_row; /* Embedded zval - safer memory management */
     zend_object std;
 } cisv_parser_object;
 
@@ -44,7 +44,7 @@ static void php_cisv_field_callback(void *user, const char *data, size_t len) {
     cisv_parser_object *obj = (cisv_parser_object *)user;
     zval field;
     ZVAL_STRINGL(&field, data, len);
-    add_next_index_zval(obj->current_row, &field);
+    add_next_index_zval(&obj->current_row, &field);
 }
 
 static void php_cisv_row_callback(void *user) {
@@ -52,12 +52,15 @@ static void php_cisv_row_callback(void *user) {
 
     /* Add current row to rows array */
     zval row_copy;
-    ZVAL_COPY(&row_copy, obj->current_row);
-    add_next_index_zval(obj->rows, &row_copy);
+    ZVAL_COPY(&row_copy, &obj->current_row);
+    add_next_index_zval(&obj->rows, &row_copy);
 
-    /* Clear current row for next */
-    zval_ptr_dtor(obj->current_row);
-    array_init(obj->current_row);
+    /* Clear current row for next - properly reinitialize the zval */
+    /* First destroy the old array data */
+    zval_ptr_dtor(&obj->current_row);
+    /* Then reinitialize the zval structure before calling array_init */
+    ZVAL_UNDEF(&obj->current_row);
+    array_init(&obj->current_row);
 }
 
 /* Create object */
@@ -71,12 +74,9 @@ static zend_object *cisv_parser_create_object(zend_class_entry *ce) {
     /* Initialize config */
     cisv_config_init(&intern->config);
 
-    /* Allocate arrays */
-    intern->rows = emalloc(sizeof(zval));
-    array_init(intern->rows);
-
-    intern->current_row = emalloc(sizeof(zval));
-    array_init(intern->current_row);
+    /* Initialize embedded zvals - no separate allocation needed */
+    array_init(&intern->rows);
+    array_init(&intern->current_row);
 
     return &intern->std;
 }
@@ -90,15 +90,9 @@ static void cisv_parser_free_object(zend_object *obj) {
         intern->parser = NULL;
     }
 
-    if (intern->rows) {
-        zval_ptr_dtor(intern->rows);
-        efree(intern->rows);
-    }
-
-    if (intern->current_row) {
-        zval_ptr_dtor(intern->current_row);
-        efree(intern->current_row);
-    }
+    /* Destroy embedded zvals - no efree needed since they're embedded */
+    zval_ptr_dtor(&intern->rows);
+    zval_ptr_dtor(&intern->current_row);
 
     zend_object_std_dtor(&intern->std);
 }
@@ -163,11 +157,13 @@ PHP_METHOD(CisvParser, parseFile) {
 
     cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
 
-    /* Clear previous data */
-    zval_ptr_dtor(intern->rows);
-    array_init(intern->rows);
-    zval_ptr_dtor(intern->current_row);
-    array_init(intern->current_row);
+    /* Clear previous data - properly reinitialize embedded zvals */
+    zval_ptr_dtor(&intern->rows);
+    ZVAL_UNDEF(&intern->rows);
+    array_init(&intern->rows);
+    zval_ptr_dtor(&intern->current_row);
+    ZVAL_UNDEF(&intern->current_row);
+    array_init(&intern->current_row);
 
     /* Parse file */
     int result = cisv_parser_parse_file(intern->parser, filename);
@@ -177,7 +173,7 @@ PHP_METHOD(CisvParser, parseFile) {
     }
 
     /* Return rows */
-    RETURN_ZVAL(intern->rows, 1, 0);
+    RETURN_ZVAL(&intern->rows, 1, 0);
 }
 
 /* PHP_METHOD(CisvParser, parseString) */
@@ -191,18 +187,20 @@ PHP_METHOD(CisvParser, parseString) {
 
     cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
 
-    /* Clear previous data */
-    zval_ptr_dtor(intern->rows);
-    array_init(intern->rows);
-    zval_ptr_dtor(intern->current_row);
-    array_init(intern->current_row);
+    /* Clear previous data - properly reinitialize embedded zvals */
+    zval_ptr_dtor(&intern->rows);
+    ZVAL_UNDEF(&intern->rows);
+    array_init(&intern->rows);
+    zval_ptr_dtor(&intern->current_row);
+    ZVAL_UNDEF(&intern->current_row);
+    array_init(&intern->current_row);
 
     /* Parse string */
     cisv_parser_write(intern->parser, (const uint8_t *)csv, csv_len);
     cisv_parser_end(intern->parser);
 
     /* Return rows */
-    RETURN_ZVAL(intern->rows, 1, 0);
+    RETURN_ZVAL(&intern->rows, 1, 0);
 }
 
 /* PHP_METHOD(CisvParser, countRows) */
