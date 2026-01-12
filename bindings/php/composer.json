@@ -1,0 +1,57 @@
+{
+    "name": "sanix-darker/cisv",
+    "description": "High-performance CSV parser with SIMD optimizations for PHP",
+    "type": "php-ext",
+    "license": "MIT",
+    "keywords": [
+        "csv",
+        "parser",
+        "simd",
+        "avx",
+        "high-performance",
+        "fast"
+    ],
+    "authors": [
+        {
+            "name": "Sanix Darker",
+            "email": "s4nixd@gmail.com"
+        }
+    ],
+    "homepage": "https://github.com/Sanix-Darker/cisv",
+    "support": {
+        "issues": "https://github.com/Sanix-Darker/cisv/issues",
+        "source": "https://github.com/Sanix-Darker/cisv"
+    },
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.0 || ^10.0 || ^11.0"
+    },
+    "provide": {
+        "ext-cisv": "0.0.8"
+    },
+    "autoload": {
+        "files": ["stubs/cisv.php"]
+    },
+    "scripts": {
+        "build-core": [
+            "cd ../../core && make"
+        ],
+        "build-ext": [
+            "@build-core",
+            "phpize",
+            "./configure --enable-cisv",
+            "make clean",
+            "make"
+        ],
+        "install-ext": [
+            "@build-ext",
+            "sudo make install"
+        ],
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
