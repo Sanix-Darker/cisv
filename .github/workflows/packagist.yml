@@ -15,8 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Update Packagist
+        env:
+          # SECURITY: Use environment variables to prevent credential exposure in logs
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
         run: |
-          curl -XPOST \
+          # Use API-TOKEN header instead of query string to protect credentials
+          curl -sSf -XPOST \
             -H 'Content-Type: application/json' \
-            -d '{"repository":{"url":"https://packagist.org/packages/sanix-darker/cisv"}}' \
-            "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}"
+            -H "API-TOKEN: ${PACKAGIST_TOKEN}" \
+            -d "{\"repository\":{\"url\":\"https://packagist.org/packages/${PACKAGIST_USERNAME}/cisv\"}}" \
+            "https://packagist.org/api/update-package"

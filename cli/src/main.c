@@ -6,9 +6,79 @@
 #include <sys/time.h>
 #include <getopt.h>
 #include <time.h>
+#include <limits.h>
 
 #include "cisv/parser.h"
 #include "cisv/writer.h"
+
+/**
+ * SECURITY: Safe integer parsing with overflow protection.
+ * Returns 0 on success, -1 on error (overflow, invalid input, negative when not allowed).
+ */
+static int safe_parse_int(const char *str, int *result, int allow_negative) {
+    if (!str || !result || *str == '\0') {
+        return -1;
+    }
+
+    char *endptr;
+    errno = 0;
+    long val = strtol(str, &endptr, 10);
+
+    // Check for conversion errors
+    if (errno == ERANGE || val > INT_MAX || val < INT_MIN) {
+        fprintf(stderr, "Error: Integer overflow in argument '%s'\n", str);
+        return -1;
+    }
+
+    // Check for invalid characters
+    if (*endptr != '\0') {
+        fprintf(stderr, "Error: Invalid integer '%s'\n", str);
+        return -1;
+    }
+
+    // Check for negative when not allowed
+    if (!allow_negative && val < 0) {
+        fprintf(stderr, "Error: Negative value not allowed '%s'\n", str);
+        return -1;
+    }
+
+    *result = (int)val;
+    return 0;
+}
+
+/**
+ * SECURITY: Safe long parsing with overflow protection.
+ */
+static int safe_parse_long(const char *str, long *result, int allow_negative) {
+    if (!str || !result || *str == '\0') {
+        return -1;
+    }
+
+    char *endptr;
+    errno = 0;
+    long val = strtol(str, &endptr, 10);
+
+    // Check for conversion errors
+    if (errno == ERANGE) {
+        fprintf(stderr, "Error: Integer overflow in argument '%s'\n", str);
+        return -1;
+    }
+
+    // Check for invalid characters
+    if (*endptr != '\0') {
+        fprintf(stderr, "Error: Invalid integer '%s'\n", str);
+        return -1;
+    }
+
+    // Check for negative when not allowed
+    if (!allow_negative && val < 0) {
+        fprintf(stderr, "Error: Negative value not allowed '%s'\n", str);
+        return -1;
+    }
+
+    *result = val;
+    return 0;
+}
 
 typedef struct {
     size_t row_count;
@@ -302,10 +372,23 @@ static int cisv_writer_main(int argc, char *argv[]) {
     int opt;
     while ((opt = getopt_long(argc, argv, "g:t:j:o:d:q:Qrn:c:bh", long_options, NULL)) != -1) {
         switch (opt) {
-            case 'g':
+            case 'g': {
                 mode = MODE_GENERATE;
-                generate_rows = strtoull(optarg, NULL, 10);
+                char *endptr;
+                errno = 0;
+                unsigned long long val = strtoull(optarg, &endptr, 10);
+                if (errno == ERANGE || *endptr != '\0' || val == 0) {
+                    fprintf(stderr, "Error: Invalid row count '%s'\n", optarg);
+                    return 1;
+                }
+                // Reasonable limit to prevent accidental resource exhaustion
+                if (val > 1000000000ULL) {
+                    fprintf(stderr, "Error: Row count too large (max 1 billion)\n");
+                    return 1;
+                }
+                generate_rows = (size_t)val;
                 break;
+            }
             case 't':
                 mode = MODE_TRANSFORM;
                 break;
@@ -474,14 +557,42 @@ int main(int argc, char *argv[]) {
                 return 0;
 
             case 'd':
+                // SECURITY: Validate delimiter
+                if (optarg[0] == '\n' || optarg[0] == '\r') {
+                    fprintf(stderr, "Error: Delimiter cannot be a newline character\n");
+                    free(ctx.current_row);
+                    return 1;
+                }
+                if (optarg[0] == '\0') {
+                    fprintf(stderr, "Error: Delimiter cannot be empty\n");
+                    free(ctx.current_row);
+                    return 1;
+                }
                 config.delimiter = optarg[0];
                 break;
 
             case 'q':
+                // SECURITY: Validate quote character
+                if (optarg[0] == '\n' || optarg[0] == '\r') {
+                    fprintf(stderr, "Error: Quote character cannot be a newline character\n");
+                    free(ctx.current_row);
+                    return 1;
+                }
+                if (optarg[0] == '\0') {
+                    fprintf(stderr, "Error: Quote character cannot be empty\n");
+                    free(ctx.current_row);
+                    return 1;
+                }
                 config.quote = optarg[0];
                 break;
 
             case 'e':
+                // SECURITY: Validate escape character
+                if (optarg[0] == '\n' || optarg[0] == '\r') {
+                    fprintf(stderr, "Error: Escape character cannot be a newline character\n");
+                    free(ctx.current_row);
+                    return 1;
+                }
                 config.escape = optarg[0];
                 break;
 
@@ -505,17 +616,35 @@ int main(int argc, char *argv[]) {
                 config.skip_lines_with_error = true;
                 break;
 
-            case 3:
-                config.max_row_size = atol(optarg);
+            case 3: {
+                long max_row;
+                if (safe_parse_long(optarg, &max_row, 0) != 0) {
+                    free(ctx.current_row);
+                    return 1;
+                }
+                config.max_row_size = (size_t)max_row;
                 break;
+            }
 
-            case 4:
-                config.from_line = atoi(optarg);
+            case 4: {
+                int from_line;
+                if (safe_parse_int(optarg, &from_line, 0) != 0) {
+                    free(ctx.current_row);
+                    return 1;
+                }
+                config.from_line = from_line;
                 break;
+            }
 
-            case 5:
-                config.to_line = atoi(optarg);
+            case 5: {
+                int to_line;
+                if (safe_parse_int(optarg, &to_line, 0) != 0) {
+                    free(ctx.current_row);
+                    return 1;
+                }
+                config.to_line = to_line;
                 break;
+            }
 
             case 's': {
                 char *cols_copy = strdup(optarg);
@@ -541,7 +670,15 @@ int main(int argc, char *argv[]) {
                 char *tok = strtok(cols_copy, ",");
                 int i = 0;
                 while (tok && i < count) {
-                    ctx.select_cols[i++] = atoi(tok);
+                    int col_idx;
+                    if (safe_parse_int(tok, &col_idx, 0) != 0) {
+                        fprintf(stderr, "Error: Invalid column index '%s'\n", tok);
+                        free(cols_copy);
+                        free(ctx.select_cols);
+                        free(ctx.current_row);
+                        return 1;
+                    }
+                    ctx.select_cols[i++] = col_idx;
                     tok = strtok(NULL, ",");
                 }
                 ctx.select_count = i;
@@ -562,12 +699,40 @@ int main(int argc, char *argv[]) {
                 benchmark = 1;
                 break;
 
-            case 6:
-                ctx.head = atoi(optarg);
+            case 6: {
+                int head_val;
+                if (safe_parse_int(optarg, &head_val, 0) != 0) {
+                    free(ctx.current_row);
+                    free(ctx.select_cols);
+                    return 1;
+                }
+                // SECURITY: Limit head value to prevent excessive memory allocation
+                if (head_val > 10000000) {
+                    fprintf(stderr, "Error: --head value too large (max 10000000)\n");
+                    free(ctx.current_row);
+                    free(ctx.select_cols);
+                    return 1;
+                }
+                ctx.head = head_val;
                 break;
+            }
 
-            case 7:
-                ctx.tail = atoi(optarg);
+            case 7: {
+                int tail_val;
+                if (safe_parse_int(optarg, &tail_val, 0) != 0) {
+                    free(ctx.current_row);
+                    free(ctx.select_cols);
+                    return 1;
+                }
+                // SECURITY: Limit tail value to prevent excessive memory allocation
+                // tail buffer allocates tail * sizeof(char**) bytes
+                if (tail_val > 10000000) {
+                    fprintf(stderr, "Error: --tail value too large (max 10000000)\n");
+                    free(ctx.current_row);
+                    free(ctx.select_cols);
+                    return 1;
+                }
+                ctx.tail = tail_val;
                 ctx.tail_buffer = calloc(ctx.tail, sizeof(char **));
                 ctx.tail_field_counts = calloc(ctx.tail, sizeof(size_t));
                 if (!ctx.tail_buffer || !ctx.tail_field_counts) {
@@ -577,6 +742,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 break;
+            }
 
             default:
                 fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
@@ -584,6 +750,26 @@ int main(int argc, char *argv[]) {
                 free(ctx.select_cols);
                 return 1;
         }
+    }
+
+    // SECURITY: Validate configuration for conflicts after all options are parsed
+    if (config.delimiter == config.quote) {
+        fprintf(stderr, "Error: Delimiter and quote character cannot be the same ('%c')\n",
+                config.delimiter);
+        free(ctx.current_row);
+        free(ctx.select_cols);
+        free(ctx.tail_buffer);
+        free(ctx.tail_field_counts);
+        return 1;
+    }
+    if (config.escape != '\0' && config.escape == config.delimiter) {
+        fprintf(stderr, "Error: Escape and delimiter cannot be the same ('%c')\n",
+                config.escape);
+        free(ctx.current_row);
+        free(ctx.select_cols);
+        free(ctx.tail_buffer);
+        free(ctx.tail_field_counts);
+        return 1;
     }
 
     if (optind < argc) {

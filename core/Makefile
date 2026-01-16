@@ -1,11 +1,21 @@
 # CISV Core Library Makefile
 CC ?= gcc
 AR ?= ar
+
+# SECURITY: Binary hardening flags
+# -fstack-protector-strong: Protect against stack buffer overflows
+# -D_FORTIFY_SOURCE=2: Detect buffer overflows in string/memory functions
+# -Wl,-z,relro,-z,now: Full RELRO - make GOT read-only after relocation
+# -fstack-check: Check for stack overflow at runtime
+SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fstack-check
+SECURITY_LDFLAGS = -Wl,-z,relro,-z,now
+
 CFLAGS ?= -O3 -march=native -mavx2 -mtune=native -pipe -fomit-frame-pointer \
-          -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops -fPIC
+          -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops -fPIC \
+          $(SECURITY_CFLAGS)
 CFLAGS_DEBUG = -Wall -Wextra -g -O0 -fsanitize=address -fsanitize=undefined \
                -fno-omit-frame-pointer -fPIC
-LDFLAGS ?= -flto
+LDFLAGS ?= -flto $(SECURITY_LDFLAGS)
 
 # Directories
 SRC_DIR = src

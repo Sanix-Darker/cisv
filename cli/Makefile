@@ -1,8 +1,19 @@
 # CISV CLI Makefile
 CC ?= gcc
+
+# SECURITY: Binary hardening flags for executables
+# -fstack-protector-strong: Protect against stack buffer overflows
+# -D_FORTIFY_SOURCE=2: Detect buffer overflows in string/memory functions
+# -fPIE / -pie: Position Independent Executable for ASLR
+# -Wl,-z,relro,-z,now: Full RELRO - make GOT read-only after relocation
+# -fstack-check: Check for stack overflow at runtime
+SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fstack-check -fPIE
+SECURITY_LDFLAGS = -Wl,-z,relro,-z,now -pie
+
 CFLAGS ?= -O3 -march=native -mavx2 -mtune=native -pipe -fomit-frame-pointer \
-          -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops
-LDFLAGS ?= -flto -s
+          -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops \
+          $(SECURITY_CFLAGS)
+LDFLAGS ?= -flto -s $(SECURITY_LDFLAGS)
 
 # Directories
 SRC_DIR = src
