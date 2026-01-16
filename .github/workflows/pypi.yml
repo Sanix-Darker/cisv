@@ -19,19 +19,16 @@ env:
   VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0.dev0' }}
 
 jobs:
-  build-linux-wheels:
-    name: Build Linux wheels
+  build-linux-wheel:
+    name: Build Linux wheel (x86_64)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.11'
 
       - name: Install build dependencies
         run: |
@@ -49,6 +46,7 @@ jobs:
           VERSION="${{ env.VERSION }}"
           VERSION="${VERSION#v}"
           echo "Using version: $VERSION"
+          echo "PKG_VERSION=$VERSION" >> $GITHUB_ENV
 
           # Update version in pyproject.toml
           sed -i "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
@@ -66,43 +64,37 @@ jobs:
           cp core/build/libcisv.so bindings/python/cisv/libs/
           cp LICENSE bindings/python/
 
-      - name: Build wheel with platform tag
+      - name: Build universal wheel
         run: |
           cd bindings/python
-          # Build the wheel
           python -m build --wheel
 
-          # Get Python version tag (e.g., cp311)
-          PY_TAG="cp$(echo ${{ matrix.python-version }} | tr -d '.')"
-
-          # Rename wheel to platform-specific
+          # Rename to universal py3 wheel with platform tag
           cd dist
           for whl in *.whl; do
-            # Extract base name without the platform tag
-            NEW_NAME=$(echo "$whl" | sed "s/py3-none-any/${PY_TAG}-${PY_TAG}-manylinux_2_17_x86_64/")
+            # cisv-0.1.0-py3-none-any.whl -> cisv-0.1.0-py3-none-manylinux_2_17_x86_64.whl
+            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-manylinux_2_17_x86_64.whl/")
             mv "$whl" "$NEW_NAME"
+            echo "Renamed to: $NEW_NAME"
           done
           ls -la
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-linux-${{ matrix.python-version }}
+          name: wheel-linux-x86_64
           path: bindings/python/dist/*.whl
 
-  build-macos-wheels:
-    name: Build macOS wheels
+  build-macos-arm64-wheel:
+    name: Build macOS wheel (ARM64)
     runs-on: macos-latest
-    strategy:
-      matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.11'
 
       - name: Install build dependencies
         run: |
@@ -120,6 +112,7 @@ jobs:
           VERSION="${{ env.VERSION }}"
           VERSION="${VERSION#v}"
           echo "Using version: $VERSION"
+          echo "PKG_VERSION=$VERSION" >> $GITHUB_ENV
 
           # Update version in pyproject.toml (macOS sed syntax)
           sed -i '' "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
@@ -137,35 +130,25 @@ jobs:
           cp core/build/libcisv.dylib bindings/python/cisv/libs/
           cp LICENSE bindings/python/
 
-      - name: Build wheel with platform tag
+      - name: Build universal wheel
         run: |
           cd bindings/python
-          # Build the wheel
           python -m build --wheel
 
-          # Get Python version tag (e.g., cp311)
-          PY_TAG="cp$(echo ${{ matrix.python-version }} | tr -d '.')"
-
-          # Determine macOS platform tag
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "arm64" ]; then
-            PLAT_TAG="macosx_11_0_arm64"
-          else
-            PLAT_TAG="macosx_10_9_x86_64"
-          fi
-
-          # Rename wheel to platform-specific
+          # Rename to universal py3 wheel with platform tag
           cd dist
           for whl in *.whl; do
-            NEW_NAME=$(echo "$whl" | sed "s/py3-none-any/${PY_TAG}-${PY_TAG}-${PLAT_TAG}/")
+            # cisv-0.1.0-py3-none-any.whl -> cisv-0.1.0-py3-none-macosx_11_0_arm64.whl
+            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-macosx_11_0_arm64.whl/")
             mv "$whl" "$NEW_NAME"
+            echo "Renamed to: $NEW_NAME"
           done
           ls -la
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-macos-${{ matrix.python-version }}
+          name: wheel-macos-arm64
           path: bindings/python/dist/*.whl
 
   build-sdist:
@@ -211,13 +194,13 @@ jobs:
 
   test-wheels:
     name: Test wheels
-    needs: [build-linux-wheels, build-macos-wheels]
+    needs: [build-linux-wheel, build-macos-arm64-wheel]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ['3.9', '3.11', '3.12']
+        python-version: ['3.9', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
@@ -229,7 +212,7 @@ jobs:
       - name: Download wheel
         uses: actions/download-artifact@v4
         with:
-          name: wheel-${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}-${{ matrix.python-version }}
+          name: wheel-${{ matrix.os == 'ubuntu-latest' && 'linux-x86_64' || 'macos-arm64' }}
           path: dist/
 
       - name: Install wheel
@@ -249,7 +232,7 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: [build-linux-wheels, build-macos-wheels, build-sdist, test-wheels]
+    needs: [build-linux-wheel, build-macos-arm64-wheel, build-sdist, test-wheels]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
@@ -272,7 +255,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: [build-linux-wheels, build-macos-wheels, build-sdist, test-wheels]
+    needs: [build-linux-wheel, build-macos-arm64-wheel, build-sdist, test-wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
