@@ -10,28 +10,55 @@ from typing import List, Optional, Callable, Any
 # Find the shared library
 def _find_library():
     """Find the cisv shared library."""
-    base_dir = Path(__file__).parent.parent.parent.parent
+    pkg_dir = Path(__file__).parent
 
-    # Possible library locations
-    locations = [
-        base_dir / 'core' / 'build' / 'libcisv.so',
-        base_dir / 'core' / 'build' / 'libcisv.dylib',
-        '/usr/local/lib/libcisv.so',
-        '/usr/lib/libcisv.so',
+    # First, check for bundled library in package (installed via pip)
+    bundled_locations = [
+        pkg_dir / 'libs' / 'libcisv.so',
+        pkg_dir / 'libs' / 'libcisv.dylib',
+        pkg_dir / 'libcisv.so',
+        pkg_dir / 'libcisv.dylib',
     ]
 
-    for loc in locations:
+    for loc in bundled_locations:
         if loc.exists():
             return str(loc)
 
-    # Try system library path
+    # Fallback to development locations (when running from source)
+    base_dir = pkg_dir.parent.parent.parent
+
+    dev_locations = [
+        base_dir / 'core' / 'build' / 'libcisv.so',
+        base_dir / 'core' / 'build' / 'libcisv.dylib',
+    ]
+
+    for loc in dev_locations:
+        if loc.exists():
+            return str(loc)
+
+    # System library paths
+    system_locations = [
+        Path('/usr/local/lib/libcisv.so'),
+        Path('/usr/local/lib/libcisv.dylib'),
+        Path('/usr/lib/libcisv.so'),
+    ]
+
+    for loc in system_locations:
+        if loc.exists():
+            return str(loc)
+
+    # Try system library path via ctypes
     try:
-        return ctypes.util.find_library('cisv')
-    except:
+        lib_path = ctypes.util.find_library('cisv')
+        if lib_path:
+            return lib_path
+    except Exception:
         pass
 
     raise RuntimeError(
-        "Could not find libcisv. Please build the core library first:\n"
+        "Could not find libcisv shared library.\n"
+        "If you installed via pip, this may indicate a packaging issue.\n"
+        "If running from source, build the core library first:\n"
         "  cd core && make"
     )
 
