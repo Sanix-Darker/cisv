@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cisv"
+version = "0.1.0"
+description = "High-performance CSV parser with SIMD optimizations (AVX-512/AVX2)"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Sanix Darker", email = "s4nixd@gmail.com"}
+]
+keywords = ["csv", "parser", "simd", "avx", "performance", "fast", "high-performance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing",
+]
+requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/sanix-darker/cisv"
+Documentation = "https://github.com/sanix-darker/cisv#readme"
+Repository = "https://github.com/sanix-darker/cisv"
+Issues = "https://github.com/sanix-darker/cisv/issues"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-benchmark"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cisv*"]
+
+[tool.setuptools.package-data]
+cisv = ["*.so", "*.dylib", "*.dll", "libs/*.so", "libs/*.dylib", "libs/*.dll"]

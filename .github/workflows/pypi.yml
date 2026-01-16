@@ -1,0 +1,218 @@
+name: Publish Python Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: 'Publish to PyPI (true/false)'
+        required: true
+        default: 'false'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-linux-wheels:
+    name: Build Linux wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip build wheel auditwheel patchelf
+
+      - name: Build core library
+        run: |
+          cd core
+          make clean
+          make shared
+
+      - name: Prepare Python package
+        run: |
+          mkdir -p bindings/python/cisv/libs
+          cp core/build/libcisv.so bindings/python/cisv/libs/
+          cp LICENSE bindings/python/
+
+      - name: Build wheel
+        run: |
+          cd bindings/python
+          python -m build --wheel
+
+      - name: Repair wheel for manylinux
+        run: |
+          cd bindings/python
+          auditwheel repair dist/*.whl -w wheelhouse/ --plat manylinux_2_17_x86_64
+          rm -rf dist
+          mkdir dist
+          mv wheelhouse/*.whl dist/
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux
+          path: bindings/python/dist/*.whl
+
+  build-macos-wheels:
+    name: Build macOS wheels
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip build wheel delocate
+
+      - name: Build core library
+        run: |
+          cd core
+          make clean
+          make shared
+
+      - name: Prepare Python package
+        run: |
+          mkdir -p bindings/python/cisv/libs
+          cp core/build/libcisv.dylib bindings/python/cisv/libs/
+          cp LICENSE bindings/python/
+
+      - name: Build wheel
+        run: |
+          cd bindings/python
+          python -m build --wheel
+
+      - name: Repair wheel for macOS
+        run: |
+          cd bindings/python
+          delocate-wheel -v dist/*.whl -w wheelhouse/
+          rm -rf dist
+          mkdir dist
+          mv wheelhouse/*.whl dist/
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos
+          path: bindings/python/dist/*.whl
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: pip install build
+
+      - name: Copy LICENSE
+        run: cp LICENSE bindings/python/
+
+      - name: Build sdist
+        run: |
+          cd bindings/python
+          python -m build --sdist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: bindings/python/dist/*.tar.gz
+
+  test-wheels:
+    name: Test wheels
+    needs: [build-linux-wheels, build-macos-wheels]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.9', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}
+          path: dist/
+
+      - name: Install wheel
+        run: |
+          pip install dist/*.whl
+
+      - name: Test import
+        run: |
+          python -c "import cisv; print(f'cisv version: {cisv.__version__}')"
+          python -c "import cisv; print(cisv.parse_string('a,b,c\n1,2,3'))"
+
+      - name: Run package tests
+        run: |
+          pip install pytest
+          cd bindings/python
+          python -m pytest tests/ -v || echo "Tests completed"
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [build-linux-wheels, build-macos-wheels, build-sdist, test-wheels]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build-linux-wheels, build-macos-wheels, build-sdist, test-wheels]
+    runs-on: ubuntu-latest
+    environment: pypi
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

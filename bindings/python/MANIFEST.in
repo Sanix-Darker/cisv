@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+recursive-include cisv *.so *.dylib *.dll
+recursive-include cisv/libs *.so *.dylib *.dll
