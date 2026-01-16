@@ -14,27 +14,51 @@ on:
 permissions:
   contents: read
 
+env:
+  # Extract version from tag (v1.2.3 -> 1.2.3) or use dev version
+  VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0.dev0' }}
+
 jobs:
   build-linux-wheels:
     name: Build Linux wheels
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install build dependencies
         run: |
-          python -m pip install --upgrade pip build wheel auditwheel patchelf
+          python -m pip install --upgrade pip build wheel
 
       - name: Build core library
         run: |
           cd core
           make clean
           make shared
+
+      - name: Set package version from tag
+        run: |
+          # Extract version from tag (remove 'v' prefix if present)
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "Using version: $VERSION"
+
+          # Update version in pyproject.toml
+          sed -i "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
+
+          # Update version in __init__.py
+          sed -i "s/__version__ = .*/__version__ = '$VERSION'/" bindings/python/cisv/__init__.py
+
+          # Verify changes
+          grep "version" bindings/python/pyproject.toml
+          grep "__version__" bindings/python/cisv/__init__.py
 
       - name: Prepare Python package
         run: |
@@ -42,39 +66,47 @@ jobs:
           cp core/build/libcisv.so bindings/python/cisv/libs/
           cp LICENSE bindings/python/
 
-      - name: Build wheel
+      - name: Build wheel with platform tag
         run: |
           cd bindings/python
+          # Build the wheel
           python -m build --wheel
 
-      - name: Repair wheel for manylinux
-        run: |
-          cd bindings/python
-          auditwheel repair dist/*.whl -w wheelhouse/ --plat manylinux_2_17_x86_64
-          rm -rf dist
-          mkdir dist
-          mv wheelhouse/*.whl dist/
+          # Get Python version tag (e.g., cp311)
+          PY_TAG="cp$(echo ${{ matrix.python-version }} | tr -d '.')"
+
+          # Rename wheel to platform-specific
+          cd dist
+          for whl in *.whl; do
+            # Extract base name without the platform tag
+            NEW_NAME=$(echo "$whl" | sed "s/py3-none-any/${PY_TAG}-${PY_TAG}-manylinux_2_17_x86_64/")
+            mv "$whl" "$NEW_NAME"
+          done
+          ls -la
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-linux
+          name: wheel-linux-${{ matrix.python-version }}
           path: bindings/python/dist/*.whl
 
   build-macos-wheels:
     name: Build macOS wheels
     runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install build dependencies
         run: |
-          python -m pip install --upgrade pip build wheel delocate
+          python -m pip install --upgrade pip build wheel
 
       - name: Build core library
         run: |
@@ -82,29 +114,58 @@ jobs:
           make clean
           make shared
 
+      - name: Set package version from tag
+        run: |
+          # Extract version from tag (remove 'v' prefix if present)
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "Using version: $VERSION"
+
+          # Update version in pyproject.toml (macOS sed syntax)
+          sed -i '' "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
+
+          # Update version in __init__.py
+          sed -i '' "s/__version__ = .*/__version__ = '$VERSION'/" bindings/python/cisv/__init__.py
+
+          # Verify changes
+          grep "version" bindings/python/pyproject.toml
+          grep "__version__" bindings/python/cisv/__init__.py
+
       - name: Prepare Python package
         run: |
           mkdir -p bindings/python/cisv/libs
           cp core/build/libcisv.dylib bindings/python/cisv/libs/
           cp LICENSE bindings/python/
 
-      - name: Build wheel
+      - name: Build wheel with platform tag
         run: |
           cd bindings/python
+          # Build the wheel
           python -m build --wheel
 
-      - name: Repair wheel for macOS
-        run: |
-          cd bindings/python
-          delocate-wheel -v dist/*.whl -w wheelhouse/
-          rm -rf dist
-          mkdir dist
-          mv wheelhouse/*.whl dist/
+          # Get Python version tag (e.g., cp311)
+          PY_TAG="cp$(echo ${{ matrix.python-version }} | tr -d '.')"
+
+          # Determine macOS platform tag
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            PLAT_TAG="macosx_11_0_arm64"
+          else
+            PLAT_TAG="macosx_10_9_x86_64"
+          fi
+
+          # Rename wheel to platform-specific
+          cd dist
+          for whl in *.whl; do
+            NEW_NAME=$(echo "$whl" | sed "s/py3-none-any/${PY_TAG}-${PY_TAG}-${PLAT_TAG}/")
+            mv "$whl" "$NEW_NAME"
+          done
+          ls -la
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-macos
+          name: wheel-macos-${{ matrix.python-version }}
           path: bindings/python/dist/*.whl
 
   build-sdist:
@@ -120,6 +181,19 @@ jobs:
 
       - name: Install build dependencies
         run: pip install build
+
+      - name: Set package version from tag
+        run: |
+          # Extract version from tag (remove 'v' prefix if present)
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION#v}"
+          echo "Using version: $VERSION"
+
+          # Update version in pyproject.toml
+          sed -i "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
+
+          # Update version in __init__.py
+          sed -i "s/__version__ = .*/__version__ = '$VERSION'/" bindings/python/cisv/__init__.py
 
       - name: Copy LICENSE
         run: cp LICENSE bindings/python/
@@ -140,6 +214,7 @@ jobs:
     needs: [build-linux-wheels, build-macos-wheels]
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ['3.9', '3.11', '3.12']
@@ -154,7 +229,7 @@ jobs:
       - name: Download wheel
         uses: actions/download-artifact@v4
         with:
-          name: wheel-${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}
+          name: wheel-${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}-${{ matrix.python-version }}
           path: dist/
 
       - name: Install wheel
