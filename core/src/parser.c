@@ -19,6 +19,14 @@
 #include <immintrin.h>
 #endif
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
+#if defined(__SSE2__) && !defined(__AVX2__) && !defined(__AVX512F__)
+#include <emmintrin.h>
+#endif
+
 // Cache optimization constants
 #define CACHE_LINE_SIZE 64
 #define L1_SIZE (32 * 1024)
@@ -414,9 +422,14 @@ static void parse_avx512(cisv_parser *p);
 #ifdef __AVX2__
 static void parse_avx2(cisv_parser *p);
 #endif
-#if !defined(__AVX512F__) && !defined(__AVX2__)
-static void parse_scalar(cisv_parser *p);
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+static void parse_neon(cisv_parser *p);
 #endif
+#if defined(__SSE2__) && !defined(__AVX2__) && !defined(__AVX512F__)
+static void parse_sse2(cisv_parser *p);
+#endif
+// Scalar fallback for platforms without SIMD
+static void parse_scalar(cisv_parser *p);
 
 #ifdef __AVX512F__
 // AVX-512 ultra-fast path
@@ -596,7 +609,10 @@ static void parse_avx2(cisv_parser *p) {
     const __m256i nl_v = _mm256_set1_epi8('\n');
 
     while (p->cur + 32 <= p->end) {
+        // Multiple prefetch lines for better cache utilization (matches AVX-512 pattern)
         _mm_prefetch(p->cur + PREFETCH_DISTANCE, _MM_HINT_T0);
+        _mm_prefetch(p->cur + PREFETCH_DISTANCE + 64, _MM_HINT_T0);
+        _mm_prefetch(p->cur + PREFETCH_DISTANCE + 128, _MM_HINT_T0);
 
         if (p->state == S_NORMAL) {
             __m256i chunk = _mm256_loadu_si256((__m256i*)p->cur);
@@ -755,10 +771,367 @@ static void parse_avx2(cisv_parser *p) {
 }
 #endif
 
-#if !defined(__AVX512F__) && !defined(__AVX2__)
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+// ARM NEON fast path for Apple Silicon, AWS Graviton, Raspberry Pi
+// PERF: __attribute__((hot)) tells compiler this is frequently called
+__attribute__((hot))
+static void parse_neon(cisv_parser *p) {
+    const uint8x16_t delim_v = vdupq_n_u8(p->delimiter);
+    const uint8x16_t quote_v = vdupq_n_u8(p->quote);
+    const uint8x16_t nl_v = vdupq_n_u8('\n');
+
+    while (p->cur + 16 <= p->end) {
+        // Prefetch future data
+        __builtin_prefetch(p->cur + PREFETCH_DISTANCE, 0, 1);
+        __builtin_prefetch(p->cur + PREFETCH_DISTANCE + 64, 0, 1);
+
+        if (p->state == S_NORMAL) {
+            uint8x16_t chunk = vld1q_u8(p->cur);
+
+            // Compare for special characters
+            uint8x16_t delim_cmp = vceqq_u8(chunk, delim_v);
+            uint8x16_t quote_cmp = vceqq_u8(chunk, quote_v);
+            uint8x16_t nl_cmp = vceqq_u8(chunk, nl_v);
+
+            // Combine masks
+            uint8x16_t special = vorrq_u8(delim_cmp, vorrq_u8(quote_cmp, nl_cmp));
+
+            // Check if any special chars found (using horizontal max)
+            uint8x8_t special_low = vget_low_u8(special);
+            uint8x8_t special_high = vget_high_u8(special);
+            uint8x8_t special_max = vorr_u8(special_low, special_high);
+            uint64_t has_special;
+            vst1_u8((uint8_t*)&has_special, special_max);
+
+            if (!has_special) {
+                p->cur += 16;
+                continue;
+            }
+
+            // Process bytes until we find a special character
+            while (p->cur + 16 <= p->end) {
+                uint8_t c = *p->cur;
+
+                if (c == p->delimiter) {
+                    yield_field(p, p->field_start, p->cur);
+                    p->cur++;
+                    p->field_start = p->cur;
+                } else if (c == '\n') {
+                    const uint8_t *field_end = p->cur;
+                    if (field_end > p->field_start && *(field_end - 1) == '\r') {
+                        field_end--;
+                    }
+                    yield_field(p, p->field_start, field_end);
+                    yield_row(p);
+                    p->cur++;
+                    p->field_start = p->cur;
+                } else if (c == p->quote && p->cur == p->field_start) {
+                    p->state = S_QUOTED;
+                    p->cur++;
+                    p->quote_buffer_pos = 0;
+                    goto handle_quoted_neon;
+                } else {
+                    p->cur++;
+                    if (p->cur >= p->field_start + 16) break;
+                }
+            }
+        } else {
+            handle_quoted_neon:
+            while (p->cur + 16 <= p->end) {
+                uint8x16_t chunk = vld1q_u8(p->cur);
+                uint8x16_t quote_cmp = vceqq_u8(chunk, quote_v);
+
+                // Check if any quotes found
+                uint8x8_t quote_low = vget_low_u8(quote_cmp);
+                uint8x8_t quote_high = vget_high_u8(quote_cmp);
+                uint8x8_t quote_max = vorr_u8(quote_low, quote_high);
+                uint64_t has_quote;
+                vst1_u8((uint8_t*)&has_quote, quote_max);
+
+                if (!has_quote) {
+                    append_to_quote_buffer(p, p->cur, 16);
+                    p->cur += 16;
+                    continue;
+                }
+
+                // Find first quote position
+                int pos = 0;
+                for (int i = 0; i < 16; i++) {
+                    if (p->cur[i] == p->quote) {
+                        pos = i;
+                        break;
+                    }
+                }
+
+                if (pos > 0) {
+                    append_to_quote_buffer(p, p->cur, pos);
+                }
+
+                p->cur += pos;
+
+                if (p->cur + 1 < p->end && *(p->cur + 1) == p->quote) {
+                    uint8_t q = p->quote;
+                    append_to_quote_buffer(p, &q, 1);
+                    p->cur += 2;
+                    continue;
+                }
+
+                yield_quoted_field(p);
+                p->state = S_NORMAL;
+                p->cur++;
+                // Skip delimiter/newline immediately after closing quote
+                if (p->cur < p->end && *p->cur == p->delimiter) {
+                    p->cur++;
+                } else if (p->cur < p->end && *p->cur == '\n') {
+                    p->cur++;
+                    yield_row(p);
+                } else if (p->cur < p->end && *p->cur == '\r' &&
+                           p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                    p->cur += 2;
+                    yield_row(p);
+                }
+                p->field_start = p->cur;
+                break;
+            }
+        }
+    }
+
+    // Handle remainder with scalar code
+    while (p->cur < p->end) {
+        uint8_t c = *p->cur++;
+
+        if (p->state == S_NORMAL) {
+            if (c == p->delimiter) {
+                yield_field(p, p->field_start, p->cur - 1);
+                p->field_start = p->cur;
+            } else if (c == '\n') {
+                const uint8_t *field_end = p->cur - 1;
+                if (field_end > p->field_start && *(field_end - 1) == '\r') {
+                    field_end--;
+                }
+                yield_field(p, p->field_start, field_end);
+                yield_row(p);
+                p->field_start = p->cur;
+            } else if (c == p->quote && p->cur - 1 == p->field_start) {
+                p->state = S_QUOTED;
+                p->quote_buffer_pos = 0;
+            }
+        } else if (p->state == S_QUOTED) {
+            if (c == p->quote) {
+                if (p->cur < p->end && *p->cur == p->quote) {
+                    uint8_t q = p->quote;
+                    append_to_quote_buffer(p, &q, 1);
+                    p->cur++;
+                } else {
+                    yield_quoted_field(p);
+                    p->state = S_NORMAL;
+                    if (p->cur < p->end && *p->cur == p->delimiter) {
+                        p->cur++;
+                    } else if (p->cur < p->end && *p->cur == '\n') {
+                        p->cur++;
+                        yield_row(p);
+                    } else if (p->cur < p->end && *p->cur == '\r' &&
+                               p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                        p->cur += 2;
+                        yield_row(p);
+                    }
+                    p->field_start = p->cur;
+                }
+            } else {
+                append_to_quote_buffer(p, p->cur - 1, 1);
+            }
+        }
+    }
+
+    if (p->state == S_NORMAL && p->field_start < p->end) {
+        yield_field(p, p->field_start, p->end);
+    } else if (p->state == S_QUOTED) {
+        if (p->ecb) {
+            p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
+        }
+        if (p->quote_buffer_pos > 0) {
+            yield_quoted_field(p);
+        }
+    }
+
+    if (p->current_row_fields > 0) {
+        yield_row(p);
+    }
+}
+#endif
+
+#if defined(__SSE2__) && !defined(__AVX2__) && !defined(__AVX512F__)
+// SSE2 fast path for older x86-64 machines (16 bytes at a time)
+// PERF: __attribute__((hot)) tells compiler this is frequently called
+__attribute__((hot))
+static void parse_sse2(cisv_parser *p) {
+    const __m128i delim_v = _mm_set1_epi8(p->delimiter);
+    const __m128i quote_v = _mm_set1_epi8(p->quote);
+    const __m128i nl_v = _mm_set1_epi8('\n');
+
+    while (p->cur + 16 <= p->end) {
+        // Prefetch future data
+        _mm_prefetch((const char*)(p->cur + PREFETCH_DISTANCE), _MM_HINT_T0);
+        _mm_prefetch((const char*)(p->cur + PREFETCH_DISTANCE + 64), _MM_HINT_T0);
+
+        if (p->state == S_NORMAL) {
+            __m128i chunk = _mm_loadu_si128((const __m128i*)p->cur);
+
+            __m128i delim_cmp = _mm_cmpeq_epi8(chunk, delim_v);
+            __m128i quote_cmp = _mm_cmpeq_epi8(chunk, quote_v);
+            __m128i nl_cmp = _mm_cmpeq_epi8(chunk, nl_v);
+
+            __m128i special = _mm_or_si128(delim_cmp, _mm_or_si128(quote_cmp, nl_cmp));
+            int mask = _mm_movemask_epi8(special);
+
+            if (!mask) {
+                p->cur += 16;
+                continue;
+            }
+
+            while (mask) {
+                int pos = __builtin_ctz(mask);
+                const uint8_t *ptr = p->cur + pos;
+                uint8_t c = *ptr;
+
+                if (c == p->delimiter) {
+                    yield_field(p, p->field_start, ptr);
+                    p->field_start = ptr + 1;
+                } else if (c == '\n') {
+                    const uint8_t *field_end = ptr;
+                    if (field_end > p->field_start && *(field_end - 1) == '\r') {
+                        field_end--;
+                    }
+                    yield_field(p, p->field_start, field_end);
+                    yield_row(p);
+                    p->field_start = ptr + 1;
+                } else if (c == p->quote) {
+                    p->state = S_QUOTED;
+                    p->cur = ptr + 1;
+                    p->quote_buffer_pos = 0;
+                    goto handle_quoted_sse2;
+                }
+
+                mask &= mask - 1;
+            }
+
+            p->cur += 16;
+        } else {
+            handle_quoted_sse2:
+            while (p->cur + 16 <= p->end) {
+                __m128i chunk = _mm_loadu_si128((const __m128i*)p->cur);
+                __m128i quote_cmp = _mm_cmpeq_epi8(chunk, quote_v);
+                int mask = _mm_movemask_epi8(quote_cmp);
+
+                if (!mask) {
+                    append_to_quote_buffer(p, p->cur, 16);
+                    p->cur += 16;
+                    continue;
+                }
+
+                int pos = __builtin_ctz(mask);
+
+                if (pos > 0) {
+                    append_to_quote_buffer(p, p->cur, pos);
+                }
+
+                p->cur += pos;
+
+                if (p->cur + 1 < p->end && *(p->cur + 1) == p->quote) {
+                    uint8_t q = p->quote;
+                    append_to_quote_buffer(p, &q, 1);
+                    p->cur += 2;
+                    continue;
+                }
+
+                yield_quoted_field(p);
+                p->state = S_NORMAL;
+                p->cur++;
+                // Skip delimiter/newline immediately after closing quote
+                if (p->cur < p->end && *p->cur == p->delimiter) {
+                    p->cur++;
+                } else if (p->cur < p->end && *p->cur == '\n') {
+                    p->cur++;
+                    yield_row(p);
+                } else if (p->cur < p->end && *p->cur == '\r' &&
+                           p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                    p->cur += 2;
+                    yield_row(p);
+                }
+                p->field_start = p->cur;
+                break;
+            }
+        }
+    }
+
+    // Handle remainder with scalar code
+    while (p->cur < p->end) {
+        uint8_t c = *p->cur++;
+
+        if (p->state == S_NORMAL) {
+            if (c == p->delimiter) {
+                yield_field(p, p->field_start, p->cur - 1);
+                p->field_start = p->cur;
+            } else if (c == '\n') {
+                const uint8_t *field_end = p->cur - 1;
+                if (field_end > p->field_start && *(field_end - 1) == '\r') {
+                    field_end--;
+                }
+                yield_field(p, p->field_start, field_end);
+                yield_row(p);
+                p->field_start = p->cur;
+            } else if (c == p->quote && p->cur - 1 == p->field_start) {
+                p->state = S_QUOTED;
+                p->quote_buffer_pos = 0;
+            }
+        } else if (p->state == S_QUOTED) {
+            if (c == p->quote) {
+                if (p->cur < p->end && *p->cur == p->quote) {
+                    uint8_t q = p->quote;
+                    append_to_quote_buffer(p, &q, 1);
+                    p->cur++;
+                } else {
+                    yield_quoted_field(p);
+                    p->state = S_NORMAL;
+                    if (p->cur < p->end && *p->cur == p->delimiter) {
+                        p->cur++;
+                    } else if (p->cur < p->end && *p->cur == '\n') {
+                        p->cur++;
+                        yield_row(p);
+                    } else if (p->cur < p->end && *p->cur == '\r' &&
+                               p->cur + 1 < p->end && *(p->cur + 1) == '\n') {
+                        p->cur += 2;
+                        yield_row(p);
+                    }
+                    p->field_start = p->cur;
+                }
+            } else {
+                append_to_quote_buffer(p, p->cur - 1, 1);
+            }
+        }
+    }
+
+    if (p->state == S_NORMAL && p->field_start < p->end) {
+        yield_field(p, p->field_start, p->end);
+    } else if (p->state == S_QUOTED) {
+        if (p->ecb) {
+            p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
+        }
+        if (p->quote_buffer_pos > 0) {
+            yield_quoted_field(p);
+        }
+    }
+
+    if (p->current_row_fields > 0) {
+        yield_row(p);
+    }
+}
+#endif
+
 // Scalar fallback using SWAR (SIMD Within A Register) - 1BRC technique
 // Processes 8 bytes at a time without SIMD instructions (20-40% faster)
-__attribute__((hot))
+// Always compiled as fallback for all platforms
+__attribute__((hot, unused))
 static void parse_scalar(cisv_parser *p) {
     while (p->cur + 8 <= p->end) {
         if (p->state == S_NORMAL) {
@@ -949,9 +1322,36 @@ static void parse_scalar(cisv_parser *p) {
         yield_row(p);
     }
 }
-#endif
 
 cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
+    if (!config) return NULL;
+
+    // SECURITY: Validate configuration to prevent parsing ambiguities
+    // Delimiter cannot be the same as quote character
+    if (config->delimiter == config->quote) {
+        return NULL;  // Invalid configuration
+    }
+
+    // Delimiter cannot be a newline character (would break row detection)
+    if (config->delimiter == '\n' || config->delimiter == '\r') {
+        return NULL;  // Invalid configuration
+    }
+
+    // Quote character cannot be a newline character
+    if (config->quote == '\n' || config->quote == '\r') {
+        return NULL;  // Invalid configuration
+    }
+
+    // Escape character validation (if set)
+    if (config->escape != '\0') {
+        if (config->escape == '\n' || config->escape == '\r') {
+            return NULL;  // Invalid configuration
+        }
+        if (config->escape == config->delimiter) {
+            return NULL;  // Invalid configuration
+        }
+    }
+
     cisv_parser *p = (cisv_parser*)aligned_alloc(CACHE_LINE_SIZE, sizeof(*p));
     if (!p) return NULL;
 
@@ -975,18 +1375,19 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     p->line_num = 0;
     p->current_row_fields = 0;
 
-    // Allocate quote buffer with NULL check
-    p->quote_buffer_size = 4096;
-    p->quote_buffer = malloc(p->quote_buffer_size);
+    // Allocate quote buffer with cache-line alignment for SIMD access
+    // Start at 64KB to avoid early reallocations and match MIN_BUFFER_INCREMENT
+    p->quote_buffer_size = MIN_BUFFER_INCREMENT;
+    p->quote_buffer = aligned_alloc(CACHE_LINE_SIZE, p->quote_buffer_size);
     if (!p->quote_buffer) {
         free(p);
         return NULL;
     }
     p->quote_buffer_pos = 0;
 
-    // Allocate stream buffer for streaming mode
-    p->stream_buffer_size = 4096;
-    p->stream_buffer = malloc(p->stream_buffer_size);
+    // Allocate stream buffer for streaming mode (cache-line aligned, 64KB)
+    p->stream_buffer_size = MIN_BUFFER_INCREMENT;
+    p->stream_buffer = aligned_alloc(CACHE_LINE_SIZE, p->stream_buffer_size);
     if (!p->stream_buffer) {
         free(p->quote_buffer);
         free(p);
@@ -1069,10 +1470,15 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
     p->current_row_fields = 0;
     p->quote_buffer_pos = 0;
 
+    // Dispatch to best available SIMD implementation
 #ifdef __AVX512F__
     parse_avx512(p);
 #elif defined(__AVX2__)
     parse_avx2(p);
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+    parse_neon(p);
+#elif defined(__SSE2__)
+    parse_sse2(p);
 #else
     parse_scalar(p);
 #endif
@@ -1123,6 +1529,15 @@ size_t cisv_parser_count_rows(const char *path) {
     const __m256i nl = _mm256_set1_epi8('\n');
     size_t i = 0;
 
+    // Unrolled loop: process 64 bytes (2x 32-byte chunks) per iteration
+    for (; i + 64 <= (size_t)st.st_size; i += 64) {
+        __m256i chunk1 = _mm256_loadu_si256((__m256i*)(base + i));
+        __m256i chunk2 = _mm256_loadu_si256((__m256i*)(base + i + 32));
+        count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk1, nl)));
+        count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk2, nl)));
+    }
+
+    // Handle remaining 32-byte chunk
     for (; i + 32 <= (size_t)st.st_size; i += 32) {
         __m256i chunk = _mm256_loadu_si256((__m256i*)(base + i));
         __m256i cmp = _mm256_cmpeq_epi8(chunk, nl);
@@ -1133,15 +1548,65 @@ size_t cisv_parser_count_rows(const char *path) {
     for (; i < (size_t)st.st_size; i++) {
         count += (base[i] == '\n');
     }
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+    // ARM NEON row counting (16 bytes at a time)
+    const uint8x16_t nl = vdupq_n_u8('\n');
+    size_t i = 0;
+
+    // Unrolled: process 32 bytes per iteration
+    for (; i + 32 <= (size_t)st.st_size; i += 32) {
+        uint8x16_t chunk1 = vld1q_u8(base + i);
+        uint8x16_t chunk2 = vld1q_u8(base + i + 16);
+        uint8x16_t cmp1 = vceqq_u8(chunk1, nl);
+        uint8x16_t cmp2 = vceqq_u8(chunk2, nl);
+        // Count matches: each 0xFF byte becomes 1 when right-shifted
+        count += vaddvq_u8(vshrq_n_u8(cmp1, 7));
+        count += vaddvq_u8(vshrq_n_u8(cmp2, 7));
+    }
+
+    // Handle remaining 16-byte chunk
+    for (; i + 16 <= (size_t)st.st_size; i += 16) {
+        uint8x16_t chunk = vld1q_u8(base + i);
+        uint8x16_t cmp = vceqq_u8(chunk, nl);
+        count += vaddvq_u8(vshrq_n_u8(cmp, 7));
+    }
+
+    for (; i < (size_t)st.st_size; i++) {
+        count += (base[i] == '\n');
+    }
+#elif defined(__SSE2__)
+    // SSE2 row counting (16 bytes at a time)
+    const __m128i nl = _mm_set1_epi8('\n');
+    size_t i = 0;
+
+    // Unrolled: process 32 bytes per iteration
+    for (; i + 32 <= (size_t)st.st_size; i += 32) {
+        __m128i chunk1 = _mm_loadu_si128((const __m128i*)(base + i));
+        __m128i chunk2 = _mm_loadu_si128((const __m128i*)(base + i + 16));
+        count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk1, nl)));
+        count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk2, nl)));
+    }
+
+    // Handle remaining 16-byte chunk
+    for (; i + 16 <= (size_t)st.st_size; i += 16) {
+        __m128i chunk = _mm_loadu_si128((const __m128i*)(base + i));
+        count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk, nl)));
+    }
+
+    for (; i < (size_t)st.st_size; i++) {
+        count += (base[i] == '\n');
+    }
 #else
+    // Scalar fallback using proper SWAR (SIMD Within A Register)
     size_t i = 0;
     for (; i + 8 <= (size_t)st.st_size; i += 8) {
         // Use memcpy for safe unaligned access (optimized by compiler)
         uint64_t word;
         memcpy(&word, base + i, sizeof(word));
-        for (int j = 0; j < 8; j++) {
-            count += ((word >> (j*8)) & 0xFF) == '\n';
-        }
+        // SWAR: each matching byte has its high bit set in the mask
+        uint64_t nl_mask = swar_has_byte(word, '\n');
+        // Each match sets 0x80 in that byte position, popcount gives 8x actual count
+        count += __builtin_popcountll(nl_mask) >> 3;
     }
 
     for (; i < (size_t)st.st_size; i++) {
@@ -1171,10 +1636,15 @@ int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
     p->end = chunk + len;
     p->field_start = p->cur;
 
+    // Dispatch to best available SIMD implementation
 #ifdef __AVX512F__
     parse_avx512(p);
 #elif defined(__AVX2__)
     parse_avx2(p);
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+    parse_neon(p);
+#elif defined(__SSE2__)
+    parse_sse2(p);
 #else
     parse_scalar(p);
 #endif
@@ -1307,20 +1777,78 @@ cisv_chunk_t *cisv_split_chunks(
             }
         }
 
-        // Count rows in this chunk (using SWAR for speed)
+        // Count rows in this chunk using SIMD when available
         size_t row_count = 0;
         const uint8_t *p = chunk_start;
 
+#ifdef __AVX512F__
+        const __m512i nl_v = _mm512_set1_epi8('\n');
+        while (p + 64 <= target_end) {
+            __m512i chunk = _mm512_loadu_si512((__m512i*)p);
+            __mmask64 mask = _mm512_cmpeq_epi8_mask(chunk, nl_v);
+            row_count += __builtin_popcountll(mask);
+            p += 64;
+        }
+#elif defined(__AVX2__)
+        const __m256i nl_v = _mm256_set1_epi8('\n');
+        // Unrolled: process 64 bytes per iteration
+        while (p + 64 <= target_end) {
+            __m256i chunk1 = _mm256_loadu_si256((__m256i*)p);
+            __m256i chunk2 = _mm256_loadu_si256((__m256i*)(p + 32));
+            row_count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk1, nl_v)));
+            row_count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk2, nl_v)));
+            p += 64;
+        }
+        // Handle remaining 32-byte chunk
+        while (p + 32 <= target_end) {
+            __m256i chunk = _mm256_loadu_si256((__m256i*)p);
+            row_count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, nl_v)));
+            p += 32;
+        }
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+        // ARM NEON newline counting
+        const uint8x16_t nl_v = vdupq_n_u8('\n');
+        while (p + 32 <= target_end) {
+            uint8x16_t chunk1 = vld1q_u8(p);
+            uint8x16_t chunk2 = vld1q_u8(p + 16);
+            uint8x16_t cmp1 = vceqq_u8(chunk1, nl_v);
+            uint8x16_t cmp2 = vceqq_u8(chunk2, nl_v);
+            row_count += vaddvq_u8(vshrq_n_u8(cmp1, 7));
+            row_count += vaddvq_u8(vshrq_n_u8(cmp2, 7));
+            p += 32;
+        }
+        while (p + 16 <= target_end) {
+            uint8x16_t chunk = vld1q_u8(p);
+            uint8x16_t cmp = vceqq_u8(chunk, nl_v);
+            row_count += vaddvq_u8(vshrq_n_u8(cmp, 7));
+            p += 16;
+        }
+#elif defined(__SSE2__)
+        // SSE2 newline counting
+        const __m128i nl_v = _mm_set1_epi8('\n');
+        while (p + 32 <= target_end) {
+            __m128i chunk1 = _mm_loadu_si128((const __m128i*)p);
+            __m128i chunk2 = _mm_loadu_si128((const __m128i*)(p + 16));
+            row_count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk1, nl_v)));
+            row_count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk2, nl_v)));
+            p += 32;
+        }
+        while (p + 16 <= target_end) {
+            __m128i chunk = _mm_loadu_si128((const __m128i*)p);
+            row_count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk, nl_v)));
+            p += 16;
+        }
+#else
         // SWAR newline counting
         while (p + 8 <= target_end) {
             uint64_t word;
             memcpy(&word, p, sizeof(word));
             uint64_t nl_mask = swar_has_byte(word, '\n');
-            if (nl_mask) {
-                row_count += __builtin_popcountll(nl_mask) / 8;
-            }
+            // Each match sets 0x80 in that byte position, popcount gives 8x actual count
+            row_count += __builtin_popcountll(nl_mask) >> 3;
             p += 8;
         }
+#endif
 
         // Remainder
         while (p < target_end) {
@@ -1351,10 +1879,15 @@ int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
     p->quote_buffer_pos = 0;
     p->current_row_fields = 0;
 
+    // Dispatch to best available SIMD implementation
 #ifdef __AVX512F__
     parse_avx512(p);
 #elif defined(__AVX2__)
     parse_avx2(p);
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+    parse_neon(p);
+#elif defined(__SSE2__)
+    parse_sse2(p);
 #else
     parse_scalar(p);
 #endif

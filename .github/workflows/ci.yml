@@ -1,5 +1,8 @@
 name: CI
 
+# SECURITY NOTE: For production deployments, consider pinning actions to full SHA hashes.
+# See .github/SECURITY.md for details on SHA pinning best practices.
+
 on:
   push:
   pull_request:
@@ -261,12 +264,15 @@ jobs:
           cat benchmark.log
 
       - name: Commit and push
+        env:
+          # SECURITY: Use environment variable to prevent script injection via branch name
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
           git add BENCHMARKS.md
           git commit -m "Update benchmark results [skip ci]" || exit 0
-          git push --force origin ${{ github.event.pull_request.head.ref }}
+          git push --force origin "${HEAD_REF}"
 
       - name: Comment PR with summary
         uses: actions/github-script@v8

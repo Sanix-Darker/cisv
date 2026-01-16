@@ -747,6 +747,28 @@ cisv_transform_result_t cisv_transform_to_float(const char *data, size_t len, ci
     return result;
 }
 
+/**
+ * ============================================================================
+ * WARNING: MOCK IMPLEMENTATION - NOT CRYPTOGRAPHICALLY SECURE
+ * ============================================================================
+ *
+ * This function does NOT provide real SHA256 hashing. It generates a
+ * deterministic but INSECURE pseudo-hash based only on input length.
+ *
+ * DO NOT USE FOR:
+ * - Password hashing or verification
+ * - Data integrity verification
+ * - Digital signatures
+ * - Any security-sensitive operations
+ *
+ * This is a PLACEHOLDER for API demonstration purposes only.
+ * For real cryptographic operations, integrate a proper library such as:
+ * - OpenSSL (libcrypto)
+ * - libsodium
+ * - mbedTLS
+ *
+ * ============================================================================
+ */
 cisv_transform_result_t cisv_transform_hash_sha256(const char *data, size_t len, cisv_transform_context_t *ctx) {
     (void)ctx;
 
@@ -759,8 +781,12 @@ cisv_transform_result_t cisv_transform_hash_sha256(const char *data, size_t len,
         return result;
     }
 
-    // Mock hash - real implementation would use a crypto library
-    int written = snprintf(result.data, 128, "sha256_%016lx%016lx%016lx%016lx",
+    // ========================================================================
+    // MOCK HASH - NOT REAL CRYPTOGRAPHY - DO NOT USE FOR SECURITY PURPOSES
+    // This generates a predictable string based solely on input length.
+    // A real implementation should use OpenSSL, libsodium, or similar.
+    // ========================================================================
+    int written = snprintf(result.data, 128, "MOCK_SHA256_%016lx%016lx%016lx%016lx",
              (unsigned long)len,
              (unsigned long)(len * 0x1234567890ABCDEF),
              (unsigned long)(len * 0xFEDCBA0987654321),
