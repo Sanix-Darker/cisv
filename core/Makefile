@@ -2,19 +2,55 @@
 CC ?= gcc
 AR ?= ar
 
+# Platform and architecture detection
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
 # SECURITY: Binary hardening flags
 # -fstack-protector-strong: Protect against stack buffer overflows
 # -D_FORTIFY_SOURCE=2: Detect buffer overflows in string/memory functions
-# -Wl,-z,relro,-z,now: Full RELRO - make GOT read-only after relocation
 # -fstack-check: Check for stack overflow at runtime
-SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fstack-check
-SECURITY_LDFLAGS = -Wl,-z,relro,-z,now
+SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2
 
-CFLAGS ?= -O3 -march=native -mavx2 -mtune=native -pipe -fomit-frame-pointer \
-          -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops -fPIC \
-          $(SECURITY_CFLAGS)
+# Base CFLAGS (architecture-independent)
+BASE_CFLAGS = -O3 -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto \
+              -ffast-math -funroll-loops -fPIC $(SECURITY_CFLAGS)
+
+# Architecture-specific SIMD flags
+ifeq ($(UNAME_M),x86_64)
+    # x86_64: Use AVX2 SIMD
+    ARCH_CFLAGS = -march=native -mavx2 -mtune=native
+else ifeq ($(UNAME_M),amd64)
+    # amd64 (same as x86_64 on some systems)
+    ARCH_CFLAGS = -march=native -mavx2 -mtune=native
+else ifeq ($(UNAME_M),arm64)
+    # ARM64 (Apple Silicon, etc.): Use NEON SIMD
+    ARCH_CFLAGS = -mcpu=native
+else ifeq ($(UNAME_M),aarch64)
+    # aarch64 (same as arm64 on Linux)
+    ARCH_CFLAGS = -march=native
+else
+    # Fallback for other architectures
+    ARCH_CFLAGS = -march=native
+endif
+
+CFLAGS ?= $(BASE_CFLAGS) $(ARCH_CFLAGS)
 CFLAGS_DEBUG = -Wall -Wextra -g -O0 -fsanitize=address -fsanitize=undefined \
                -fno-omit-frame-pointer -fPIC
+
+# Platform-specific linker flags
+ifeq ($(UNAME_S),Linux)
+    # Linux: Full RELRO for GOT protection
+    SECURITY_LDFLAGS = -Wl,-z,relro,-z,now
+    CFLAGS += -D_GNU_SOURCE -fstack-check
+else ifeq ($(UNAME_S),Darwin)
+    # macOS: No RELRO equivalent, but use other hardening
+    SECURITY_LDFLAGS =
+    CFLAGS += -D__APPLE__
+else
+    SECURITY_LDFLAGS =
+endif
+
 LDFLAGS ?= -flto $(SECURITY_LDFLAGS)
 
 # Directories
@@ -30,16 +66,10 @@ OBJS_DEBUG = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.debug.o,$(SRCS))
 
 # Library outputs
 STATIC_LIB = $(BUILD_DIR)/libcisv.a
-SHARED_LIB = $(BUILD_DIR)/libcisv.so
-
-# Platform detection
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Linux)
-    CFLAGS += -D_GNU_SOURCE
-endif
 ifeq ($(UNAME_S),Darwin)
-    CFLAGS += -D__APPLE__
     SHARED_LIB = $(BUILD_DIR)/libcisv.dylib
+else
+    SHARED_LIB = $(BUILD_DIR)/libcisv.so
 endif
 
 # Targets
