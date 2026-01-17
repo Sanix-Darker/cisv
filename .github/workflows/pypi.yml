@@ -144,65 +144,6 @@ jobs:
           name: wheel-macos-arm64
           path: bindings/python/dist/*.whl
 
-  build-macos-x86-wheel:
-    name: Build macOS wheel (x86_64)
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip build wheel
-
-      - name: Build core library
-        run: |
-          cd core
-          make clean
-          make shared
-          ls -la build/
-
-      - name: Set package version from tag
-        run: |
-          VERSION="${{ env.VERSION }}"
-          VERSION="${VERSION#v}"
-          echo "Using version: $VERSION"
-
-          sed -i '' "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
-          sed -i '' "s/__version__ = .*/__version__ = '$VERSION'/" bindings/python/cisv/__init__.py
-
-          grep "version" bindings/python/pyproject.toml
-          grep "__version__" bindings/python/cisv/__init__.py
-
-      - name: Prepare Python package
-        run: |
-          mkdir -p bindings/python/cisv/libs
-          cp core/build/libcisv.dylib bindings/python/cisv/libs/
-          cp LICENSE bindings/python/
-
-      - name: Build wheel
-        run: |
-          cd bindings/python
-          python -m build --wheel
-
-          cd dist
-          for whl in *.whl; do
-            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-macosx_10_13_x86_64.whl/")
-            mv "$whl" "$NEW_NAME"
-            echo "Built: $NEW_NAME"
-          done
-          ls -la
-
-      - name: Upload wheel
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheel-macos-x86_64
-          path: bindings/python/dist/*.whl
-
   build-sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
@@ -242,22 +183,20 @@ jobs:
 
   test-wheels:
     name: Test wheels
-    needs: [build-linux-wheel, build-macos-arm64-wheel, build-macos-x86-wheel]
+    needs: [build-linux-wheel, build-macos-arm64-wheel]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-20.04
-            artifact: wheel-linux-x86_64
           - os: ubuntu-22.04
             artifact: wheel-linux-x86_64
           - os: ubuntu-24.04
             artifact: wheel-linux-x86_64
           - os: macos-14
             artifact: wheel-macos-arm64
-          - os: macos-13
-            artifact: wheel-macos-x86_64
+          - os: macos-15
+            artifact: wheel-macos-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -308,7 +247,7 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: [build-linux-wheel, build-macos-arm64-wheel, build-macos-x86-wheel, build-sdist, test-wheels]
+    needs: [build-linux-wheel, build-macos-arm64-wheel, build-sdist, test-wheels]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
@@ -331,7 +270,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: [build-linux-wheel, build-macos-arm64-wheel, build-macos-x86-wheel, build-sdist, test-wheels]
+    needs: [build-linux-wheel, build-macos-arm64-wheel, build-sdist, test-wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
