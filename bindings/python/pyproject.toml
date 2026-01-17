@@ -39,9 +39,8 @@ Issues = "https://github.com/sanix-darker/cisv/issues"
 [project.optional-dependencies]
 dev = ["pytest", "pytest-benchmark"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["cisv*"]
+[tool.setuptools]
+packages = ["cisv", "cisv.libs"]
 
 [tool.setuptools.package-data]
-cisv = ["*.so", "*.dylib", "*.dll", "libs/*.so", "libs/*.dylib", "libs/*.dll"]
+cisv = ["libs/*.so", "libs/*.dylib", "libs/*.dll"]
