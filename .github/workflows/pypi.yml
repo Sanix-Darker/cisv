@@ -22,13 +22,13 @@ jobs:
     name: Build Linux wheel (x86_64)
     runs-on: ubuntu-latest
     container:
-      image: quay.io/pypa/manylinux_2_17_x86_64
+      image: ghcr.io/pypa/manylinux_2_28_x86_64:latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install build tools
         run: |
-          yum install -y make gcc
+          dnf install -y make gcc
 
       - name: Build core library
         run: |
@@ -71,7 +71,7 @@ jobs:
           # Rename to correct platform tag
           cd dist
           for whl in *.whl; do
-            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-manylinux_2_17_x86_64.whl/")
+            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-manylinux_2_28_x86_64.whl/")
             mv "$whl" "$NEW_NAME"
             echo "Built: $NEW_NAME"
           done
