@@ -16,6 +16,7 @@ endif()
 option(CISV_BUILD_CLI "Build CLI tool" ON)
 option(CISV_BUILD_TESTS "Build tests" ON)
 option(CISV_ENABLE_SIMD "Enable SIMD optimizations" ON)
+option(CISV_BUILD_PYTHON "Build Python bindings (nanobind)" OFF)
 
 # Compiler flags - optimized for maximum performance
 set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer")
@@ -51,6 +52,11 @@ if(CISV_BUILD_CLI)
     add_subdirectory(cli)
 endif()
 
+# Python bindings (nanobind)
+if(CISV_BUILD_PYTHON)
+    add_subdirectory(bindings/python-nanobind)
+endif()
+
 # Summary
 message(STATUS "")
 message(STATUS "CISV Configuration:")
@@ -59,4 +65,5 @@ message(STATUS "  Build type:  ${CMAKE_BUILD_TYPE}")
 message(STATUS "  CLI:         ${CISV_BUILD_CLI}")
 message(STATUS "  Tests:       ${CISV_BUILD_TESTS}")
 message(STATUS "  SIMD:        ${CISV_ENABLE_SIMD}")
+message(STATUS "  Python:      ${CISV_BUILD_PYTHON}")
 message(STATUS "")
