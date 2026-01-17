@@ -164,7 +164,7 @@ jobs:
       - name: Build with debug symbols
         run: |
           make clean
-          CFLAGS="-g -O0" make all
+          CFLAGS="-g -O0 -fPIC -D_GNU_SOURCE" make all
 
       - name: Create test data
         run: |
