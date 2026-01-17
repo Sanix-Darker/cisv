@@ -11,6 +11,14 @@
       "require": "./cisv/index.js"
     }
   },
+  "files": [
+    "binding.gyp",
+    "cisv/",
+    "build/Release/*.node",
+    "types/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
