@@ -1,0 +1,39 @@
+# Dependencies - this is the main cause of hard link issues
+node_modules/
+
+# Build artifacts (except Release/*.node which is needed)
+build/Debug/
+build/Release/obj/
+build/Release/*.a
+build/Release/*.lib
+build/*.target.mk
+build/gyp-mac-tool
+build/Makefile
+build/config.gypi
+build/binding.Makefile
+
+# Test files
+tests/
+test/
+*.test.js
+*.test.ts
+
+# Development files
+.git/
+.github/
+.vscode/
+*.log
+*.tgz
+coverage/
+.nyc_output/
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Benchmark files
+benchmark.js
+
+# Examples
+examples/

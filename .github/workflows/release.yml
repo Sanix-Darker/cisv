@@ -119,16 +119,24 @@ jobs:
         run: |
           cd bindings/nodejs
           npm version ${VERSION#v} --no-git-tag-version
-          npm install
 
-      - name: Build and test
+      - name: Install dependencies (without creating hard links)
+        run: |
+          cd bindings/nodejs
+          # Use --install-links to avoid hard links
+          npm install --install-links
+
+      - name: Build native addon
         run: |
           cd bindings/nodejs
           npm run build
 
-      - name: Publish to npm
+      - name: Create and publish package
         run: |
           cd bindings/nodejs
+          # Pack first to create a clean tarball
+          npm pack
+          # Publish the tarball
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
