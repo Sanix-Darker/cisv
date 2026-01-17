@@ -172,9 +172,15 @@ jobs:
           # Copy LICENSE
           cp LICENSE bindings/python/
 
+          # Clean any pre-built libraries (sdist should only contain source)
+          rm -rf bindings/python/cisv/libs/*.so bindings/python/cisv/libs/*.dylib 2>/dev/null || true
+
           # Copy the core C source code into the Python package directory
           # This allows pip to compile from source
           cp -r core bindings/python/
+
+          # Clean any build artifacts from core
+          rm -rf bindings/python/core/build 2>/dev/null || true
 
           # Verify the structure
           echo "=== Package structure ==="
