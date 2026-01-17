@@ -1,0 +1,66 @@
+[build-system]
+requires = ["scikit-build-core>=0.5", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cisv"
+version = "0.2.0"
+description = "High-performance CSV parser with SIMD optimizations"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "CISV Contributors"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C",
+    "Programming Language :: C++",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing",
+]
+keywords = ["csv", "parser", "simd", "performance", "data"]
+
+[project.urls]
+Homepage = "https://github.com/user/cisv"
+Documentation = "https://github.com/user/cisv#readme"
+Repository = "https://github.com/user/cisv"
+Issues = "https://github.com/user/cisv/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+benchmark = ["polars", "pandas"]
+
+[tool.scikit-build]
+wheel.packages = ["cisv"]
+cmake.build-type = "Release"
+cmake.verbose = false
+build-dir = "build/{wheel_tag}"
+
+# Minimum CMake and Ninja versions
+cmake.minimum-version = "3.15"
+ninja.minimum-version = "1.5"
+
+[tool.scikit-build.cmake.define]
+CMAKE_BUILD_TYPE = "Release"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
