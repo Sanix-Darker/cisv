@@ -1,8 +1,29 @@
 #!/bin/bash
 
+# Determine the project root directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Set up paths
+CISV_BIN="$PROJECT_ROOT/cli/build/cisv"
+export LD_LIBRARY_PATH="$PROJECT_ROOT/core/build:$LD_LIBRARY_PATH"
+
 echo -ne "\n\n------------------------------"
 echo -ne "\n==== CISV PARSER checks ===\n"
 echo -ne "------------------------------\n\n"
+
+# Build if needed
+if [ ! -f "$CISV_BIN" ]; then
+    echo "Building CLI..."
+    make -C "$PROJECT_ROOT" clean
+    make -C "$PROJECT_ROOT" all
+fi
+
+# Verify binary exists
+if [ ! -f "$CISV_BIN" ]; then
+    echo "Error: CLI binary not found at $CISV_BIN"
+    exit 1
+fi
 
 echo "Creating test CSV file..."
 cat > test_select.csv << EOF
@@ -16,71 +37,65 @@ echo "Testing column selection..."
 echo ""
 
 echo "1. Display all columns (no selection):"
-./cisv_bin test_select.csv
+"$CISV_BIN" test_select.csv
 echo ""
 
 echo "2. Select column 0 only:"
-./cisv_bin -s 0 test_select.csv
+"$CISV_BIN" -s 0 test_select.csv
 echo ""
 
 echo "3. Select columns 0,2:"
-./cisv_bin -s 0,2 test_select.csv
+"$CISV_BIN" -s 0,2 test_select.csv
 echo ""
 
 echo "4. Select columns 0,2,3:"
-./cisv_bin -s 0,2,3 test_select.csv
+"$CISV_BIN" -s 0,2,3 test_select.csv
 echo ""
 
 echo "5. Test with valgrind (if available):"
 if command -v valgrind > /dev/null 2>&1; then
-    valgrind --leak-check=full ./cisv_bin -s 0,2,3 test_select.csv
+    valgrind --leak-check=full "$CISV_BIN" -s 0,2,3 test_select.csv
 else
     echo "Valgrind not installed"
 fi
 
 rm -f test_select.csv
 echo ""
-echo "All writer tests completed!"
+echo "All parser tests completed!"
 
 echo -ne "\n\n------------------------------"
 echo -ne "\n==== CISV WRITER checks ===\n"
 echo -ne "------------------------------\n\n"
 
-# Build if needed
-if [ ! -f "./cisv" ]; then
-    make clean
-    make cli
-fi
-
 echo ""
 echo "1. Testing basic generation (10 rows):"
-./cisv_bin write -g 10 -o test_basic.csv
+"$CISV_BIN" write -g 10 -o test_basic.csv
 cat test_basic.csv
 echo ""
 
 echo "2. Testing with custom delimiter (semicolon):"
-./cisv_bin write -g 5 -d ';' -o test_delim.csv
+"$CISV_BIN" write -g 5 -d ';' -o test_delim.csv
 cat test_delim.csv
 echo ""
 
 echo "3. Testing with always quote:"
-./cisv_bin write -g 5 -Q -o test_quoted.csv
+"$CISV_BIN" write -g 5 -Q -o test_quoted.csv
 cat test_quoted.csv
 echo ""
 
 echo "4. Testing CRLF line endings:"
-./cisv_bin write -g 3 -r -o test_crlf.csv
+"$CISV_BIN" write -g 3 -r -o test_crlf.csv
 file test_crlf.csv
 od -c test_crlf.csv | head -2
 echo ""
 
 echo "5. Testing benchmark mode (1000 rows):"
-./cisv_bin write -g 1000 -o test_bench.csv -b
+"$CISV_BIN" write -g 1000 -o test_bench.csv -b
 echo ""
 
 echo "6. Testing memory leaks with valgrind:"
 if command -v valgrind > /dev/null 2>&1; then
-    valgrind --leak-check=full ./cisv_bin write -g 100 -o test_valgrind.csv
+    valgrind --leak-check=full "$CISV_BIN" write -g 100 -o test_valgrind.csv
 else
     echo "Valgrind not installed"
 fi
