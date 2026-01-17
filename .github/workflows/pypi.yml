@@ -20,15 +20,20 @@ env:
 jobs:
   build-linux-wheel:
     name: Build Linux wheel (x86_64)
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/pypa/manylinux_2_28_x86_64:latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
         run: |
-          dnf install -y make gcc
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+          python -m pip install --upgrade pip build wheel
 
       - name: Build core library
         run: |
@@ -36,6 +41,8 @@ jobs:
           make clean
           make shared
           ls -la build/
+          echo "=== GLIBC symbols required ==="
+          objdump -T build/libcisv.so | grep GLIBC | sed 's/.*GLIBC_/GLIBC_/' | sort -u || true
 
       - name: Set package version from tag
         run: |
@@ -43,13 +50,9 @@ jobs:
           VERSION="${VERSION#v}"
           echo "Using version: $VERSION"
 
-          # Update version in pyproject.toml
           sed -i "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
-
-          # Update version in __init__.py
           sed -i "s/__version__ = .*/__version__ = '$VERSION'/" bindings/python/cisv/__init__.py
 
-          # Verify
           grep "version" bindings/python/pyproject.toml
           grep "__version__" bindings/python/cisv/__init__.py
 
@@ -59,19 +62,15 @@ jobs:
           cp core/build/libcisv.so bindings/python/cisv/libs/
           cp LICENSE bindings/python/
 
-          # Verify the library works
-          ldd bindings/python/cisv/libs/libcisv.so || true
-
       - name: Build wheel
         run: |
           cd bindings/python
-          /opt/python/cp311-cp311/bin/python -m pip install --upgrade pip build wheel
-          /opt/python/cp311-cp311/bin/python -m build --wheel
+          python -m build --wheel
 
-          # Rename to correct platform tag
+          # Tag as manylinux_2_35 (Ubuntu 22.04 glibc version)
           cd dist
           for whl in *.whl; do
-            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-manylinux_2_28_x86_64.whl/")
+            NEW_NAME=$(echo "$whl" | sed "s/-py3-none-any\.whl/-py3-none-manylinux_2_35_x86_64.whl/")
             mv "$whl" "$NEW_NAME"
             echo "Built: $NEW_NAME"
           done
