@@ -1894,3 +1894,453 @@ int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
 
     return 0;
 }
+
+// =============================================================================
+// Batch Parsing Implementation
+// High-performance API that returns all data at once (no callbacks)
+// =============================================================================
+
+// Initial allocation sizes for batch parsing
+#define BATCH_INITIAL_ROWS 1024
+#define BATCH_INITIAL_FIELDS 8192
+#define BATCH_INITIAL_DATA (1024 * 1024)  // 1MB initial data buffer
+
+// Internal collector for batch parsing
+typedef struct {
+    cisv_result_t *result;
+    size_t current_row_start;  // Index in all_fields where current row starts
+} BatchCollector;
+
+// Ensure result has capacity for more rows
+static inline bool batch_ensure_rows(cisv_result_t *r, size_t needed) {
+    if (r->row_count + needed <= r->row_capacity) return true;
+
+    size_t new_cap = r->row_capacity * 2;
+    if (new_cap < r->row_count + needed) new_cap = r->row_count + needed;
+
+    cisv_row_t *new_rows = realloc(r->rows, new_cap * sizeof(cisv_row_t));
+    if (!new_rows) return false;
+
+    r->rows = new_rows;
+    r->row_capacity = new_cap;
+    return true;
+}
+
+// Ensure result has capacity for more fields
+static inline bool batch_ensure_fields(cisv_result_t *r, size_t needed) {
+    if (r->total_fields + needed <= r->fields_capacity) return true;
+
+    size_t new_cap = r->fields_capacity * 2;
+    if (new_cap < r->total_fields + needed) new_cap = r->total_fields + needed;
+
+    char **new_fields = realloc(r->all_fields, new_cap * sizeof(char*));
+    if (!new_fields) return false;
+
+    size_t *new_lengths = realloc(r->all_lengths, new_cap * sizeof(size_t));
+    if (!new_lengths) return false;
+
+    r->all_fields = new_fields;
+    r->all_lengths = new_lengths;
+    r->fields_capacity = new_cap;
+    return true;
+}
+
+// Ensure result has capacity for more field data
+static inline bool batch_ensure_data(cisv_result_t *r, size_t needed) {
+    if (r->field_data_size + needed <= r->field_data_capacity) return true;
+
+    size_t new_cap = r->field_data_capacity * 2;
+    if (new_cap < r->field_data_size + needed) new_cap = r->field_data_size + needed;
+
+    // Round up to 64-byte alignment for cache efficiency
+    new_cap = (new_cap + 63) & ~(size_t)63;
+
+    char *new_data = realloc(r->field_data, new_cap);
+    if (!new_data) return false;
+
+    // Update all field pointers if realloc moved the buffer
+    if (new_data != r->field_data && r->field_data) {
+        ptrdiff_t delta = new_data - r->field_data;
+        for (size_t i = 0; i < r->total_fields; i++) {
+            r->all_fields[i] += delta;
+        }
+    }
+
+    r->field_data = new_data;
+    r->field_data_capacity = new_cap;
+    return true;
+}
+
+// Batch field callback - accumulates fields into result
+static void batch_field_cb(void *user, const char *data, size_t len) {
+    BatchCollector *bc = (BatchCollector *)user;
+    cisv_result_t *r = bc->result;
+
+    // Ensure we have space
+    if (!batch_ensure_fields(r, 1)) {
+        r->error_code = -1;
+        snprintf(r->error_message, sizeof(r->error_message), "Out of memory (fields)");
+        return;
+    }
+
+    if (!batch_ensure_data(r, len + 1)) {
+        r->error_code = -1;
+        snprintf(r->error_message, sizeof(r->error_message), "Out of memory (data)");
+        return;
+    }
+
+    // Copy field data (null-terminated for convenience)
+    char *dest = r->field_data + r->field_data_size;
+    memcpy(dest, data, len);
+    dest[len] = '\0';
+
+    // Record field pointer and length
+    r->all_fields[r->total_fields] = dest;
+    r->all_lengths[r->total_fields] = len;
+    r->total_fields++;
+    r->field_data_size += len + 1;
+}
+
+// Batch row callback - stores field start index (pointers set up at end)
+// We store the start index in the fields pointer and convert to actual
+// pointers after parsing is complete (to handle reallocation during parsing)
+static void batch_row_cb(void *user) {
+    BatchCollector *bc = (BatchCollector *)user;
+    cisv_result_t *r = bc->result;
+
+    if (!batch_ensure_rows(r, 1)) {
+        r->error_code = -1;
+        snprintf(r->error_message, sizeof(r->error_message), "Out of memory (rows)");
+        return;
+    }
+
+    // Store field count and start index (not actual pointers - those are set later)
+    size_t field_count = r->total_fields - bc->current_row_start;
+    cisv_row_t *row = &r->rows[r->row_count];
+
+    // Store start index as intptr_t (will be converted to pointer later)
+    row->fields = (char **)(intptr_t)bc->current_row_start;
+    row->field_lengths = NULL;  // Will be set during finalization
+    row->field_count = field_count;
+
+    r->row_count++;
+    bc->current_row_start = r->total_fields;
+}
+
+// Finalize result by converting stored indices to actual pointers
+// Must be called after all parsing is complete
+static void batch_result_finalize(cisv_result_t *r) {
+    for (size_t i = 0; i < r->row_count; i++) {
+        // Convert stored index back to actual pointer
+        size_t start_index = (size_t)(intptr_t)r->rows[i].fields;
+        r->rows[i].fields = &r->all_fields[start_index];
+        r->rows[i].field_lengths = &r->all_lengths[start_index];
+    }
+}
+
+// Batch error callback
+static void batch_error_cb(void *user, int line, const char *msg) {
+    BatchCollector *bc = (BatchCollector *)user;
+    cisv_result_t *r = bc->result;
+
+    if (r->error_code == 0) {
+        r->error_code = -1;
+        snprintf(r->error_message, sizeof(r->error_message),
+                 "Parse error at line %d: %s", line, msg ? msg : "unknown error");
+    }
+}
+
+// Allocate and initialize a new result structure
+static cisv_result_t *batch_result_create(void) {
+    cisv_result_t *r = calloc(1, sizeof(cisv_result_t));
+    if (!r) return NULL;
+
+    // Allocate initial buffers
+    r->rows = malloc(BATCH_INITIAL_ROWS * sizeof(cisv_row_t));
+    r->all_fields = malloc(BATCH_INITIAL_FIELDS * sizeof(char*));
+    r->all_lengths = malloc(BATCH_INITIAL_FIELDS * sizeof(size_t));
+    r->field_data = malloc(BATCH_INITIAL_DATA);
+
+    if (!r->rows || !r->all_fields || !r->all_lengths || !r->field_data) {
+        free(r->rows);
+        free(r->all_fields);
+        free(r->all_lengths);
+        free(r->field_data);
+        free(r);
+        return NULL;
+    }
+
+    r->row_capacity = BATCH_INITIAL_ROWS;
+    r->fields_capacity = BATCH_INITIAL_FIELDS;
+    r->field_data_capacity = BATCH_INITIAL_DATA;
+
+    return r;
+}
+
+void cisv_result_free(cisv_result_t *result) {
+    if (!result) return;
+
+    // Note: row->fields and row->field_lengths point into all_fields/all_lengths
+    // so we don't need to free them separately
+    free(result->rows);
+    free(result->all_fields);
+    free(result->all_lengths);
+    free(result->field_data);
+    free(result);
+}
+
+cisv_result_t *cisv_parse_file_batch(const char *path, const cisv_config *config) {
+    if (!path) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    cisv_result_t *result = batch_result_create();
+    if (!result) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    BatchCollector bc = {
+        .result = result,
+        .current_row_start = 0
+    };
+
+    // Create config with batch callbacks
+    cisv_config batch_config;
+    if (config) {
+        batch_config = *config;
+    } else {
+        cisv_config_init(&batch_config);
+    }
+    batch_config.field_cb = batch_field_cb;
+    batch_config.row_cb = batch_row_cb;
+    batch_config.error_cb = batch_error_cb;
+    batch_config.user = &bc;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&batch_config);
+    if (!parser) {
+        cisv_result_free(result);
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    int parse_result = cisv_parser_parse_file(parser, path);
+    cisv_parser_destroy(parser);
+
+    if (parse_result < 0) {
+        result->error_code = parse_result;
+        snprintf(result->error_message, sizeof(result->error_message),
+                 "Failed to parse file: %s", strerror(-parse_result));
+    }
+
+    // Convert stored indices to actual pointers now that parsing is complete
+    batch_result_finalize(result);
+
+    return result;
+}
+
+cisv_result_t *cisv_parse_string_batch(const char *data, size_t len, const cisv_config *config) {
+    if (!data) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    cisv_result_t *result = batch_result_create();
+    if (!result) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    BatchCollector bc = {
+        .result = result,
+        .current_row_start = 0
+    };
+
+    // Create config with batch callbacks
+    cisv_config batch_config;
+    if (config) {
+        batch_config = *config;
+    } else {
+        cisv_config_init(&batch_config);
+    }
+    batch_config.field_cb = batch_field_cb;
+    batch_config.row_cb = batch_row_cb;
+    batch_config.error_cb = batch_error_cb;
+    batch_config.user = &bc;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&batch_config);
+    if (!parser) {
+        cisv_result_free(result);
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    cisv_parser_write(parser, (const uint8_t *)data, len);
+    cisv_parser_end(parser);
+    cisv_parser_destroy(parser);
+
+    // Convert stored indices to actual pointers now that parsing is complete
+    batch_result_finalize(result);
+
+    return result;
+}
+
+// =============================================================================
+// Parallel Batch Parsing Implementation
+// =============================================================================
+
+#include <pthread.h>
+
+// Thread argument for parallel parsing
+typedef struct {
+    const cisv_chunk_t *chunk;
+    const cisv_config *config;
+    cisv_result_t *result;
+} ParallelParseArg;
+
+// Thread function for parallel parsing
+static void *parallel_parse_thread(void *arg) {
+    ParallelParseArg *parg = (ParallelParseArg *)arg;
+
+    cisv_result_t *result = batch_result_create();
+    if (!result) {
+        parg->result = NULL;
+        return NULL;
+    }
+
+    BatchCollector bc = {
+        .result = result,
+        .current_row_start = 0
+    };
+
+    // Create config with batch callbacks
+    cisv_config batch_config;
+    if (parg->config) {
+        batch_config = *parg->config;
+    } else {
+        cisv_config_init(&batch_config);
+    }
+    batch_config.field_cb = batch_field_cb;
+    batch_config.row_cb = batch_row_cb;
+    batch_config.error_cb = batch_error_cb;
+    batch_config.user = &bc;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&batch_config);
+    if (!parser) {
+        cisv_result_free(result);
+        parg->result = NULL;
+        return NULL;
+    }
+
+    cisv_parse_chunk(parser, parg->chunk);
+    cisv_parser_destroy(parser);
+
+    // Convert stored indices to actual pointers now that parsing is complete
+    batch_result_finalize(result);
+
+    parg->result = result;
+    return NULL;
+}
+
+// Get number of available CPUs
+static int get_cpu_count(void) {
+#ifdef _SC_NPROCESSORS_ONLN
+    long count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (count > 0) return (int)count;
+#endif
+    return 4;  // Default fallback
+}
+
+cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *config,
+                                          int num_threads, int *result_count) {
+    if (!path || !result_count) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    *result_count = 0;
+
+    // Auto-detect thread count
+    if (num_threads <= 0) {
+        num_threads = get_cpu_count();
+    }
+
+    // Limit to reasonable maximum
+    if (num_threads > 64) num_threads = 64;
+
+    // Memory-map the file
+    cisv_mmap_file_t *mmap_file = cisv_mmap_open(path);
+    if (!mmap_file) {
+        return NULL;
+    }
+
+    // Split into chunks
+    int chunk_count;
+    cisv_chunk_t *chunks = cisv_split_chunks(mmap_file, num_threads, &chunk_count);
+    if (!chunks || chunk_count == 0) {
+        cisv_mmap_close(mmap_file);
+        return NULL;
+    }
+
+    // Allocate thread arguments and results array
+    ParallelParseArg *args = calloc(chunk_count, sizeof(ParallelParseArg));
+    pthread_t *threads = calloc(chunk_count, sizeof(pthread_t));
+    cisv_result_t **results = calloc(chunk_count, sizeof(cisv_result_t *));
+
+    if (!args || !threads || !results) {
+        free(args);
+        free(threads);
+        free(results);
+        free(chunks);
+        cisv_mmap_close(mmap_file);
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    // Launch threads
+    for (int i = 0; i < chunk_count; i++) {
+        args[i].chunk = &chunks[i];
+        args[i].config = config;
+        args[i].result = NULL;
+
+        if (pthread_create(&threads[i], NULL, parallel_parse_thread, &args[i]) != 0) {
+            // Thread creation failed - wait for already-launched threads
+            for (int j = 0; j < i; j++) {
+                pthread_join(threads[j], NULL);
+                if (args[j].result) {
+                    cisv_result_free(args[j].result);
+                }
+            }
+            free(args);
+            free(threads);
+            free(results);
+            free(chunks);
+            cisv_mmap_close(mmap_file);
+            return NULL;
+        }
+    }
+
+    // Wait for all threads to complete
+    for (int i = 0; i < chunk_count; i++) {
+        pthread_join(threads[i], NULL);
+        results[i] = args[i].result;
+    }
+
+    free(args);
+    free(threads);
+    free(chunks);
+    cisv_mmap_close(mmap_file);
+
+    *result_count = chunk_count;
+    return results;
+}
+
+void cisv_results_free(cisv_result_t **results, int count) {
+    if (!results) return;
+
+    for (int i = 0; i < count; i++) {
+        cisv_result_free(results[i]);
+    }
+    free(results);
+}

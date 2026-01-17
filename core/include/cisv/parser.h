@@ -105,6 +105,64 @@ cisv_chunk_t *cisv_split_chunks(
 // Returns 0 on success, negative on error
 int cisv_parse_chunk(cisv_parser *parser, const cisv_chunk_t *chunk);
 
+// =============================================================================
+// Batch Parsing API (High-Performance Python Bindings)
+// Eliminates per-field callbacks by returning all data at once
+// =============================================================================
+
+// Single row structure
+typedef struct {
+    char **fields;           // Array of field pointers (into field_data)
+    size_t *field_lengths;   // Length of each field
+    size_t field_count;      // Number of fields in this row
+} cisv_row_t;
+
+// Complete parsing result
+typedef struct {
+    cisv_row_t *rows;        // Array of rows
+    size_t row_count;        // Number of rows
+    size_t row_capacity;     // Allocated capacity for rows
+    char *field_data;        // Contiguous field storage (all strings)
+    size_t field_data_size;  // Current size of field_data
+    size_t field_data_capacity; // Allocated capacity for field_data
+    char **all_fields;       // Flat array of all field pointers
+    size_t *all_lengths;     // Flat array of all field lengths
+    size_t total_fields;     // Total number of fields
+    size_t fields_capacity;  // Allocated capacity for fields
+    int error_code;          // 0 = success, negative = error
+    char error_message[256]; // Error description
+} cisv_result_t;
+
+// Parse entire file and return all data at once
+// Returns NULL on failure (check errno), caller must free with cisv_result_free()
+cisv_result_t *cisv_parse_file_batch(const char *path, const cisv_config *config);
+
+// Parse string buffer and return all data at once
+// Returns NULL on failure (check errno), caller must free with cisv_result_free()
+cisv_result_t *cisv_parse_string_batch(const char *data, size_t len, const cisv_config *config);
+
+// Free result allocated by cisv_parse_file_batch or cisv_parse_string_batch
+void cisv_result_free(cisv_result_t *result);
+
+// =============================================================================
+// Parallel Batch Parsing API
+// Uses multiple threads for maximum throughput on large files
+// =============================================================================
+
+// Parse file in parallel using multiple threads
+// Returns array of results (one per chunk), caller must free with cisv_results_free()
+// num_threads: number of threads to use (0 = auto-detect CPU count)
+// result_count: output parameter for number of results
+cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *config,
+                                          int num_threads, int *result_count);
+
+// Free array of results from cisv_parse_file_parallel
+void cisv_results_free(cisv_result_t **results, int count);
+
+// =============================================================================
+// Platform-specific defines
+// =============================================================================
+
 // Platform-specific defines
 #ifdef __linux__
     #define HAS_POSIX_FADVISE 1
