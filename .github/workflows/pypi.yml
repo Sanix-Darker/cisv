@@ -167,19 +167,88 @@ jobs:
           sed -i "s/^version = .*/version = \"$VERSION\"/" bindings/python/pyproject.toml
           sed -i "s/__version__ = .*/__version__ = '$VERSION'/" bindings/python/cisv/__init__.py
 
-      - name: Copy LICENSE
-        run: cp LICENSE bindings/python/
+      - name: Prepare sdist with C source code
+        run: |
+          # Copy LICENSE
+          cp LICENSE bindings/python/
+
+          # Copy the core C source code into the Python package directory
+          # This allows pip to compile from source
+          cp -r core bindings/python/
+
+          # Verify the structure
+          echo "=== Package structure ==="
+          ls -la bindings/python/
+          ls -la bindings/python/core/
 
       - name: Build sdist
         run: |
           cd bindings/python
           python -m build --sdist
 
+          # Verify sdist contents
+          echo "=== sdist contents ==="
+          tar -tzf dist/*.tar.gz | head -50
+
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
           name: sdist
           path: bindings/python/dist/*.tar.gz
+
+  test-sdist:
+    name: Test source distribution
+    needs: [build-sdist]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: |
+          if [[ "${{ matrix.os }}" == ubuntu* ]]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential
+          fi
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Install from sdist (compiles from source)
+        run: |
+          pip install dist/*.tar.gz -v
+
+      - name: Test import and functionality
+        run: |
+          python -c "import cisv; print(f'cisv version: {cisv.__version__}')"
+          python -c "import cisv; print(cisv.parse_string('a,b,c\n1,2,3'))"
+          python -c "
+          import cisv
+          import tempfile
+          import os
+
+          with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+              f.write('name,value\n')
+              for i in range(100):
+                  f.write(f'item{i},{i}\n')
+              filepath = f.name
+
+          rows = cisv.parse_file(filepath)
+          assert len(rows) == 101, f'Expected 101 rows, got {len(rows)}'
+          print(f'Parsed {len(rows)} rows from source-built library!')
+
+          os.unlink(filepath)
+          print('Source build test passed!')
+          "
 
   test-wheels:
     name: Test wheels

@@ -4,7 +4,7 @@
 Benchmark comparison: cisv vs pandas vs polars for CSV parsing
 
 # Install dependencies
-pip install pandas polars cisv
+pip install --upgrade --no-cache-dir cisv pandas polars
 
 # Run benchmark with 1 million rows × 10 columns (~100MB file)
 python scripts/benchmark_python.py --rows 1000000 --cols 10
@@ -17,7 +17,6 @@ python scripts/benchmark_python.py --file /path/to/large.csv
 """
 
 import os
-import sys
 import time
 import tempfile
 import argparse
