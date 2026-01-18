@@ -14,6 +14,12 @@ python scripts/benchmark_python.py --rows 10000000 --cols 20
 
 # Use an existing CSV file
 python scripts/benchmark_python.py --file /path/to/large.csv
+
+# Include parallel cisv benchmark
+python scripts/benchmark_python.py --rows 1000000 --parallel
+
+# Only benchmark cisv (single-threaded + parallel)
+python scripts/benchmark_python.py --rows 1000000 --only-cisv
 """
 
 import os
@@ -46,26 +52,30 @@ def generate_csv(filepath: str, rows: int, cols: int) -> int:
     return size
 
 
-def benchmark_cisv(filepath: str) -> tuple:
+def benchmark_cisv(filepath: str, parallel: bool = False) -> tuple:
     """Benchmark cisv parser."""
     try:
         import cisv
     except ImportError:
         return None, "cisv not installed"
 
-    print("Benchmarking cisv...")
+    mode = "parallel" if parallel else "single-threaded"
+    print(f"Benchmarking cisv ({mode})...")
 
     # Warm up
     cisv.count_rows(filepath)
 
-    # Count rows (fast path)
-    start = time.perf_counter()
-    row_count = cisv.count_rows(filepath)
-    count_time = time.perf_counter() - start
+    # Count rows (fast path) - only for non-parallel
+    count_time = None
+    row_count = None
+    if not parallel:
+        start = time.perf_counter()
+        row_count = cisv.count_rows(filepath)
+        count_time = time.perf_counter() - start
 
     # Full parse
     start = time.perf_counter()
-    rows = cisv.parse_file(filepath)
+    rows = cisv.parse_file(filepath, parallel=parallel)
     parse_time = time.perf_counter() - start
 
     return {
@@ -158,6 +168,8 @@ def main():
     parser.add_argument('--cols', type=int, default=10, help='Number of columns')
     parser.add_argument('--file', type=str, help='Use existing CSV file instead of generating')
     parser.add_argument('--skip-stdlib', action='store_true', help='Skip stdlib csv benchmark')
+    parser.add_argument('--parallel', action='store_true', help='Include parallel cisv benchmark')
+    parser.add_argument('--only-cisv', action='store_true', help='Only benchmark cisv (single + parallel)')
     args = parser.parse_args()
 
     # Generate or use existing file
@@ -176,39 +188,48 @@ def main():
 
     results = {}
 
-    # Run benchmarks
-    results['cisv'], err = benchmark_cisv(filepath)
+    # Run cisv benchmarks
+    results['cisv'], err = benchmark_cisv(filepath, parallel=False)
     if err:
         print(f"  Skipped: {err}")
 
-    results['polars'], err = benchmark_polars(filepath)
-    if err:
-        print(f"  Skipped: {err}")
-
-    results['pandas'], err = benchmark_pandas(filepath)
-    if err:
-        print(f"  Skipped: {err}")
-
-    if not args.skip_stdlib and args.rows <= 1_000_000:
-        results['stdlib'], err = benchmark_stdlib(filepath)
+    # Run parallel cisv benchmark if requested or if --only-cisv
+    if args.parallel or args.only_cisv:
+        results['cisv-parallel'], err = benchmark_cisv(filepath, parallel=True)
         if err:
             print(f"  Skipped: {err}")
+
+    # Run other benchmarks unless --only-cisv
+    if not args.only_cisv:
+        results['polars'], err = benchmark_polars(filepath)
+        if err:
+            print(f"  Skipped: {err}")
+
+        results['pandas'], err = benchmark_pandas(filepath)
+        if err:
+            print(f"  Skipped: {err}")
+
+        if not args.skip_stdlib and args.rows <= 1_000_000:
+            results['stdlib'], err = benchmark_stdlib(filepath)
+            if err:
+                print(f"  Skipped: {err}")
 
     # Print results
     print(f"\n{'='*60}")
     print("RESULTS")
     print(f"{'='*60}")
-    print(f"{'Library':<12} {'Parse Time':>12} {'Throughput':>14} {'Rows':>12}")
+    print(f"{'Library':<16} {'Parse Time':>12} {'Throughput':>14} {'Rows':>12}")
     print(f"{'-'*60}")
 
     for name, result in sorted(results.items(), key=lambda x: x[1]['parse_time'] if x[1] else float('inf')):
         if result:
             throughput = format_throughput(file_size, result['parse_time'])
-            print(f"{name:<12} {result['parse_time']:>10.3f}s {throughput:>14} {result['parse_rows']:>12,}")
+            print(f"{name:<16} {result['parse_time']:>10.3f}s {throughput:>14} {result['parse_rows']:>12,}")
 
     # cisv count_rows benchmark
     if results.get('cisv') and results['cisv'].get('count_time'):
-        print(f"\ncisv count_rows (fast): {results['cisv']['count_time']:.3f}s")
+        count_throughput = format_throughput(file_size, results['cisv']['count_time'])
+        print(f"\ncisv count_rows: {results['cisv']['count_time']:.4f}s ({count_throughput})")
 
     # Cleanup
     if not args.file:
