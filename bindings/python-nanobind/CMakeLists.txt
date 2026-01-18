@@ -36,16 +36,21 @@ if(SKBUILD)
         -O3 -ffast-math -funroll-loops
     )
 
-    # Enable SIMD if available
+    # For distributable packages, use portable SIMD settings
+    # Do NOT use -march=native as it causes "Illegal instruction" on older CPUs
     include(CheckCCompilerFlag)
-    check_c_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
-    if(COMPILER_SUPPORTS_AVX2)
-        target_compile_options(cisv_core PRIVATE -mavx2)
-    endif()
 
-    check_c_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-    if(COMPILER_SUPPORTS_MARCH_NATIVE)
-        target_compile_options(cisv_core PRIVATE -march=native -mtune=native)
+    # Check architecture and set appropriate SIMD flags
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|amd64)")
+        # x86-64: Use SSE2 baseline (available on all x86-64 CPUs)
+        # The code has runtime paths for SSE2, AVX2, AVX-512
+        check_c_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
+        if(COMPILER_SUPPORTS_SSE42)
+            target_compile_options(cisv_core PRIVATE -msse4.2)
+        endif()
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64|ARM64)")
+        # ARM64: NEON is always available
+        target_compile_options(cisv_core PRIVATE -march=armv8-a)
     endif()
 
     # Link pthread for parallel parsing
