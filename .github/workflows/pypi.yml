@@ -77,7 +77,7 @@ jobs:
           ls -la
 
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wheel-linux-x86_64
           path: bindings/python/dist/*.whl
@@ -139,7 +139,7 @@ jobs:
           ls -la
 
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wheel-macos-arm64
           path: bindings/python/dist/*.whl
@@ -197,7 +197,7 @@ jobs:
           tar -tzf dist/*.tar.gz | head -50
 
       - name: Upload sdist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sdist
           path: bindings/python/dist/*.tar.gz
