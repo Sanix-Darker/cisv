@@ -7,100 +7,18 @@ on:
 
 permissions:
   contents: write
-  packages: write
-
-env:
-  VERSION: ${{ github.ref_name }}
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        arch: [amd64]
-        include:
-          - os: ubuntu-latest
-            pkg_os: ubuntu
-            pkg_type: deb
-
+  create-release:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '23.x'
-
-      - name: Install build dependencies
-        shell: bash
-        run: |
-          npm install -g node-gyp
-
-      - name: Build core library and CLI
-        shell: bash
-        run: |
-          OS_NAME=$(echo "${{ matrix.os }}" | sed 's/-latest//')
-          ARCH="${{ matrix.arch }}"
-          EXT=""
-
-          # Build core and CLI
-          make clean
-          make all
-
-          # Create output with version info
-          OUTPUT="cisv-${{ matrix.pkg_os }}-${ARCH}${EXT}"
-          cp cli/build/cisv "$OUTPUT"
-          echo "OUTPUT_FILE=$OUTPUT" >> $GITHUB_ENV
-
-      - name: Build Node.js addon
-        shell: bash
-        run: |
-          cd bindings/nodejs
-          npm install
-          npm run build
-          cd ../..
-
-          ADDON_OUTPUT="cisv-node-${{ matrix.pkg_os }}-${VERSION}-${{ matrix.arch }}.node"
-          cp bindings/nodejs/build/Release/cisv.node "$ADDON_OUTPUT"
-          echo "ADDON_FILE=$ADDON_OUTPUT" >> $GITHUB_ENV
-
-      - name: Create minimal package
-        shell: bash
-        run: |
-          mkdir -p cisv-package/include
-          mkdir -p cisv-package/lib
-          mkdir -p cisv-package/bin
-
-          # Copy headers
-          cp -r core/include/cisv cisv-package/include/
-
-          # Copy libraries
-          cp core/build/libcisv.a cisv-package/lib/
-          cp core/build/libcisv.so cisv-package/lib/
-
-          # Copy binary
-          cp cli/build/cisv cisv-package/bin/
-
-          # Copy docs
-          cp LICENSE cisv-package/ 2>/dev/null || true
-          cp README.md cisv-package/ 2>/dev/null || true
-
-          # Create tarball
-          tar czf cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz -C cisv-package .
-          echo "MINIMAL_PACKAGE=cisv-minimal-${{ matrix.pkg_os }}-${{ matrix.arch }}.tar.gz" >> $GITHUB_ENV
-
-      - name: Upload Release Assets
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          files: |
-            ${{ env.OUTPUT_FILE }}
-            ${{ env.ADDON_FILE }}
-            ${{ env.MINIMAL_PACKAGE }}
           generate_release_notes: true
 
   publish-npm:
@@ -138,5 +56,46 @@ jobs:
           npm pack
           # Publish the tarball
           npm publish --access public
+||||||| parent of 24e4c6a (chore: updates)
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    needs: build
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '23.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Prepare npm package
+        run: |
+          cd bindings/nodejs
+          npm version ${VERSION#v} --no-git-tag-version
+
+      - name: Install dependencies (without creating hard links)
+        run: |
+          cd bindings/nodejs
+          # Use --install-links to avoid hard links
+          npm install --install-links
+
+      - name: Build native addon
+        run: |
+          cd bindings/nodejs
+          npm run build
+
+      - name: Create and publish package
+        run: |
+          cd bindings/nodejs
+          # Pack first to create a clean tarball
+          npm pack
+          # Publish the tarball
+          npm publish --access public
+=======
+          draft: false
+          prerelease: false
+>>>>>>> 24e4c6a (chore: updates)
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
