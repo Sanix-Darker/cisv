@@ -53,6 +53,12 @@ jobs:
           sed -i.bak "s/version = \".*\"/version = \"${{ steps.get_version.outputs.VERSION }}\"/" pyproject.toml
           rm -f pyproject.toml.bak
 
+      - name: Copy core sources into package
+        run: |
+          mkdir -p bindings/python-nanobind/core
+          cp -r core/src bindings/python-nanobind/core/
+          cp -r core/include bindings/python-nanobind/core/
+
       - name: Build wheels
         run: |
           cd bindings/python-nanobind
