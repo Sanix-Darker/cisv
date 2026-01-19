@@ -52,6 +52,8 @@ if(SKBUILD)
     target_include_directories(cisv_core PUBLIC
         ${CISV_CORE_DIR}/include
     )
+    # -fPIC is required for linking into shared library
+    set_target_properties(cisv_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_options(cisv_core PRIVATE
         -O3 -ffast-math -funroll-loops
     )
@@ -60,17 +62,28 @@ if(SKBUILD)
     # Do NOT use -march=native as it causes "Illegal instruction" on older CPUs
     include(CheckCCompilerFlag)
 
-    # Check architecture and set appropriate SIMD flags
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|amd64)")
-        # x86-64: Use SSE2 baseline (available on all x86-64 CPUs)
-        # The code has runtime paths for SSE2, AVX2, AVX-512
+    # Determine actual target architecture (handle cross-compilation on macOS)
+    if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+        set(TARGET_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+    else()
+        set(TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    message(STATUS "Target architecture: ${TARGET_ARCH}")
+
+    # Set architecture-specific SIMD flags
+    if(TARGET_ARCH MATCHES "(x86_64|AMD64|amd64)")
+        # x86-64: Use SSE4.2 baseline (available on all modern x86-64 CPUs)
         check_c_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE42)
         if(COMPILER_SUPPORTS_SSE42)
             target_compile_options(cisv_core PRIVATE -msse4.2)
         endif()
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64|ARM64)")
-        # ARM64: NEON is always available
-        target_compile_options(cisv_core PRIVATE -march=armv8-a)
+    elseif(TARGET_ARCH MATCHES "(aarch64|arm64|ARM64)")
+        # ARM64: NEON is always available, use portable flag
+        if(APPLE)
+            # macOS ARM: no extra flags needed, NEON is implicit
+        else()
+            target_compile_options(cisv_core PRIVATE -march=armv8-a)
+        endif()
     endif()
 
     # Link pthread for parallel parsing

@@ -68,6 +68,9 @@ jobs:
           CIBW_SKIP: "*-musllinux_* *-win32 *-manylinux_i686"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           CIBW_ARCHS_LINUX: "x86_64 aarch64"
+          # macOS 10.13+ required for nanobind (aligned allocation)
+          MACOSX_DEPLOYMENT_TARGET: "10.14"
+          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.14"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
