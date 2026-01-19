@@ -12,6 +12,7 @@ find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
 if(SKBUILD)
     # Building via scikit-build-core (pip install)
     message(STATUS "Building via scikit-build-core")
+    message(STATUS "CMAKE_CURRENT_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
 
     # Use FetchContent to get nanobind
     include(FetchContent)
@@ -23,13 +24,25 @@ if(SKBUILD)
     FetchContent_MakeAvailable(nanobind)
 
     # Build the core library from source
-    # Check for local core directory (sdist) or parent directory (wheel build from git)
+    # Check multiple locations for core sources
+    set(CISV_CORE_DIR "")
+
+    # Option 1: Local core directory (sdist package)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/src/parser.c")
         set(CISV_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/core")
         message(STATUS "Using local core sources (sdist)")
+    # Option 2: Parent directory (development/cibuildwheel from git checkout)
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../core/src/parser.c")
+        get_filename_component(CISV_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../core" ABSOLUTE)
+        message(STATUS "Using parent core sources: ${CISV_CORE_DIR}")
+    # Option 3: SKBUILD_PROJECT_DIR (scikit-build-core sets this)
+    elseif(DEFINED SKBUILD_PROJECT_DIR AND EXISTS "${SKBUILD_PROJECT_DIR}/../../core/src/parser.c")
+        get_filename_component(CISV_CORE_DIR "${SKBUILD_PROJECT_DIR}/../../core" ABSOLUTE)
+        message(STATUS "Using SKBUILD_PROJECT_DIR core sources: ${CISV_CORE_DIR}")
     else()
-        set(CISV_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../core")
-        message(STATUS "Using parent core sources (development/wheel)")
+        message(FATAL_ERROR "Cannot find core sources. Searched in:\n"
+            "  ${CMAKE_CURRENT_SOURCE_DIR}/core/src/parser.c\n"
+            "  ${CMAKE_CURRENT_SOURCE_DIR}/../../core/src/parser.c")
     endif()
 
     # Add core library sources directly

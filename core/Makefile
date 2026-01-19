@@ -6,6 +6,10 @@ AR ?= ar
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
+# PORTABLE mode: Set PORTABLE=1 to build portable binaries without -march=native
+# Example: make PORTABLE=1 shared
+PORTABLE ?= 0
+
 # SECURITY: Binary hardening flags
 # -fstack-protector-strong: Protect against stack buffer overflows
 # -D_FORTIFY_SOURCE=2: Detect buffer overflows in string/memory functions
@@ -17,21 +21,32 @@ BASE_CFLAGS = -O3 -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto \
               -ffast-math -funroll-loops -fPIC $(SECURITY_CFLAGS)
 
 # Architecture-specific SIMD flags
-ifeq ($(UNAME_M),x86_64)
-    # x86_64: Use AVX2 SIMD
-    ARCH_CFLAGS = -march=native -mavx2 -mtune=native
-else ifeq ($(UNAME_M),amd64)
-    # amd64 (same as x86_64 on some systems)
-    ARCH_CFLAGS = -march=native -mavx2 -mtune=native
-else ifeq ($(UNAME_M),arm64)
-    # ARM64 (Apple Silicon, etc.): Use NEON SIMD
-    ARCH_CFLAGS = -mcpu=native
-else ifeq ($(UNAME_M),aarch64)
-    # aarch64 (same as arm64 on Linux)
-    ARCH_CFLAGS = -march=native
+ifeq ($(PORTABLE),1)
+    # Portable mode: Use baseline SIMD that works on all CPUs of each arch
+    ifeq ($(UNAME_M),x86_64)
+        ARCH_CFLAGS = -msse4.2
+    else ifeq ($(UNAME_M),amd64)
+        ARCH_CFLAGS = -msse4.2
+    else ifeq ($(UNAME_M),arm64)
+        ARCH_CFLAGS = -march=armv8-a
+    else ifeq ($(UNAME_M),aarch64)
+        ARCH_CFLAGS = -march=armv8-a
+    else
+        ARCH_CFLAGS =
+    endif
 else
-    # Fallback for other architectures
-    ARCH_CFLAGS = -march=native
+    # Native mode: Optimize for the build machine's CPU
+    ifeq ($(UNAME_M),x86_64)
+        ARCH_CFLAGS = -march=native -mavx2 -mtune=native
+    else ifeq ($(UNAME_M),amd64)
+        ARCH_CFLAGS = -march=native -mavx2 -mtune=native
+    else ifeq ($(UNAME_M),arm64)
+        ARCH_CFLAGS = -mcpu=native
+    else ifeq ($(UNAME_M),aarch64)
+        ARCH_CFLAGS = -march=native
+    else
+        ARCH_CFLAGS = -march=native
+    endif
 endif
 
 CFLAGS ?= $(BASE_CFLAGS) $(ARCH_CFLAGS)
