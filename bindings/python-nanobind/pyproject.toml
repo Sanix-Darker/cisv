@@ -44,10 +44,6 @@ wheel.packages = ["cisv"]
 cmake.build-type = "Release"
 build-dir = "build/{wheel_tag}"
 
-# CMake and Ninja versions (updated syntax for scikit-build-core >= 0.8)
-cmake.version = ">=3.15"
-ninja.version = ">=1.5"
-
 # Include core source files in sdist (copied during CI build)
 sdist.include = [
     "core/src/*.c",
