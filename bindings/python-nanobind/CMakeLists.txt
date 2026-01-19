@@ -23,7 +23,14 @@ if(SKBUILD)
     FetchContent_MakeAvailable(nanobind)
 
     # Build the core library from source
-    set(CISV_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../core")
+    # Check for local core directory (sdist) or parent directory (wheel build from git)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/src/parser.c")
+        set(CISV_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/core")
+        message(STATUS "Using local core sources (sdist)")
+    else()
+        set(CISV_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../core")
+        message(STATUS "Using parent core sources (development/wheel)")
+    endif()
 
     # Add core library sources directly
     add_library(cisv_core STATIC

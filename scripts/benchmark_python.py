@@ -73,9 +73,15 @@ def benchmark_cisv(filepath: str, parallel: bool = False) -> tuple:
         row_count = cisv.count_rows(filepath)
         count_time = time.perf_counter() - start
 
-    # Full parse
+    # Full parse - handle both old (ctypes) and new (nanobind) versions
     start = time.perf_counter()
-    rows = cisv.parse_file(filepath, parallel=parallel)
+    try:
+        rows = cisv.parse_file(filepath, parallel=parallel)
+    except TypeError:
+        # Old ctypes version doesn't support parallel parameter
+        if parallel:
+            return None, "parallel not supported (old cisv version)"
+        rows = cisv.parse_file(filepath)
     parse_time = time.perf_counter() - start
 
     return {
