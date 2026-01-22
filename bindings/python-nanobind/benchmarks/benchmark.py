@@ -5,12 +5,13 @@ Benchmark comparison: cisv vs popular Python CSV parsers
 
 Compared libraries:
 - cisv: High-performance C parser with SIMD optimizations
-- polars: Rust-based DataFrame library with Arrow backend
-- pyarrow: Apache Arrow's CSV reader (columnar format)
+- polars: Rust-based DataFrame library with Arrow backend (multi-threaded by default)
+- pyarrow: Apache Arrow's CSV reader (columnar format, multi-threaded)
 - datatable: Fast C-based parser (similar to R's data.table)
 - duckdb: SQL database with fast CSV import
-- pandas: Popular DataFrame library
-- stdlib csv: Python's built-in csv module
+- pandas: Popular DataFrame library (single-threaded with C engine)
+- pandas-pyarrow: pandas with pyarrow engine (multi-threaded)
+- stdlib csv: Python's built-in csv module (single-threaded)
 
 # Install dependencies
 pip install --upgrade --no-cache-dir cisv pandas polars pyarrow datatable duckdb numpy
@@ -130,7 +131,8 @@ def benchmark_cisv(filepath: str, parallel: bool = False, fast: bool = False, be
     parse_time = time.perf_counter() - start
 
     # Get row count and column count
-    parse_rows = len(rows)
+    # Subtract 1 to exclude header row (consistent with other libraries)
+    parse_rows = len(rows) - 1
     if fast or benchmark:
         parse_cols = len(rows[0]) if parse_rows > 0 else 0
     else:
@@ -138,7 +140,7 @@ def benchmark_cisv(filepath: str, parallel: bool = False, fast: bool = False, be
 
     return {
         'count_time': count_time,
-        'count_rows': row_count,
+        'count_rows': row_count - 1 if row_count else None,
         'parse_time': parse_time,
         'parse_rows': parse_rows,
         'parse_cols': parse_cols,
@@ -168,13 +170,40 @@ def benchmark_pandas(filepath: str) -> tuple:
     }, None
 
 
+def benchmark_pandas_pyarrow(filepath: str) -> tuple:
+    """Benchmark pandas CSV reader with pyarrow engine (multi-threaded)."""
+    try:
+        import pandas as pd
+    except ImportError:
+        return None, "pandas not installed"
+
+    print("Benchmarking pandas (pyarrow engine)...")
+
+    # Full parse with pyarrow engine for multi-threaded reading
+    start = time.perf_counter()
+    try:
+        df = pd.read_csv(filepath, engine="pyarrow")
+    except Exception as e:
+        return None, f"pyarrow engine error: {e}"
+    parse_time = time.perf_counter() - start
+
+    return {
+        'count_time': None,
+        'count_rows': len(df),
+        'parse_time': parse_time,
+        'parse_rows': len(df),
+        'parse_cols': len(df.columns),
+    }, None
+
+
 def benchmark_polars(filepath: str) -> tuple:
-    """Benchmark polars CSV reader."""
+    """Benchmark polars CSV reader (multi-threaded by default)."""
     try:
         import polars as pl
     except ImportError:
         return None, "polars not installed"
 
+    # Note: polars uses all CPU cores by default, no extra config needed
     print("Benchmarking polars...")
 
     # Full parse
@@ -367,6 +396,10 @@ def main():
             print(f"  Skipped: {err}")
 
         results['pandas'], err = benchmark_pandas(filepath)
+        if err:
+            print(f"  Skipped: {err}")
+
+        results['pandas-pyarrow'], err = benchmark_pandas_pyarrow(filepath)
         if err:
             print(f"  Skipped: {err}")
 
