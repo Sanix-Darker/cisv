@@ -28,13 +28,24 @@
         "docs": "https://github.com/Sanix-Darker/cisv/blob/master/bindings/php/README.md"
     },
     "require": {
-        "php": ">=7.4"
+        "php": ">=8.1"
     },
     "require-dev": {
         "phpunit/phpunit": "^9.0 || ^10.0 || ^11.0"
     },
     "provide": {
         "ext-cisv": "0.0.8"
+    },
+    "php-ext": {
+        "extension-name": "cisv",
+        "priority": 80,
+        "support-zts": true,
+        "configure-options": [
+            {
+                "name": "enable-cisv",
+                "description": "Enable CISV high-performance CSV parser support"
+            }
+        ]
     },
     "autoload": {
         "files": ["bindings/php/stubs/cisv.php"]
