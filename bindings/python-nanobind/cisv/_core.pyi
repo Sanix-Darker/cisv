@@ -104,3 +104,82 @@ def count_rows(path: str) -> int:
         Number of rows in the file
     """
     ...
+
+class CisvIterator:
+    """
+    Row-by-row iterator for streaming CSV parsing.
+
+    Provides fgetcsv-style iteration with minimal memory footprint.
+    Supports early exit - no wasted work when breaking mid-file.
+
+    Example:
+        with CisvIterator('/path/to/file.csv') as reader:
+            for row in reader:
+                print(row)  # List[str]
+                if row[0] == 'stop':
+                    break  # Early exit - no wasted work
+    """
+
+    def __init__(
+        self,
+        path: str,
+        delimiter: str = ",",
+        quote: str = '"',
+        trim: bool = False,
+        skip_empty_lines: bool = False,
+    ) -> None:
+        """
+        Create a new CSV iterator.
+
+        Args:
+            path: Path to the CSV file
+            delimiter: Field delimiter character (default: ',')
+            quote: Quote character (default: '"')
+            trim: Whether to trim whitespace from fields
+            skip_empty_lines: Whether to skip empty lines
+        """
+        ...
+
+    def next(self) -> List[str] | None:
+        """
+        Get the next row as a list of strings, or None if at end of file.
+
+        Returns:
+            List of field values for the next row, or None if EOF
+        """
+        ...
+
+    def close(self) -> None:
+        """Close the iterator and release resources."""
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """Whether the iterator has been closed."""
+        ...
+
+    def __iter__(self) -> "CisvIterator":
+        """Return the iterator object itself."""
+        ...
+
+    def __next__(self) -> List[str]:
+        """
+        Get the next row as a list of strings.
+
+        Raises:
+            StopIteration: When end of file is reached
+        """
+        ...
+
+    def __enter__(self) -> "CisvIterator":
+        """Enter the context manager."""
+        ...
+
+    def __exit__(
+        self,
+        exc_type: type | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> bool:
+        """Exit the context manager and close the iterator."""
+        ...

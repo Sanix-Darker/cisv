@@ -427,9 +427,172 @@ static size_t count_rows(const std::string &path) {
     return cisv_parser_count_rows(path.c_str());
 }
 
+/**
+ * Row-by-row iterator for streaming CSV parsing.
+ *
+ * Provides fgetcsv-style iteration with minimal memory footprint.
+ * Supports early exit - no wasted work when breaking mid-file.
+ */
+class CisvIterator {
+private:
+    cisv_iterator_t *it_;
+    bool closed_;
+    std::string path_;
+
+public:
+    CisvIterator(const std::string &path,
+                 const std::string &delimiter = ",",
+                 const std::string &quote = "\"",
+                 bool trim = false,
+                 bool skip_empty_lines = false)
+        : it_(nullptr), closed_(false), path_(path)
+    {
+        if (path.empty()) {
+            throw std::invalid_argument("Path cannot be empty");
+        }
+        if (delimiter.empty() || delimiter.size() > 1) {
+            throw std::invalid_argument("Delimiter must be a single character");
+        }
+        if (quote.empty() || quote.size() > 1) {
+            throw std::invalid_argument("Quote must be a single character");
+        }
+
+        cisv_config config;
+        cisv_config_init(&config);
+        config.delimiter = delimiter[0];
+        config.quote = quote[0];
+        config.trim = trim;
+        config.skip_empty_lines = skip_empty_lines;
+
+        it_ = cisv_iterator_open(path.c_str(), &config);
+        if (!it_) {
+            throw std::runtime_error("Failed to open file: " + path);
+        }
+    }
+
+    ~CisvIterator() {
+        close();
+    }
+
+    // Disable copy
+    CisvIterator(const CisvIterator&) = delete;
+    CisvIterator& operator=(const CisvIterator&) = delete;
+
+    /**
+     * Get the next row, or None if at end of file.
+     */
+    nb::object next() {
+        if (closed_ || !it_) {
+            return nb::none();
+        }
+
+        const char **fields;
+        const size_t *lengths;
+        size_t field_count;
+
+        int result = cisv_iterator_next(it_, &fields, &lengths, &field_count);
+
+        if (result == CISV_ITER_EOF) {
+            return nb::none();
+        }
+        if (result == CISV_ITER_ERROR) {
+            throw std::runtime_error("Error reading CSV row from: " + path_);
+        }
+
+        nb::list row;
+        for (size_t i = 0; i < field_count; i++) {
+            row.append(nb::str(fields[i], lengths[i]));
+        }
+        return row;
+    }
+
+    /**
+     * Close the iterator and release resources.
+     */
+    void close() {
+        if (!closed_ && it_) {
+            cisv_iterator_close(it_);
+            it_ = nullptr;
+            closed_ = true;
+        }
+    }
+
+    /**
+     * Check if the iterator is closed.
+     */
+    bool is_closed() const {
+        return closed_;
+    }
+
+    // Python iterator protocol - __iter__
+    CisvIterator& iter() {
+        return *this;
+    }
+
+    // Python iterator protocol - __next__
+    nb::object iternext() {
+        nb::object row = next();
+        if (row.is_none()) {
+            throw nb::stop_iteration();
+        }
+        return row;
+    }
+
+    // Context manager protocol - __enter__
+    CisvIterator& enter() {
+        return *this;
+    }
+
+    // Context manager protocol - __exit__
+    // Note: Returns false to indicate exception should propagate (if any)
+    bool exit(nb::object /*exc_type*/, nb::object /*exc_val*/, nb::object /*exc_tb*/) {
+        close();
+        return false;  // Don't suppress exceptions
+    }
+};
+
 // Module definition
 NB_MODULE(_core, m) {
     m.doc() = "High-performance CSV parser with SIMD optimizations";
+
+    // Register the CisvIterator class
+    nb::class_<CisvIterator>(m, "CisvIterator",
+        "Row-by-row iterator for streaming CSV parsing.\n\n"
+        "Provides fgetcsv-style iteration with minimal memory footprint.\n"
+        "Supports early exit - no wasted work when breaking mid-file.\n\n"
+        "Example:\n"
+        "    with CisvIterator('/path/to/file.csv') as reader:\n"
+        "        for row in reader:\n"
+        "            print(row)  # List[str]\n"
+        "            if row[0] == 'stop':\n"
+        "                break  # Early exit - no wasted work")
+        .def(nb::init<const std::string &, const std::string &,
+                      const std::string &, bool, bool>(),
+             nb::arg("path"),
+             nb::arg("delimiter") = ",",
+             nb::arg("quote") = "\"",
+             nb::arg("trim") = false,
+             nb::arg("skip_empty_lines") = false,
+             "Create a new CSV iterator.\n\n"
+             "Args:\n"
+             "    path: Path to the CSV file\n"
+             "    delimiter: Field delimiter character (default: ',')\n"
+             "    quote: Quote character (default: '\"')\n"
+             "    trim: Whether to trim whitespace from fields\n"
+             "    skip_empty_lines: Whether to skip empty lines")
+        .def("next", &CisvIterator::next,
+             "Get the next row as a list of strings, or None if at end of file.")
+        .def("close", &CisvIterator::close,
+             "Close the iterator and release resources.")
+        .def_prop_ro("closed", &CisvIterator::is_closed,
+             "Whether the iterator has been closed.")
+        .def("__iter__", &CisvIterator::iter, nb::rv_policy::reference)
+        .def("__next__", &CisvIterator::iternext)
+        .def("__enter__", &CisvIterator::enter, nb::rv_policy::reference)
+        .def("__exit__", [](CisvIterator &self, nb::args) {
+            self.close();
+            return false;  // Don't suppress exceptions
+        });
 
     m.def("parse_file", &parse_file,
           nb::arg("path"),

@@ -15,6 +15,7 @@ from ._core import (
     parse_file_raw as _parse_file_raw,
     parse_file_count_only as _parse_file_count_only,
     count_rows,
+    CisvIterator,
 )
 
 __version__ = '0.2.0'
@@ -27,6 +28,8 @@ __all__ = [
     'CisvResult',
     'CisvBenchmarkResult',
     'CisvError',
+    'CisvIterator',
+    'open_iterator',
 ]
 
 
@@ -343,3 +346,54 @@ def parse_file_benchmark(
         raise CisvError(str(e)) from e
     except Exception as e:
         raise CisvError(f"Failed to parse file: {e}") from e
+
+
+def open_iterator(
+    path: str,
+    delimiter: str = ',',
+    quote: str = '"',
+    *,
+    trim: bool = False,
+    skip_empty_lines: bool = False,
+) -> CisvIterator:
+    """
+    Open a CSV file for row-by-row iteration.
+
+    This function returns a CisvIterator that provides fgetcsv-style
+    streaming with minimal memory footprint. It supports early exit -
+    breaking out of iteration stops parsing immediately with no wasted work.
+
+    Args:
+        path: Path to the CSV file
+        delimiter: Field delimiter character (default: ',')
+        quote: Quote character (default: '"')
+        trim: Whether to trim whitespace from fields
+        skip_empty_lines: Whether to skip empty lines
+
+    Returns:
+        CisvIterator that can be used with for-loops or as a context manager.
+
+    Raises:
+        CisvError: If the file cannot be opened
+
+    Example:
+        >>> import cisv
+        >>> # Using as context manager (recommended)
+        >>> with cisv.open_iterator('data.csv') as reader:
+        ...     for row in reader:
+        ...         print(row)
+        ...         if row[0] == 'stop':
+        ...             break  # Early exit - no wasted work
+        ['header1', 'header2']
+        ['value1', 'value2']
+
+        >>> # Using in a simple for loop
+        >>> for row in cisv.open_iterator('data.csv'):
+        ...     print(row[0])
+    """
+    try:
+        return CisvIterator(path, delimiter, quote, trim, skip_empty_lines)
+    except RuntimeError as e:
+        raise CisvError(str(e)) from e
+    except Exception as e:
+        raise CisvError(f"Failed to open iterator: {e}") from e
