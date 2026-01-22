@@ -107,13 +107,13 @@ else()
         FetchContent_MakeAvailable(nanobind)
     endif()
 
-    # Use the existing cisv target from the parent project
-    if(NOT TARGET cisv)
-        message(FATAL_ERROR "cisv target not found. Build from the project root.")
+    # Use the existing cisv_static target from the parent project
+    if(NOT TARGET cisv_static)
+        message(FATAL_ERROR "cisv_static target not found. Build from the project root.")
     endif()
 
     # Create alias for consistency
-    add_library(cisv_core ALIAS cisv)
+    add_library(cisv_core ALIAS cisv_static)
 endif()
 
 # Create the Python extension module
@@ -130,7 +130,7 @@ if(SKBUILD)
         ${CISV_CORE_DIR}/include
     )
 else()
-    target_link_libraries(_core PRIVATE cisv)
+    target_link_libraries(_core PRIVATE cisv_static)
     target_include_directories(_core PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../core/include
     )

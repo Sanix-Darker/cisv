@@ -214,7 +214,7 @@ void cisv_config_init(cisv_config *config) {
 #define DEFAULT_MAX_FIELD_SIZE (1 * 1024 * 1024)
 
 // Ensure quote buffer has enough space
-// Optimized: power-of-2 growth with 64KB minimum increment, cache-line aligned
+// Optimized: 1.5x growth with 64KB minimum increment, cache-line aligned
 static inline bool ensure_quote_buffer(cisv_parser *p, size_t needed) {
     size_t required = p->quote_buffer_pos + needed;
     if (__builtin_expect(required <= p->quote_buffer_size, 1)) {
@@ -227,20 +227,11 @@ static inline bool ensure_quote_buffer(cisv_parser *p, size_t needed) {
         return false;
     }
 
-    // Power-of-2 growth with 64KB minimum increment
-    if (new_size < MIN_BUFFER_INCREMENT) {
-        new_size = MIN_BUFFER_INCREMENT;
-    } else {
-        // Round up to next power of 2
-        new_size--;
-        new_size |= new_size >> 1;
-        new_size |= new_size >> 2;
-        new_size |= new_size >> 4;
-        new_size |= new_size >> 8;
-        new_size |= new_size >> 16;
-        new_size |= new_size >> 32;
-        new_size++;
-    }
+    // 1.5x growth: reduces memory waste from ~50% to ~33%
+    size_t grow_size = p->quote_buffer_size + (p->quote_buffer_size >> 1);
+    if (grow_size < new_size) grow_size = new_size;
+    if (grow_size < MIN_BUFFER_INCREMENT) grow_size = MIN_BUFFER_INCREMENT;
+    new_size = grow_size;
 
     // Align to cache line for SIMD access
     new_size = (new_size + CACHE_LINE_SIZE - 1) & ~(size_t)(CACHE_LINE_SIZE - 1);
@@ -277,18 +268,9 @@ static inline bool ensure_stream_buffer(cisv_parser *p, size_t needed) {
         return true;  // Fast path: buffer has space
     }
 
-    // Calculate new size with overflow protection
-    size_t sum;
-    if (__builtin_add_overflow(p->stream_buffer_size, needed, &sum)) {
-        if (p->ecb) p->ecb(p->user, p->line_num, "Stream buffer calculation overflow");
-        return false;
-    }
-
-    size_t new_size;
-    if (__builtin_mul_overflow(sum, (size_t)2, &new_size)) {
-        if (p->ecb) p->ecb(p->user, p->line_num, "Stream buffer growth overflow");
-        return false;
-    }
+    // 1.5x growth: reduces memory waste from ~50% to ~33%
+    size_t grow_size = p->stream_buffer_size + (p->stream_buffer_size >> 1);
+    size_t new_size = (grow_size > required) ? grow_size : required;
 
     // Enforce maximum buffer size to prevent DoS
     if (new_size > MAX_QUOTE_BUFFER_SIZE) {
@@ -1915,8 +1897,10 @@ typedef struct {
 static inline bool batch_ensure_rows(cisv_result_t *r, size_t needed) {
     if (r->row_count + needed <= r->row_capacity) return true;
 
-    size_t new_cap = r->row_capacity * 2;
-    if (new_cap < r->row_count + needed) new_cap = r->row_count + needed;
+    // 1.5x growth: reduces memory waste from ~50% to ~33%
+    size_t required = r->row_count + needed;
+    size_t new_cap = r->row_capacity + (r->row_capacity >> 1);
+    if (new_cap < required) new_cap = required;
 
     cisv_row_t *new_rows = realloc(r->rows, new_cap * sizeof(cisv_row_t));
     if (!new_rows) return false;
@@ -1930,8 +1914,10 @@ static inline bool batch_ensure_rows(cisv_result_t *r, size_t needed) {
 static inline bool batch_ensure_fields(cisv_result_t *r, size_t needed) {
     if (r->total_fields + needed <= r->fields_capacity) return true;
 
-    size_t new_cap = r->fields_capacity * 2;
-    if (new_cap < r->total_fields + needed) new_cap = r->total_fields + needed;
+    // 1.5x growth: reduces memory waste from ~50% to ~33%
+    size_t required = r->total_fields + needed;
+    size_t new_cap = r->fields_capacity + (r->fields_capacity >> 1);
+    if (new_cap < required) new_cap = required;
 
     char **new_fields = realloc(r->all_fields, new_cap * sizeof(char*));
     if (!new_fields) return false;
@@ -1946,11 +1932,16 @@ static inline bool batch_ensure_fields(cisv_result_t *r, size_t needed) {
 }
 
 // Ensure result has capacity for more field data
+// NOTE: all_fields[] stores offsets (not pointers) during parsing to avoid
+// O(n) pointer fixup on reallocation. Offsets are converted to pointers
+// in batch_result_finalize() after parsing completes.
 static inline bool batch_ensure_data(cisv_result_t *r, size_t needed) {
     if (r->field_data_size + needed <= r->field_data_capacity) return true;
 
-    size_t new_cap = r->field_data_capacity * 2;
-    if (new_cap < r->field_data_size + needed) new_cap = r->field_data_size + needed;
+    // 1.5x growth: reduces memory waste from ~50% to ~33%
+    size_t required = r->field_data_size + needed;
+    size_t new_cap = r->field_data_capacity + (r->field_data_capacity >> 1);
+    if (new_cap < required) new_cap = required;
 
     // Round up to 64-byte alignment for cache efficiency
     new_cap = (new_cap + 63) & ~(size_t)63;
@@ -1958,20 +1949,14 @@ static inline bool batch_ensure_data(cisv_result_t *r, size_t needed) {
     char *new_data = realloc(r->field_data, new_cap);
     if (!new_data) return false;
 
-    // Update all field pointers if realloc moved the buffer
-    if (new_data != r->field_data && r->field_data) {
-        ptrdiff_t delta = new_data - r->field_data;
-        for (size_t i = 0; i < r->total_fields; i++) {
-            r->all_fields[i] += delta;
-        }
-    }
-
+    // No pointer fixup needed - we store offsets, not pointers
     r->field_data = new_data;
     r->field_data_capacity = new_cap;
     return true;
 }
 
 // Batch field callback - accumulates fields into result
+// NOTE: stores field offset (not pointer) to avoid O(n) fixup on realloc
 static void batch_field_cb(void *user, const char *data, size_t len) {
     BatchCollector *bc = (BatchCollector *)user;
     cisv_result_t *r = bc->result;
@@ -1989,13 +1974,16 @@ static void batch_field_cb(void *user, const char *data, size_t len) {
         return;
     }
 
+    // Store current offset before copying (field_data may reallocate)
+    size_t offset = r->field_data_size;
+
     // Copy field data (null-terminated for convenience)
-    char *dest = r->field_data + r->field_data_size;
+    char *dest = r->field_data + offset;
     memcpy(dest, data, len);
     dest[len] = '\0';
 
-    // Record field pointer and length
-    r->all_fields[r->total_fields] = dest;
+    // Record field offset (converted to pointer in batch_result_finalize)
+    r->all_fields[r->total_fields] = (char*)(uintptr_t)offset;
     r->all_lengths[r->total_fields] = len;
     r->total_fields++;
     r->field_data_size += len + 1;
@@ -2027,11 +2015,18 @@ static void batch_row_cb(void *user) {
     bc->current_row_start = r->total_fields;
 }
 
-// Finalize result by converting stored indices to actual pointers
+// Finalize result by converting stored indices/offsets to actual pointers
 // Must be called after all parsing is complete
 static void batch_result_finalize(cisv_result_t *r) {
+    // First, convert all field offsets to actual pointers
+    // This is O(n) but only done once at the end, not on every realloc
+    for (size_t i = 0; i < r->total_fields; i++) {
+        size_t offset = (size_t)(uintptr_t)r->all_fields[i];
+        r->all_fields[i] = r->field_data + offset;
+    }
+
+    // Now convert row field indices to actual pointers
     for (size_t i = 0; i < r->row_count; i++) {
-        // Convert stored index back to actual pointer
         size_t start_index = (size_t)(intptr_t)r->rows[i].fields;
         r->rows[i].fields = &r->all_fields[start_index];
         r->rows[i].field_lengths = &r->all_lengths[start_index];
@@ -2050,16 +2045,50 @@ static void batch_error_cb(void *user, int line, const char *msg) {
     }
 }
 
-// Allocate and initialize a new result structure
-static cisv_result_t *batch_result_create(void) {
+// Maximum initial allocation for pre-sized buffers (500MB)
+#define BATCH_MAX_INITIAL_ALLOC (500 * 1024 * 1024)
+
+// Allocate and initialize a new result structure with size hints
+// file_size_hint: estimated file size (0 to use defaults)
+static cisv_result_t *batch_result_create_with_hint(size_t file_size_hint) {
     cisv_result_t *r = calloc(1, sizeof(cisv_result_t));
     if (!r) return NULL;
 
-    // Allocate initial buffers
-    r->rows = malloc(BATCH_INITIAL_ROWS * sizeof(cisv_row_t));
-    r->all_fields = malloc(BATCH_INITIAL_FIELDS * sizeof(char*));
-    r->all_lengths = malloc(BATCH_INITIAL_FIELDS * sizeof(size_t));
-    r->field_data = malloc(BATCH_INITIAL_DATA);
+    // Estimate buffer sizes based on file size
+    // Heuristics: ~100 bytes/row average, ~8 fields/row average
+    size_t row_cap = BATCH_INITIAL_ROWS;
+    size_t field_cap = BATCH_INITIAL_FIELDS;
+    size_t data_cap = BATCH_INITIAL_DATA;
+
+    if (file_size_hint > 0) {
+        // Estimate rows: assume ~100 bytes per row on average
+        size_t est_rows = file_size_hint / 100;
+        if (est_rows > row_cap && est_rows * sizeof(cisv_row_t) < BATCH_MAX_INITIAL_ALLOC) {
+            row_cap = est_rows;
+        }
+
+        // Estimate fields: assume ~8 fields per row
+        size_t est_fields = est_rows * 8;
+        if (est_fields > field_cap && est_fields * sizeof(char*) < BATCH_MAX_INITIAL_ALLOC) {
+            field_cap = est_fields;
+        }
+
+        // Field data needs at least file_size bytes (strings + null terminators)
+        // Add 10% overhead for null terminators
+        size_t est_data = file_size_hint + (file_size_hint / 10);
+        if (est_data > data_cap && est_data < BATCH_MAX_INITIAL_ALLOC) {
+            data_cap = est_data;
+        }
+
+        // Align data capacity to 64 bytes for cache efficiency
+        data_cap = (data_cap + 63) & ~(size_t)63;
+    }
+
+    // Allocate buffers with estimated sizes
+    r->rows = malloc(row_cap * sizeof(cisv_row_t));
+    r->all_fields = malloc(field_cap * sizeof(char*));
+    r->all_lengths = malloc(field_cap * sizeof(size_t));
+    r->field_data = malloc(data_cap);
 
     if (!r->rows || !r->all_fields || !r->all_lengths || !r->field_data) {
         free(r->rows);
@@ -2070,11 +2099,16 @@ static cisv_result_t *batch_result_create(void) {
         return NULL;
     }
 
-    r->row_capacity = BATCH_INITIAL_ROWS;
-    r->fields_capacity = BATCH_INITIAL_FIELDS;
-    r->field_data_capacity = BATCH_INITIAL_DATA;
+    r->row_capacity = row_cap;
+    r->fields_capacity = field_cap;
+    r->field_data_capacity = data_cap;
 
     return r;
+}
+
+// Allocate and initialize a new result structure with default sizes
+static cisv_result_t *batch_result_create(void) {
+    return batch_result_create_with_hint(0);
 }
 
 void cisv_result_free(cisv_result_t *result) {
@@ -2095,7 +2129,14 @@ cisv_result_t *cisv_parse_file_batch(const char *path, const cisv_config *config
         return NULL;
     }
 
-    cisv_result_t *result = batch_result_create();
+    // Get file size for buffer pre-sizing (reduces reallocations)
+    size_t file_size_hint = 0;
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+        file_size_hint = (size_t)st.st_size;
+    }
+
+    cisv_result_t *result = batch_result_create_with_hint(file_size_hint);
     if (!result) {
         errno = ENOMEM;
         return NULL;
