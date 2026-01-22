@@ -46,6 +46,11 @@ target_include_directories(cisv_shared PUBLIC
 )
 set_target_properties(cisv_shared PROPERTIES OUTPUT_NAME cisv)
 
+# Link pthread for parallel parsing support
+find_package(Threads REQUIRED)
+target_link_libraries(cisv_static PRIVATE Threads::Threads)
+target_link_libraries(cisv_shared PRIVATE Threads::Threads)
+
 # Platform-specific settings
 if(UNIX AND NOT APPLE)
     target_compile_definitions(cisv_static PRIVATE _GNU_SOURCE)

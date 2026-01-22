@@ -8,6 +8,9 @@ if test "$PHP_CISV" != "no"; then
 
   dnl Link against the pre-built libcisv library
   PHP_ADD_LIBRARY_WITH_PATH(cisv, $srcdir/../../core/build, CISV_SHARED_LIBADD)
+
+  dnl Link pthread for parallel parsing support
+  PHP_ADD_LIBRARY(pthread, 1, CISV_SHARED_LIBADD)
   PHP_SUBST(CISV_SHARED_LIBADD)
 
   dnl Compiler flags for optimization

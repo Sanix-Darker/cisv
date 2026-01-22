@@ -296,14 +296,159 @@ PHP_METHOD(CisvParser, setQuote) {
     RETURN_ZVAL(ZEND_THIS, 1, 0);
 }
 
+/* PHP_METHOD(CisvParser, parseFileParallel) - Multi-threaded parsing */
+PHP_METHOD(CisvParser, parseFileParallel) {
+    char *filename;
+    size_t filename_len;
+    zend_long num_threads = 0;
+
+    ZEND_PARSE_PARAMETERS_START(1, 2)
+        Z_PARAM_STRING(filename, filename_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(num_threads)
+    ZEND_PARSE_PARAMETERS_END();
+
+    cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
+
+    /* Parse file using parallel API */
+    int result_count = 0;
+    cisv_result_t **results = cisv_parse_file_parallel(filename, &intern->config,
+                                                        (int)num_threads, &result_count);
+
+    if (!results) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Failed to parse file in parallel: %s", strerror(errno));
+        return;
+    }
+
+    /* Build result array from all chunks */
+    zval rows;
+    array_init(&rows);
+
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        cisv_result_t *result = results[chunk];
+        if (!result) continue;
+
+        if (result->error_code != 0) {
+            zval_ptr_dtor(&rows);
+            zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
+            cisv_results_free(results, result_count);
+            return;
+        }
+
+        for (size_t i = 0; i < result->row_count; i++) {
+            zval row;
+            array_init(&row);
+            cisv_row_t *r = &result->rows[i];
+            for (size_t j = 0; j < r->field_count; j++) {
+                zval field;
+                ZVAL_STRINGL(&field, r->fields[j], r->field_lengths[j]);
+                add_next_index_zval(&row, &field);
+            }
+            add_next_index_zval(&rows, &row);
+        }
+    }
+
+    cisv_results_free(results, result_count);
+    RETURN_ZVAL(&rows, 0, 1);
+}
+
+/* PHP_METHOD(CisvParser, parseFileBenchmark) - Benchmark mode (count only, no data marshaling) */
+PHP_METHOD(CisvParser, parseFileBenchmark) {
+    char *filename;
+    size_t filename_len;
+    zend_long num_threads = 0;
+
+    ZEND_PARSE_PARAMETERS_START(1, 2)
+        Z_PARAM_STRING(filename, filename_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(num_threads)
+    ZEND_PARSE_PARAMETERS_END();
+
+    cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
+
+    /* Parse file using parallel API */
+    int result_count = 0;
+    cisv_result_t **results = cisv_parse_file_parallel(filename, &intern->config,
+                                                        (int)num_threads, &result_count);
+
+    if (!results) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Failed to parse file: %s", strerror(errno));
+        return;
+    }
+
+    /* Just count totals, don't create PHP arrays */
+    size_t total_rows = 0;
+    size_t total_fields = 0;
+
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        cisv_result_t *result = results[chunk];
+        if (!result) continue;
+
+        if (result->error_code != 0) {
+            zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
+            cisv_results_free(results, result_count);
+            return;
+        }
+
+        total_rows += result->row_count;
+        total_fields += result->total_fields;
+    }
+
+    cisv_results_free(results, result_count);
+
+    /* Return array with counts */
+    zval result_arr;
+    array_init(&result_arr);
+    add_assoc_long(&result_arr, "rows", (zend_long)total_rows);
+    add_assoc_long(&result_arr, "fields", (zend_long)total_fields);
+    RETURN_ZVAL(&result_arr, 0, 1);
+}
+
+/* Arginfo definitions for PHP 8+ compatibility */
+ZEND_BEGIN_ARG_INFO_EX(arginfo_cisv_construct, 0, 0, 0)
+    ZEND_ARG_TYPE_INFO(0, options, IS_ARRAY, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_cisv_parseFile, 0, 1, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_cisv_parseString, 0, 1, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, csv, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_cisv_countRows, 0, 1, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_cisv_setDelimiter, 0, 1, CisvParser, 0)
+    ZEND_ARG_TYPE_INFO(0, delimiter, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_cisv_setQuote, 0, 1, CisvParser, 0)
+    ZEND_ARG_TYPE_INFO(0, quote, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_cisv_parseFileParallel, 0, 1, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, num_threads, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_cisv_parseFileBenchmark, 0, 1, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, num_threads, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
 /* Method table */
 static const zend_function_entry cisv_parser_methods[] = {
-    PHP_ME(CisvParser, __construct, NULL, ZEND_ACC_PUBLIC)
-    PHP_ME(CisvParser, parseFile, NULL, ZEND_ACC_PUBLIC)
-    PHP_ME(CisvParser, parseString, NULL, ZEND_ACC_PUBLIC)
-    PHP_ME(CisvParser, countRows, NULL, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-    PHP_ME(CisvParser, setDelimiter, NULL, ZEND_ACC_PUBLIC)
-    PHP_ME(CisvParser, setQuote, NULL, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, __construct, arginfo_cisv_construct, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, parseFile, arginfo_cisv_parseFile, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, parseString, arginfo_cisv_parseString, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, countRows, arginfo_cisv_countRows, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(CisvParser, setDelimiter, arginfo_cisv_setDelimiter, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, setQuote, arginfo_cisv_setQuote, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, parseFileParallel, arginfo_cisv_parseFileParallel, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, parseFileBenchmark, arginfo_cisv_parseFileBenchmark, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 

@@ -27,4 +27,4 @@ RUN mkdir -p /tmp/csv_bench && cd /tmp/csv_bench && \
 COPY bindings/php/benchmarks/benchmark.php /benchmark/
 
 WORKDIR /benchmark
-ENTRYPOINT ["php", "-d", "extension=/benchmark/cisv/bindings/php/modules/cisv.so", "/benchmark/benchmark.php"]
+ENTRYPOINT ["php", "-d", "extension=/benchmark/cisv/bindings/php/modules/cisv.so", "-d", "memory_limit=2G", "/benchmark/benchmark.php"]

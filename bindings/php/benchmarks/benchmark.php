@@ -5,6 +5,12 @@
  *
  * Compares cisv PHP extension against native PHP CSV parsing methods.
  *
+ * CISV Benchmark Modes:
+ * - cisv: Single-threaded parsing, returns array of rows
+ * - cisv-parallel: Multi-threaded parsing (auto-detect CPU cores)
+ * - cisv-bench: Multi-threaded, count only (raw parsing speed, no data marshaling)
+ * - cisv-count: Fast row counting using SIMD
+ *
  * Usage:
  *   php benchmark.php [--rows=N] [--file=/path/to/file.csv] [--iterations=N]
  *
@@ -146,15 +152,28 @@ echo sprintf("File size: %.1f MB\n", $fileSize / (1024 * 1024));
 echo sprintf("Iterations: %d\n", $config['iterations']);
 echo "============================================================\n\n";
 
-// Benchmark: cisv extension (parse)
+// Benchmark: cisv extension (parse - single-threaded)
 if ($cisvAvailable) {
-    $results['cisv (parse)'] = benchmark('cisv (parse)', function() use ($filepath) {
+    $results['cisv'] = benchmark('cisv', function() use ($filepath) {
         $parser = new CisvParser();
         return $parser->parseFile($filepath);
     }, $config['iterations']);
 
-    // Benchmark: cisv extension (count)
-    $results['cisv (count)'] = benchmark('cisv (count)', function() use ($filepath) {
+    // Benchmark: cisv extension (parallel - multi-threaded)
+    $results['cisv-parallel'] = benchmark('cisv-parallel', function() use ($filepath) {
+        $parser = new CisvParser();
+        return $parser->parseFileParallel($filepath, 0);  // 0 = auto-detect threads
+    }, $config['iterations']);
+
+    // Benchmark: cisv extension (benchmark mode - parallel, no data marshaling)
+    $results['cisv-bench'] = benchmark('cisv-bench (parallel, count only)', function() use ($filepath) {
+        $parser = new CisvParser();
+        $result = $parser->parseFileBenchmark($filepath, 0);
+        return $result['rows'];
+    }, $config['iterations']);
+
+    // Benchmark: cisv extension (count - fast row counting)
+    $results['cisv-count'] = benchmark('cisv-count', function() use ($filepath) {
         return CisvParser::countRows($filepath);
     }, $config['iterations']);
 } else {
