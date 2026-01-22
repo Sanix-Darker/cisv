@@ -251,3 +251,48 @@ const tsvCount = cisvParser.countRowsWithConfig('data.tsv', {
     toLine: 1000
 });
 ```
+
+### ROW-BY-ROW ITERATION
+
+The iterator API provides fgetcsv-style streaming with minimal memory footprint and early exit support.
+
+```javascript
+import { cisvParser } from "cisv";
+
+const parser = new cisvParser({ delimiter: ',', trim: true });
+
+// Open iterator for a file
+parser.openIterator('/path/to/large.csv');
+
+// Fetch rows one at a time
+let row;
+while ((row = parser.fetchRow()) !== null) {
+    console.log(row);  // string[]
+
+    // Early exit - no wasted work
+    if (row[0] === 'stop') {
+        break;
+    }
+}
+
+// Close iterator when done
+parser.closeIterator();
+
+// Methods support chaining
+parser.openIterator('data.csv')
+      .closeIterator();
+```
+
+**Iterator Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `openIterator(path)` | Open a file for row-by-row iteration |
+| `fetchRow()` | Get next row as `string[]`, or `null` if at EOF |
+| `closeIterator()` | Close iterator and release resources |
+
+**Notes:**
+- The iterator uses the parser's current configuration (delimiter, quote, trim, etc.)
+- Calling `destroy()` automatically closes any open iterator
+- Only one iterator can be open at a time per parser instance
+- Breaking out of iteration and calling `closeIterator()` stops parsing immediately

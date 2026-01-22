@@ -244,6 +244,54 @@ declare module 'cisv' {
      */
     destroy(): void;
 
+    // =========================================================================
+    // Iterator API - Row-by-row streaming with early exit support
+    // =========================================================================
+
+    /**
+     * Open a file for row-by-row iteration.
+     *
+     * This enables fgetcsv-style streaming with minimal memory footprint.
+     * Supports early exit - breaking out of iteration stops parsing
+     * immediately with no wasted work.
+     *
+     * @param path - Path to CSV file
+     * @returns Parser instance for chaining
+     *
+     * @example
+     * ```javascript
+     * const parser = new cisvParser({ delimiter: ',' });
+     * parser.openIterator('/path/to/file.csv');
+     *
+     * let row;
+     * while ((row = parser.fetchRow()) !== null) {
+     *     console.log(row);
+     *     if (row[0] === 'stop') break;  // Early exit
+     * }
+     *
+     * parser.closeIterator();
+     * ```
+     */
+    openIterator(path: string): this;
+
+    /**
+     * Fetch the next row from the iterator.
+     *
+     * @returns Array of string values for the next row, or null if at end of file
+     * @throws Error if no iterator is open (call openIterator first)
+     */
+    fetchRow(): ParsedRow | null;
+
+    /**
+     * Close the iterator and release resources.
+     *
+     * This is automatically called when the parser is destroyed,
+     * but it's good practice to close the iterator explicitly when done.
+     *
+     * @returns Parser instance for chaining
+     */
+    closeIterator(): this;
+
     /**
      * Count rows in CSV file without parsing
      * @param path - Path to CSV file

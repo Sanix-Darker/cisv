@@ -291,6 +291,11 @@ public:
             InstanceMethod("setHeaderFields", &CisvParser::SetHeaderFields),
             InstanceMethod("removeTransformByName", &CisvParser::RemoveTransformByName),
 
+            // Iterator API methods
+            InstanceMethod("openIterator", &CisvParser::OpenIterator),
+            InstanceMethod("fetchRow", &CisvParser::FetchRow),
+            InstanceMethod("closeIterator", &CisvParser::CloseIterator),
+
             StaticMethod("countRows", &CisvParser::CountRows),
             StaticMethod("countRowsWithConfig", &CisvParser::CountRowsWithConfig)
         });
@@ -304,6 +309,7 @@ public:
         parse_time_ = 0;
         total_bytes_ = 0;
         is_destroyed_ = false;
+        iterator_ = nullptr;
 
         // Initialize configuration with defaults
         cisv_config_init(&config_);
@@ -483,6 +489,11 @@ public:
     // Explicit cleanup method
     void Cleanup() {
         if (!is_destroyed_) {
+            // Close iterator if open
+            if (iterator_) {
+                cisv_iterator_close(iterator_);
+                iterator_ = nullptr;
+            }
             if (parser_) {
                 cisv_parser_destroy(parser_);
                 parser_ = nullptr;
@@ -1156,6 +1167,101 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
         return Napi::Number::New(env, count);
     }
 
+    // =========================================================================
+    // Iterator API - Row-by-row streaming with early exit support
+    // =========================================================================
+
+    /**
+     * Open a file for row-by-row iteration.
+     * Uses the current parser configuration.
+     * @param path - Path to CSV file
+     * @returns this for chaining
+     */
+    Napi::Value OpenIterator(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
+        if (info.Length() < 1 || !info[0].IsString()) {
+            throw Napi::TypeError::New(env, "Expected file path string");
+        }
+
+        // Close existing iterator if any
+        if (iterator_) {
+            cisv_iterator_close(iterator_);
+            iterator_ = nullptr;
+        }
+
+        std::string path = info[0].As<Napi::String>();
+
+        // Use current parser configuration for the iterator
+        iterator_ = cisv_iterator_open(path.c_str(), &config_);
+        if (!iterator_) {
+            throw Napi::Error::New(env, "Failed to open file for iteration: " + path);
+        }
+
+        return info.This();  // Return this for chaining
+    }
+
+    /**
+     * Fetch the next row from the iterator.
+     * @returns Array of strings, or null if at end of file
+     */
+    Napi::Value FetchRow(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
+        if (!iterator_) {
+            throw Napi::Error::New(env, "No iterator open. Call openIterator() first.");
+        }
+
+        const char **fields;
+        const size_t *lengths;
+        size_t field_count;
+
+        int result = cisv_iterator_next(iterator_, &fields, &lengths, &field_count);
+
+        if (result == CISV_ITER_EOF) {
+            return env.Null();
+        }
+        if (result == CISV_ITER_ERROR) {
+            throw Napi::Error::New(env, "Error reading CSV row");
+        }
+
+        // Create array of strings for the row
+        Napi::Array row = Napi::Array::New(env, field_count);
+        for (size_t i = 0; i < field_count; i++) {
+            // SECURITY: Use safe string creation to handle invalid UTF-8
+            row.Set(i, SafeNewString(env, fields[i], lengths[i]));
+        }
+
+        return row;
+    }
+
+    /**
+     * Close the iterator and release resources.
+     * @returns this for chaining
+     */
+    Napi::Value CloseIterator(const Napi::CallbackInfo &info) {
+        Napi::Env env = info.Env();
+
+        if (is_destroyed_) {
+            throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+
+        if (iterator_) {
+            cisv_iterator_close(iterator_);
+            iterator_ = nullptr;
+        }
+
+        return info.This();  // Return this for chaining
+    }
+
 private:
     Napi::Value drainRows(Napi::Env env) {
         if (!rc_) {
@@ -1186,6 +1292,7 @@ private:
     size_t total_bytes_;
     double parse_time_;
     bool is_destroyed_;
+    cisv_iterator_t *iterator_;  // For row-by-row iteration
 };
 
 // Initialize all exports
