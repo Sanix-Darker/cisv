@@ -13,6 +13,7 @@ Blog post: [How I accidentally created the fastest CSV parser ever made](https:/
 - SIMD-accelerated parsing (AVX-512, AVX2, with scalar fallback)
 - Zero-copy memory-mapped file processing
 - Streaming API for large files
+- Row-by-row iterator API (fgetcsv-style) with early exit support
 - Configurable delimiters, quotes, escapes, and comments
 - Field transforms (uppercase, lowercase, trim, hash, base64, etc.)
 - Parallel chunk processing for multi-threaded parsing
@@ -164,6 +165,17 @@ cisv_parser_destroy(p);
 // Count rows (fast mode)
 size_t count = cisv_parser_count_rows("data.csv");
 
+// Row-by-row iterator (fgetcsv-style, supports early exit)
+cisv_iterator_t *it = cisv_iterator_open("data.csv", &cfg);
+const char **fields;
+const size_t *lengths;
+size_t field_count;
+while (cisv_iterator_next(it, &fields, &lengths, &field_count) == CISV_ITER_OK) {
+    // Process row - fields valid until next call
+    if (should_stop) break;  // Early exit supported
+}
+cisv_iterator_close(it);
+
 // Parallel processing
 cisv_mmap_file_t *file = cisv_mmap_open("data.csv");
 int chunk_count;
@@ -175,31 +187,33 @@ cisv_mmap_close(file);
 ## NODE.JS API
 
 ```javascript
-const cisv = require('cisv');
+const { cisvParser } = require('cisv');
 
 // Parse file
-const rows = cisv.parseFileSync('data.csv', {
-  delimiter: ',',
-  quote: '"',
-  trim: true
-});
+const parser = new cisvParser({ delimiter: ',', quote: '"', trim: true });
+const rows = parser.parseSync('data.csv');
 
 // Parse with transforms
-const rows = cisv.parseFileSync('data.csv', {
-  transforms: {
-    0: 'uppercase',
-    1: 'trim',
-    2: (value) => value.toUpperCase()
-  }
-});
+parser.transform(0, 'uppercase')
+      .transform(1, 'trim')
+      .transform(2, (value) => value.toUpperCase());
+const transformedRows = parser.parseSync('data.csv');
 
 // Stream parsing
-const parser = new cisv.Parser({
-  onField: (field, index) => console.log(field),
-  onRow: () => console.log('row end')
-});
-parser.write(chunk);
-parser.end();
+const streamParser = new cisvParser();
+streamParser.write(chunk);
+streamParser.end();
+const results = streamParser.getRows();
+
+// Row-by-row iteration (memory efficient, supports early exit)
+const iterParser = new cisvParser({ delimiter: ',' });
+iterParser.openIterator('large.csv');
+let row;
+while ((row = iterParser.fetchRow()) !== null) {
+    console.log(row);
+    if (row[0] === 'stop') break;  // Early exit
+}
+iterParser.closeIterator();
 ```
 
 ## PYTHON API
@@ -215,6 +229,17 @@ rows = cisv.parse_string('a,b,c\n1,2,3')
 
 # Count rows (fast)
 count = cisv.count_rows('data.csv')
+
+# Row-by-row iteration (memory efficient, supports early exit)
+with cisv.CisvIterator('large.csv') as reader:
+    for row in reader:
+        print(row)
+        if row[0] == 'stop':
+            break  # Early exit - no wasted work
+
+# Or use the convenience function
+for row in cisv.open_iterator('data.csv'):
+    process(row)
 ```
 
 ## PHP API
