@@ -25,6 +25,7 @@ typedef struct {
     cisv_parser *parser;
     cisv_config config;
     cisv_transform_pipeline_t *pipeline;  /* Transform pipeline (may be NULL if unused) */
+    cisv_iterator_t *iterator;            /* Row-by-row iterator (may be NULL) */
     zval rows;        /* Embedded zval - safer memory management */
     zval current_row; /* Embedded zval - safer memory management */
     zend_object std;
@@ -78,6 +79,9 @@ static zend_object *cisv_parser_create_object(zend_class_entry *ce) {
     /* Initialize pipeline to NULL (created lazily if transforms are used) */
     intern->pipeline = NULL;
 
+    /* Initialize iterator to NULL */
+    intern->iterator = NULL;
+
     /* Initialize embedded zvals - no separate allocation needed */
     array_init(&intern->rows);
     array_init(&intern->current_row);
@@ -98,6 +102,12 @@ static void cisv_parser_free_object(zend_object *obj) {
     if (intern->pipeline) {
         cisv_transform_pipeline_destroy(intern->pipeline);
         intern->pipeline = NULL;
+    }
+
+    /* Close iterator if open */
+    if (intern->iterator) {
+        cisv_iterator_close(intern->iterator);
+        intern->iterator = NULL;
     }
 
     /* Destroy embedded zvals - no efree needed since they're embedded */
@@ -404,6 +414,82 @@ PHP_METHOD(CisvParser, parseFileBenchmark) {
     RETURN_ZVAL(&result_arr, 0, 1);
 }
 
+/* PHP_METHOD(CisvParser, openIterator) - Open file for row-by-row iteration */
+PHP_METHOD(CisvParser, openIterator) {
+    char *filename;
+    size_t filename_len;
+
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_STRING(filename, filename_len)
+    ZEND_PARSE_PARAMETERS_END();
+
+    cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
+
+    /* Close existing iterator if any */
+    if (intern->iterator) {
+        cisv_iterator_close(intern->iterator);
+        intern->iterator = NULL;
+    }
+
+    /* Open iterator */
+    intern->iterator = cisv_iterator_open(filename, &intern->config);
+    if (!intern->iterator) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Failed to open file for iteration: %s", strerror(errno));
+        return;
+    }
+
+    RETURN_ZVAL(ZEND_THIS, 1, 0);
+}
+
+/* PHP_METHOD(CisvParser, fetchRow) - Get next row from iterator */
+PHP_METHOD(CisvParser, fetchRow) {
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
+
+    if (!intern->iterator) {
+        zend_throw_exception(zend_ce_exception, "No iterator open. Call openIterator() first.", 0);
+        return;
+    }
+
+    const char **fields;
+    const size_t *lengths;
+    size_t field_count;
+
+    int result = cisv_iterator_next(intern->iterator, &fields, &lengths, &field_count);
+
+    if (result == CISV_ITER_EOF) {
+        RETURN_FALSE;
+    }
+
+    if (result == CISV_ITER_ERROR) {
+        zend_throw_exception(zend_ce_exception, "Error reading CSV row", 0);
+        return;
+    }
+
+    /* Build PHP array */
+    array_init(return_value);
+    for (size_t i = 0; i < field_count; i++) {
+        zval field;
+        ZVAL_STRINGL(&field, fields[i], lengths[i]);
+        add_next_index_zval(return_value, &field);
+    }
+}
+
+/* PHP_METHOD(CisvParser, closeIterator) - Close the iterator */
+PHP_METHOD(CisvParser, closeIterator) {
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
+
+    if (intern->iterator) {
+        cisv_iterator_close(intern->iterator);
+        intern->iterator = NULL;
+    }
+
+    RETURN_ZVAL(ZEND_THIS, 1, 0);
+}
+
 /* Arginfo definitions for PHP 8+ compatibility */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_cisv_construct, 0, 0, 0)
     ZEND_ARG_TYPE_INFO(0, options, IS_ARRAY, 1)
@@ -439,6 +525,16 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_cisv_parseFileBenchmark, 0, 1, I
     ZEND_ARG_TYPE_INFO(0, num_threads, IS_LONG, 1)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_cisv_openIterator, 0, 1, CisvParser, 0)
+    ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_cisv_fetchRow, 0, 0, MAY_BE_ARRAY|MAY_BE_FALSE)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_cisv_closeIterator, 0, 0, CisvParser, 0)
+ZEND_END_ARG_INFO()
+
 /* Method table */
 static const zend_function_entry cisv_parser_methods[] = {
     PHP_ME(CisvParser, __construct, arginfo_cisv_construct, ZEND_ACC_PUBLIC)
@@ -449,6 +545,9 @@ static const zend_function_entry cisv_parser_methods[] = {
     PHP_ME(CisvParser, setQuote, arginfo_cisv_setQuote, ZEND_ACC_PUBLIC)
     PHP_ME(CisvParser, parseFileParallel, arginfo_cisv_parseFileParallel, ZEND_ACC_PUBLIC)
     PHP_ME(CisvParser, parseFileBenchmark, arginfo_cisv_parseFileBenchmark, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, openIterator, arginfo_cisv_openIterator, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, fetchRow, arginfo_cisv_fetchRow, ZEND_ACC_PUBLIC)
+    PHP_ME(CisvParser, closeIterator, arginfo_cisv_closeIterator, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 

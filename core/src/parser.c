@@ -2385,3 +2385,474 @@ void cisv_results_free(cisv_result_t **results, int count) {
     }
     free(results);
 }
+
+// =============================================================================
+// Row-by-Row Iterator Implementation (fgetcsv-style)
+// Forward-only iteration with minimal memory footprint
+// =============================================================================
+
+// Initial allocation sizes for iterator
+#define ITER_INITIAL_FIELDS 32
+#define ITER_INITIAL_DATA 4096
+
+struct cisv_iterator {
+    // File access (mmap)
+    int fd;
+    uint8_t *data;
+    size_t file_size;
+
+    // Position tracking
+    const uint8_t *pos;        // Current position
+    const uint8_t *end;        // End of file
+
+    // Row buffer (reused, grows as needed)
+    char **fields;             // Pointers to field data
+    size_t *lengths;           // Field lengths
+    size_t field_count;        // Fields in current row
+    size_t field_capacity;     // Allocated slots
+
+    // Field data storage (contiguous)
+    char *field_data;          // String storage
+    size_t field_data_len;     // Current usage
+    size_t field_data_cap;     // Capacity
+
+    // Parser state
+    int state;                 // S_NORMAL, S_QUOTED
+    char delimiter;
+    char quote;
+    bool trim;
+    bool skip_empty_lines;
+
+    // Quote buffer for escaped quotes
+    uint8_t *quote_buffer;
+    size_t quote_buffer_pos;
+    size_t quote_buffer_size;
+
+    // Status
+    bool eof;
+    int error_code;
+};
+
+// Ensure iterator has capacity for more fields
+static inline bool iter_ensure_fields(cisv_iterator_t *it, size_t needed) {
+    size_t required = it->field_count + needed;
+    if (required <= it->field_capacity) return true;
+
+    size_t new_cap = it->field_capacity + (it->field_capacity >> 1);
+    if (new_cap < required) new_cap = required;
+
+    char **new_fields = realloc(it->fields, new_cap * sizeof(char*));
+    if (!new_fields) return false;
+
+    size_t *new_lengths = realloc(it->lengths, new_cap * sizeof(size_t));
+    if (!new_lengths) {
+        it->fields = new_fields;  // Keep the successful realloc
+        return false;
+    }
+
+    it->fields = new_fields;
+    it->lengths = new_lengths;
+    it->field_capacity = new_cap;
+    return true;
+}
+
+// Ensure iterator has capacity for more field data
+static inline bool iter_ensure_data(cisv_iterator_t *it, size_t needed) {
+    size_t required = it->field_data_len + needed + 1;  // +1 for null terminator
+    if (required <= it->field_data_cap) return true;
+
+    size_t new_cap = it->field_data_cap + (it->field_data_cap >> 1);
+    if (new_cap < required) new_cap = required;
+    new_cap = (new_cap + 63) & ~(size_t)63;  // Align to 64 bytes
+
+    char *new_data = realloc(it->field_data, new_cap);
+    if (!new_data) return false;
+
+    // Update field pointers if data moved
+    if (new_data != it->field_data) {
+        ptrdiff_t offset = new_data - it->field_data;
+        for (size_t i = 0; i < it->field_count; i++) {
+            it->fields[i] += offset;
+        }
+    }
+
+    it->field_data = new_data;
+    it->field_data_cap = new_cap;
+    return true;
+}
+
+// Ensure quote buffer has space
+static inline bool iter_ensure_quote_buffer(cisv_iterator_t *it, size_t needed) {
+    size_t required = it->quote_buffer_pos + needed;
+    if (required <= it->quote_buffer_size) return true;
+
+    size_t new_size = it->quote_buffer_size + (it->quote_buffer_size >> 1);
+    if (new_size < required) new_size = required;
+    if (new_size > MAX_QUOTE_BUFFER_SIZE) return false;
+
+    uint8_t *new_buf = realloc(it->quote_buffer, new_size);
+    if (!new_buf) return false;
+
+    it->quote_buffer = new_buf;
+    it->quote_buffer_size = new_size;
+    return true;
+}
+
+// Add a field to current row
+static inline bool iter_add_field(cisv_iterator_t *it, const uint8_t *start, size_t len) {
+    if (!iter_ensure_fields(it, 1)) return false;
+    if (!iter_ensure_data(it, len)) return false;
+
+    // Copy field data
+    char *field_ptr = it->field_data + it->field_data_len;
+    memcpy(field_ptr, start, len);
+    field_ptr[len] = '\0';  // Null-terminate
+
+    it->fields[it->field_count] = field_ptr;
+    it->lengths[it->field_count] = len;
+    it->field_count++;
+    it->field_data_len += len + 1;
+
+    return true;
+}
+
+// Add a field from quote buffer (for fields with escaped quotes)
+static inline bool iter_add_quoted_field(cisv_iterator_t *it) {
+    bool result = iter_add_field(it, it->quote_buffer, it->quote_buffer_pos);
+    it->quote_buffer_pos = 0;
+    return result;
+}
+
+cisv_iterator_t *cisv_iterator_open(const char *path, const cisv_config *config) {
+    if (!path) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return NULL;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        return NULL;
+    }
+
+    // Handle empty file
+    if (st.st_size == 0) {
+        close(fd);
+        errno = 0;  // Not an error, just empty
+        // Return iterator in EOF state
+        cisv_iterator_t *it = calloc(1, sizeof(cisv_iterator_t));
+        if (!it) {
+            errno = ENOMEM;
+            return NULL;
+        }
+        it->fd = -1;
+        it->eof = true;
+        it->delimiter = config ? config->delimiter : ',';
+        it->quote = config ? config->quote : '"';
+        return it;
+    }
+
+    int flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    flags |= MAP_POPULATE;
+#endif
+
+    uint8_t *data = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, flags, fd, 0);
+    if (data == MAP_FAILED) {
+        close(fd);
+        return NULL;
+    }
+
+    // Advise kernel for sequential access
+    madvise(data, st.st_size, MADV_SEQUENTIAL | MADV_WILLNEED);
+
+    cisv_iterator_t *it = calloc(1, sizeof(cisv_iterator_t));
+    if (!it) {
+        munmap(data, st.st_size);
+        close(fd);
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    it->fd = fd;
+    it->data = data;
+    it->file_size = st.st_size;
+    it->pos = data;
+    it->end = data + st.st_size;
+    it->state = S_NORMAL;
+
+    // Config
+    if (config) {
+        it->delimiter = config->delimiter;
+        it->quote = config->quote;
+        it->trim = config->trim;
+        it->skip_empty_lines = config->skip_empty_lines;
+    } else {
+        it->delimiter = ',';
+        it->quote = '"';
+        it->trim = false;
+        it->skip_empty_lines = false;
+    }
+
+    // Allocate initial buffers
+    it->field_capacity = ITER_INITIAL_FIELDS;
+    it->fields = malloc(it->field_capacity * sizeof(char*));
+    it->lengths = malloc(it->field_capacity * sizeof(size_t));
+    it->field_data_cap = ITER_INITIAL_DATA;
+    it->field_data = malloc(it->field_data_cap);
+    it->quote_buffer_size = 4096;
+    it->quote_buffer = malloc(it->quote_buffer_size);
+
+    if (!it->fields || !it->lengths || !it->field_data || !it->quote_buffer) {
+        cisv_iterator_close(it);
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    return it;
+}
+
+// Trim whitespace from field (modifies start/end pointers)
+static inline void iter_trim_field(const uint8_t **start, const uint8_t **end) {
+    while (*start < *end && is_ws(**start)) (*start)++;
+    while (*start < *end && is_ws(*(*end - 1))) (*end)--;
+}
+
+int cisv_iterator_next(cisv_iterator_t *it,
+                       const char ***fields,
+                       const size_t **lengths,
+                       size_t *field_count) {
+    if (!it || it->eof) {
+        if (fields) *fields = NULL;
+        if (lengths) *lengths = NULL;
+        if (field_count) *field_count = 0;
+        return CISV_ITER_EOF;
+    }
+
+    // Reset row state
+    it->field_count = 0;
+    it->field_data_len = 0;
+
+restart_row:
+    if (it->pos >= it->end) {
+        it->eof = true;
+        if (fields) *fields = NULL;
+        if (lengths) *lengths = NULL;
+        if (field_count) *field_count = 0;
+        return CISV_ITER_EOF;
+    }
+
+    const uint8_t *field_start = it->pos;
+    it->state = S_NORMAL;
+
+    // Parse until end of row
+    while (it->pos < it->end) {
+        uint8_t c = *it->pos;
+
+        if (it->state == S_NORMAL) {
+            if (c == it->delimiter) {
+                // End of field
+                const uint8_t *field_end = it->pos;
+                if (it->trim) {
+                    iter_trim_field(&field_start, &field_end);
+                }
+                if (!iter_add_field(it, field_start, field_end - field_start)) {
+                    it->error_code = ENOMEM;
+                    return CISV_ITER_ERROR;
+                }
+                it->pos++;
+                field_start = it->pos;
+            } else if (c == '\n') {
+                // End of row
+                const uint8_t *field_end = it->pos;
+                // Handle CRLF
+                if (field_end > field_start && *(field_end - 1) == '\r') {
+                    field_end--;
+                }
+                if (it->trim) {
+                    iter_trim_field(&field_start, &field_end);
+                }
+                if (!iter_add_field(it, field_start, field_end - field_start)) {
+                    it->error_code = ENOMEM;
+                    return CISV_ITER_ERROR;
+                }
+                it->pos++;
+
+                // Skip empty rows if configured
+                if (it->skip_empty_lines && it->field_count == 1 && it->lengths[0] == 0) {
+                    it->field_count = 0;
+                    it->field_data_len = 0;
+                    goto restart_row;
+                }
+
+                // Success - row complete
+                if (fields) *fields = (const char **)it->fields;
+                if (lengths) *lengths = it->lengths;
+                if (field_count) *field_count = it->field_count;
+                return CISV_ITER_OK;
+
+            } else if (c == it->quote && it->pos == field_start) {
+                // Start of quoted field
+                it->state = S_QUOTED;
+                it->quote_buffer_pos = 0;
+                it->pos++;
+            } else {
+                it->pos++;
+            }
+        } else {
+            // S_QUOTED state
+            if (c == it->quote) {
+                // Check for escaped quote
+                if (it->pos + 1 < it->end && *(it->pos + 1) == it->quote) {
+                    // Escaped quote - add one quote to buffer
+                    if (!iter_ensure_quote_buffer(it, 1)) {
+                        it->error_code = ENOMEM;
+                        return CISV_ITER_ERROR;
+                    }
+                    it->quote_buffer[it->quote_buffer_pos++] = it->quote;
+                    it->pos += 2;
+                } else {
+                    // End of quoted field
+                    if (it->trim) {
+                        // Trim the quote buffer content
+                        const uint8_t *qstart = it->quote_buffer;
+                        const uint8_t *qend = it->quote_buffer + it->quote_buffer_pos;
+                        iter_trim_field(&qstart, &qend);
+                        it->quote_buffer_pos = qend - qstart;
+                        if (qstart != it->quote_buffer) {
+                            memmove(it->quote_buffer, qstart, it->quote_buffer_pos);
+                        }
+                    }
+                    if (!iter_add_quoted_field(it)) {
+                        it->error_code = ENOMEM;
+                        return CISV_ITER_ERROR;
+                    }
+                    it->state = S_NORMAL;
+                    it->pos++;
+
+                    // Skip delimiter or newline after closing quote
+                    if (it->pos < it->end) {
+                        if (*it->pos == it->delimiter) {
+                            it->pos++;
+                            field_start = it->pos;
+                        } else if (*it->pos == '\n') {
+                            it->pos++;
+
+                            // Skip empty rows if configured
+                            if (it->skip_empty_lines && it->field_count == 1 && it->lengths[0] == 0) {
+                                it->field_count = 0;
+                                it->field_data_len = 0;
+                                goto restart_row;
+                            }
+
+                            // Success - row complete
+                            if (fields) *fields = (const char **)it->fields;
+                            if (lengths) *lengths = it->lengths;
+                            if (field_count) *field_count = it->field_count;
+                            return CISV_ITER_OK;
+                        } else if (*it->pos == '\r' && it->pos + 1 < it->end && *(it->pos + 1) == '\n') {
+                            it->pos += 2;
+
+                            // Skip empty rows if configured
+                            if (it->skip_empty_lines && it->field_count == 1 && it->lengths[0] == 0) {
+                                it->field_count = 0;
+                                it->field_data_len = 0;
+                                goto restart_row;
+                            }
+
+                            // Success - row complete
+                            if (fields) *fields = (const char **)it->fields;
+                            if (lengths) *lengths = it->lengths;
+                            if (field_count) *field_count = it->field_count;
+                            return CISV_ITER_OK;
+                        }
+                    }
+                    field_start = it->pos;
+                }
+            } else {
+                // Regular character in quoted field
+                if (!iter_ensure_quote_buffer(it, 1)) {
+                    it->error_code = ENOMEM;
+                    return CISV_ITER_ERROR;
+                }
+                it->quote_buffer[it->quote_buffer_pos++] = c;
+                it->pos++;
+            }
+        }
+    }
+
+    // End of file - handle last field if any
+    if (field_start < it->end || it->quote_buffer_pos > 0) {
+        if (it->state == S_QUOTED) {
+            // Unterminated quote - yield what we have
+            if (it->trim) {
+                const uint8_t *qstart = it->quote_buffer;
+                const uint8_t *qend = it->quote_buffer + it->quote_buffer_pos;
+                iter_trim_field(&qstart, &qend);
+                it->quote_buffer_pos = qend - qstart;
+                if (qstart != it->quote_buffer) {
+                    memmove(it->quote_buffer, qstart, it->quote_buffer_pos);
+                }
+            }
+            if (!iter_add_quoted_field(it)) {
+                it->error_code = ENOMEM;
+                return CISV_ITER_ERROR;
+            }
+        } else {
+            const uint8_t *field_end = it->end;
+            // Handle trailing CR
+            if (field_end > field_start && *(field_end - 1) == '\r') {
+                field_end--;
+            }
+            if (it->trim) {
+                iter_trim_field(&field_start, &field_end);
+            }
+            if (!iter_add_field(it, field_start, field_end - field_start)) {
+                it->error_code = ENOMEM;
+                return CISV_ITER_ERROR;
+            }
+        }
+    }
+
+    it->eof = true;
+
+    // Skip empty final row if configured
+    if (it->skip_empty_lines && it->field_count == 1 && it->lengths[0] == 0) {
+        if (fields) *fields = NULL;
+        if (lengths) *lengths = NULL;
+        if (field_count) *field_count = 0;
+        return CISV_ITER_EOF;
+    }
+
+    if (it->field_count > 0) {
+        if (fields) *fields = (const char **)it->fields;
+        if (lengths) *lengths = it->lengths;
+        if (field_count) *field_count = it->field_count;
+        return CISV_ITER_OK;
+    }
+
+    if (fields) *fields = NULL;
+    if (lengths) *lengths = NULL;
+    if (field_count) *field_count = 0;
+    return CISV_ITER_EOF;
+}
+
+void cisv_iterator_close(cisv_iterator_t *it) {
+    if (!it) return;
+
+    if (it->data && it->file_size > 0) {
+        munmap(it->data, it->file_size);
+    }
+    if (it->fd >= 0) {
+        close(it->fd);
+    }
+
+    free(it->fields);
+    free(it->lengths);
+    free(it->field_data);
+    free(it->quote_buffer);
+    free(it);
+}

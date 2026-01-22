@@ -184,6 +184,33 @@ void cisv_results_free(cisv_result_t **results, int count);
     #define HAS_NEON 1
 #endif
 
+// =============================================================================
+// Row-by-Row Iterator API (fgetcsv-style)
+// Forward-only iteration with minimal memory footprint
+// =============================================================================
+
+// Iterator handle (opaque)
+typedef struct cisv_iterator cisv_iterator_t;
+
+// Return codes for cisv_iterator_next()
+#define CISV_ITER_OK      0    // Success, row data available
+#define CISV_ITER_EOF    -1    // End of file reached
+#define CISV_ITER_ERROR  -2    // Error occurred
+
+// Open file for row-by-row iteration
+// Returns NULL on failure (check errno)
+cisv_iterator_t *cisv_iterator_open(const char *path, const cisv_config *config);
+
+// Get next row - fields/lengths valid until next call or close
+// Returns: CISV_ITER_OK (success), CISV_ITER_EOF (done), CISV_ITER_ERROR (error)
+int cisv_iterator_next(cisv_iterator_t *it,
+                       const char ***fields,
+                       const size_t **lengths,
+                       size_t *field_count);
+
+// Close iterator and free all resources
+void cisv_iterator_close(cisv_iterator_t *it);
+
 #ifdef __cplusplus
 }
 #endif
