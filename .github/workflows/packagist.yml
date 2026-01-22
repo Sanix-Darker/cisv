@@ -20,9 +20,9 @@ jobs:
           PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
           PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
         run: |
-          # Use API-TOKEN header instead of query string to protect credentials
+          # Packagist API requires username and apiToken as query parameters
+          # Repository URL should be the GitHub repo, not the Packagist package URL
           curl -sSf -XPOST \
             -H 'Content-Type: application/json' \
-            -H "API-TOKEN: ${PACKAGIST_TOKEN}" \
-            -d "{\"repository\":{\"url\":\"https://packagist.org/packages/${PACKAGIST_USERNAME}/cisv\"}}" \
-            "https://packagist.org/api/update-package"
+            -d '{"repository":"https://github.com/'"${PACKAGIST_USERNAME}"'/cisv"}' \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}"
