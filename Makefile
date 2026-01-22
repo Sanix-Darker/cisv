@@ -1,7 +1,9 @@
 # CISV - High-Performance CSV Parser
 # Root Makefile - Orchestrates all modules
 
-.PHONY: all core cli nodejs python php clean test install help
+.PHONY: all core cli nodejs python php clean test install help \
+	docker-benchmark-python docker-benchmark-nodejs docker-benchmark-php \
+	docker-benchmark-cli docker-benchmark-all
 
 # Default target
 all: core cli
@@ -75,7 +77,22 @@ benchmark-cli: cli
 
 benchmark-nodejs: nodejs
 	@echo "=== Node.js Benchmark ==="
-	cd bindings/nodejs && node benchmark.js 2>/dev/null || echo "Run npm install first"
+	cd bindings/nodejs && node benchmarks/benchmark.js 2>/dev/null || echo "Run npm install first"
+
+# Docker benchmark builds
+docker-benchmark-python:
+	docker build -t sanix-darker/cisv-python-benchmarks -f bindings/python-nanobind/benchmarks/Dockerfile .
+
+docker-benchmark-nodejs:
+	docker build -t sanix-darker/cisv-nodejs-benchmarks -f bindings/nodejs/benchmarks/Dockerfile .
+
+docker-benchmark-php:
+	docker build -t sanix-darker/cisv-php-benchmarks -f bindings/php/benchmarks/Dockerfile .
+
+docker-benchmark-cli:
+	docker build -t sanix-darker/cisv-cli-benchmarks -f cli/benchmarks/Dockerfile .
+
+docker-benchmark-all: docker-benchmark-python docker-benchmark-nodejs docker-benchmark-php docker-benchmark-cli
 
 # CMake build (alternative)
 cmake-build:
@@ -109,6 +126,13 @@ help:
 	@echo ""
 	@echo "  benchmark-cli    Run CLI benchmark"
 	@echo "  benchmark-nodejs Run Node.js benchmark"
+	@echo ""
+	@echo "Docker Benchmarks:"
+	@echo "  docker-benchmark-python   Build Python benchmark image"
+	@echo "  docker-benchmark-nodejs   Build Node.js benchmark image"
+	@echo "  docker-benchmark-php      Build PHP benchmark image"
+	@echo "  docker-benchmark-cli      Build CLI benchmark image"
+	@echo "  docker-benchmark-all      Build all benchmark images"
 	@echo ""
 	@echo "  cmake-build  Build using CMake"
 	@echo "  cmake-test   Test CMake build"

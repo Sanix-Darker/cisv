@@ -1,13 +1,31 @@
 #!/usr/bin/env python3
 
 """
-Benchmark comparison: cisv vs pandas vs polars for CSV parsing
+Benchmark comparison: cisv vs popular Python CSV parsers
+
+Compared libraries:
+- cisv: High-performance C parser with SIMD optimizations
+- polars: Rust-based DataFrame library with Arrow backend
+- pyarrow: Apache Arrow's CSV reader (columnar format)
+- datatable: Fast C-based parser (similar to R's data.table)
+- duckdb: SQL database with fast CSV import
+- pandas: Popular DataFrame library
+- stdlib csv: Python's built-in csv module
 
 # Install dependencies
-pip install --upgrade --no-cache-dir cisv pandas polars
+pip install --upgrade --no-cache-dir cisv pandas polars pyarrow datatable duckdb numpy
 
 # Run benchmark with 1 million rows × 10 columns (~100MB file)
 python scripts/benchmark_python.py --rows 1000000 --cols 10
+
+# Run with fast mode (parallel parsing with numpy arrays)
+python scripts/benchmark_python.py --rows 1000000 --fast
+
+# Run with benchmark mode (raw parsing speed, no data marshaling)
+python scripts/benchmark_python.py --rows 1000000 --benchmark
+
+# Run all cisv modes for comparison
+python scripts/benchmark_python.py --rows 1000000 --only-cisv
 
 # Run with 10 million rows × 20 columns (~2GB file)
 python scripts/benchmark_python.py --rows 10000000 --cols 20
@@ -15,11 +33,14 @@ python scripts/benchmark_python.py --rows 10000000 --cols 20
 # Use an existing CSV file
 python scripts/benchmark_python.py --file /path/to/large.csv
 
-# Include parallel cisv benchmark
+# Include parallel cisv benchmark (list output)
 python scripts/benchmark_python.py --rows 1000000 --parallel
 
-# Only benchmark cisv (single-threaded + parallel)
-python scripts/benchmark_python.py --rows 1000000 --only-cisv
+Benchmark modes for cisv:
+- cisv: Single-threaded, returns list[list[str]]
+- cisv-parallel: Multi-threaded, returns list[list[str]]
+- cisv-fast: Multi-threaded + numpy arrays (faster than list output)
+- cisv-bench: Multi-threaded, no data marshaling (raw parsing speed)
 """
 
 import os
@@ -52,23 +73,30 @@ def generate_csv(filepath: str, rows: int, cols: int) -> int:
     return size
 
 
-def benchmark_cisv(filepath: str, parallel: bool = False) -> tuple:
+def benchmark_cisv(filepath: str, parallel: bool = False, fast: bool = False, benchmark: bool = False) -> tuple:
     """Benchmark cisv parser."""
     try:
         import cisv
     except ImportError:
         return None, "cisv not installed"
 
-    mode = "parallel" if parallel else "single-threaded"
+    if benchmark:
+        mode = "benchmark (parallel, no data)"
+    elif fast:
+        mode = "fast (parallel+numpy)"
+    elif parallel:
+        mode = "parallel"
+    else:
+        mode = "single-threaded"
     print(f"Benchmarking cisv ({mode})...")
 
     # Warm up
     cisv.count_rows(filepath)
 
-    # Count rows (fast path) - only for non-parallel
+    # Count rows (fast path) - only for non-parallel single mode
     count_time = None
     row_count = None
-    if not parallel:
+    if not parallel and not fast and not benchmark:
         start = time.perf_counter()
         row_count = cisv.count_rows(filepath)
         count_time = time.perf_counter() - start
@@ -76,20 +104,44 @@ def benchmark_cisv(filepath: str, parallel: bool = False) -> tuple:
     # Full parse - handle both old (ctypes) and new (nanobind) versions
     start = time.perf_counter()
     try:
-        rows = cisv.parse_file(filepath, parallel=parallel)
+        if benchmark:
+            # Use the benchmark mode (parse only, no data marshaling)
+            try:
+                result = cisv.parse_file_benchmark(filepath)
+                rows = result  # CisvBenchmarkResult object with len() support
+            except AttributeError:
+                return None, "benchmark mode not supported (old cisv version)"
+        elif fast:
+            # Use the ultra-fast numpy-based parsing
+            try:
+                result = cisv.parse_file_fast(filepath)
+                rows = result  # CisvResult object with len() support
+            except AttributeError:
+                return None, "fast mode not supported (old cisv version)"
+        elif parallel:
+            rows = cisv.parse_file(filepath, parallel=True)
+        else:
+            rows = cisv.parse_file(filepath)
     except TypeError:
         # Old ctypes version doesn't support parallel parameter
-        if parallel:
-            return None, "parallel not supported (old cisv version)"
+        if parallel or fast or benchmark:
+            return None, "parallel/fast/benchmark not supported (old cisv version)"
         rows = cisv.parse_file(filepath)
     parse_time = time.perf_counter() - start
+
+    # Get row count and column count
+    parse_rows = len(rows)
+    if fast or benchmark:
+        parse_cols = len(rows[0]) if parse_rows > 0 else 0
+    else:
+        parse_cols = len(rows[0]) if rows else 0
 
     return {
         'count_time': count_time,
         'count_rows': row_count,
         'parse_time': parse_time,
-        'parse_rows': len(rows),
-        'parse_cols': len(rows[0]) if rows else 0,
+        'parse_rows': parse_rows,
+        'parse_cols': parse_cols,
     }, None
 
 
@@ -160,6 +212,82 @@ def benchmark_stdlib(filepath: str) -> tuple:
     }, None
 
 
+def benchmark_pyarrow(filepath: str) -> tuple:
+    """Benchmark PyArrow CSV reader."""
+    try:
+        import pyarrow.csv as pa_csv
+    except ImportError:
+        return None, "pyarrow not installed"
+
+    print("Benchmarking pyarrow...")
+
+    start = time.perf_counter()
+    table = pa_csv.read_csv(filepath)
+    parse_time = time.perf_counter() - start
+
+    return {
+        'count_time': None,
+        'count_rows': table.num_rows,
+        'parse_time': parse_time,
+        'parse_rows': table.num_rows,
+        'parse_cols': table.num_columns,
+    }, None
+
+
+def benchmark_datatable(filepath: str) -> tuple:
+    """Benchmark datatable CSV reader."""
+    try:
+        import datatable as dt
+    except ImportError:
+        return None, "datatable not installed"
+    except Exception as e:
+        return None, f"datatable error: {e}"
+
+    print("Benchmarking datatable...")
+
+    try:
+        start = time.perf_counter()
+        frame = dt.fread(filepath)
+        parse_time = time.perf_counter() - start
+
+        return {
+            'count_time': None,
+            'count_rows': frame.nrows,
+            'parse_time': parse_time,
+            'parse_rows': frame.nrows,
+            'parse_cols': frame.ncols,
+        }, None
+    except Exception as e:
+        return None, f"datatable error: {e}"
+
+
+def benchmark_duckdb(filepath: str) -> tuple:
+    """Benchmark DuckDB CSV reader."""
+    try:
+        import duckdb
+    except ImportError:
+        return None, "duckdb not installed"
+
+    print("Benchmarking duckdb...")
+
+    start = time.perf_counter()
+    conn = duckdb.connect(':memory:')
+    result = conn.execute(f"SELECT * FROM read_csv_auto('{filepath}')").fetchall()
+    parse_time = time.perf_counter() - start
+
+    row_count = len(result)
+    col_count = len(result[0]) if result else 0
+    conn.close()
+
+    return {
+        'count_time': None,
+        'count_rows': row_count,
+        'parse_time': parse_time,
+        'parse_rows': row_count,
+        'parse_cols': col_count,
+    }, None
+
+
 def format_throughput(file_size: int, parse_time: float) -> str:
     """Calculate and format throughput in MB/s."""
     if parse_time > 0:
@@ -175,7 +303,9 @@ def main():
     parser.add_argument('--file', type=str, help='Use existing CSV file instead of generating')
     parser.add_argument('--skip-stdlib', action='store_true', help='Skip stdlib csv benchmark')
     parser.add_argument('--parallel', action='store_true', help='Include parallel cisv benchmark')
-    parser.add_argument('--only-cisv', action='store_true', help='Only benchmark cisv (single + parallel)')
+    parser.add_argument('--fast', action='store_true', help='Include fast cisv benchmark (parallel+numpy)')
+    parser.add_argument('--benchmark', action='store_true', help='Include benchmark mode (parallel, no data marshal)')
+    parser.add_argument('--only-cisv', action='store_true', help='Only benchmark cisv (all modes)')
     args = parser.parse_args()
 
     # Generate or use existing file
@@ -195,19 +325,44 @@ def main():
     results = {}
 
     # Run cisv benchmarks
-    results['cisv'], err = benchmark_cisv(filepath, parallel=False)
+    results['cisv'], err = benchmark_cisv(filepath, parallel=False, fast=False)
     if err:
         print(f"  Skipped: {err}")
 
     # Run parallel cisv benchmark if requested or if --only-cisv
     if args.parallel or args.only_cisv:
-        results['cisv-parallel'], err = benchmark_cisv(filepath, parallel=True)
+        results['cisv-parallel'], err = benchmark_cisv(filepath, parallel=True, fast=False)
+        if err:
+            print(f"  Skipped: {err}")
+
+    # Run fast cisv benchmark if requested or if --only-cisv
+    if args.fast or args.only_cisv:
+        results['cisv-fast'], err = benchmark_cisv(filepath, parallel=False, fast=True, benchmark=False)
+        if err:
+            print(f"  Skipped: {err}")
+
+    # Run benchmark mode if requested or if --only-cisv
+    if args.benchmark or args.only_cisv:
+        results['cisv-bench'], err = benchmark_cisv(filepath, parallel=False, fast=False, benchmark=True)
         if err:
             print(f"  Skipped: {err}")
 
     # Run other benchmarks unless --only-cisv
     if not args.only_cisv:
         results['polars'], err = benchmark_polars(filepath)
+        if err:
+            print(f"  Skipped: {err}")
+
+        results['pyarrow'], err = benchmark_pyarrow(filepath)
+        if err:
+            print(f"  Skipped: {err}")
+
+        # Note: datatable crashes on Python 3.13, skip for now
+        # results['datatable'], err = benchmark_datatable(filepath)
+        # if err:
+        #     print(f"  Skipped: {err}")
+
+        results['duckdb'], err = benchmark_duckdb(filepath)
         if err:
             print(f"  Skipped: {err}")
 

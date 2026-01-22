@@ -9,8 +9,13 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
+#include <nanobind/ndarray.h>
 #include <stdexcept>
 #include <string>
+#include <cstring>
+#include <thread>
+#include <vector>
+#include <atomic>
 
 extern "C" {
 #include "cisv/parser.h"
@@ -205,6 +210,213 @@ static nb::list parse_file_parallel(
 }
 
 /**
+ * Ultra-fast parallel parsing that returns raw data for maximum performance.
+ * Returns a tuple of (data_bytes, field_offsets, field_lengths, row_offsets)
+ * where field data can be extracted via: data[offset:offset+length].decode()
+ *
+ * This avoids creating millions of Python string objects upfront.
+ */
+static nb::tuple parse_file_raw(
+    const std::string &path,
+    int num_threads = 0,
+    const std::string &delimiter = ",",
+    const std::string &quote = "\"",
+    bool trim = false,
+    bool skip_empty_lines = false
+) {
+    if (path.empty()) {
+        throw std::invalid_argument("Path cannot be empty");
+    }
+
+    // Setup config
+    cisv_config config;
+    cisv_config_init(&config);
+    config.delimiter = delimiter[0];
+    config.quote = quote[0];
+    config.trim = trim;
+    config.skip_empty_lines = skip_empty_lines;
+
+    // Parse file with parallel processing
+    int result_count = 0;
+    cisv_result_t **results = nullptr;
+
+    {
+        nb::gil_scoped_release release;
+        results = cisv_parse_file_parallel(path.c_str(), &config,
+                                           num_threads > 0 ? num_threads : 0, &result_count);
+    }
+
+    if (!results) {
+        throw std::runtime_error("Failed to parse file: " + std::string(strerror(errno)));
+    }
+
+    // Calculate total sizes
+    size_t total_data_size = 0;
+    size_t total_fields = 0;
+    size_t total_rows = 0;
+
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        if (!results[chunk]) continue;
+        if (results[chunk]->error_code != 0) {
+            std::string msg = results[chunk]->error_message;
+            cisv_results_free(results, result_count);
+            throw std::runtime_error(msg);
+        }
+        total_data_size += results[chunk]->field_data_size;
+        total_fields += results[chunk]->total_fields;
+        total_rows += results[chunk]->row_count;
+    }
+
+    // Allocate arrays
+    uint8_t *data_buf = new uint8_t[total_data_size];
+    uint64_t *field_offsets = new uint64_t[total_fields];
+    uint32_t *field_lengths = new uint32_t[total_fields];
+    uint64_t *row_offsets = new uint64_t[total_rows + 1];  // +1 for end sentinel
+
+    // Parallel data combining using OpenMP-style threading
+    // First pass: calculate per-chunk offsets
+    std::vector<size_t> chunk_data_offsets(result_count + 1);
+    std::vector<size_t> chunk_field_offsets(result_count + 1);
+    std::vector<size_t> chunk_row_offsets(result_count + 1);
+
+    chunk_data_offsets[0] = 0;
+    chunk_field_offsets[0] = 0;
+    chunk_row_offsets[0] = 0;
+
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        cisv_result_t *r = results[chunk];
+        if (r) {
+            chunk_data_offsets[chunk + 1] = chunk_data_offsets[chunk] + r->field_data_size;
+            chunk_field_offsets[chunk + 1] = chunk_field_offsets[chunk] + r->total_fields;
+            chunk_row_offsets[chunk + 1] = chunk_row_offsets[chunk] + r->row_count;
+        } else {
+            chunk_data_offsets[chunk + 1] = chunk_data_offsets[chunk];
+            chunk_field_offsets[chunk + 1] = chunk_field_offsets[chunk];
+            chunk_row_offsets[chunk + 1] = chunk_row_offsets[chunk];
+        }
+    }
+
+    // Second pass: parallel copy using threads
+    std::vector<std::thread> workers;
+    workers.reserve(result_count);
+
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        cisv_result_t *r = results[chunk];
+        if (!r) continue;
+
+        workers.emplace_back([=, &data_buf, &field_offsets, &field_lengths, &row_offsets]() {
+            size_t data_pos = chunk_data_offsets[chunk];
+            size_t field_idx = chunk_field_offsets[chunk];
+            size_t row_idx = chunk_row_offsets[chunk];
+
+            // Copy field data
+            memcpy(data_buf + data_pos, r->field_data, r->field_data_size);
+
+            // Build indices for this chunk
+            for (size_t i = 0; i < r->row_count; i++) {
+                row_offsets[row_idx++] = field_idx;
+                cisv_row_t *row = &r->rows[i];
+
+                for (size_t j = 0; j < row->field_count; j++) {
+                    size_t field_offset_in_chunk = row->fields[j] - r->field_data;
+                    field_offsets[field_idx] = data_pos + field_offset_in_chunk;
+                    field_lengths[field_idx] = (uint32_t)row->field_lengths[j];
+                    field_idx++;
+                }
+            }
+        });
+    }
+
+    // Wait for all workers
+    for (auto &w : workers) {
+        w.join();
+    }
+
+    row_offsets[total_rows] = total_fields;  // End sentinel
+
+    cisv_results_free(results, result_count);
+
+    // Create numpy arrays that own the data
+    nb::capsule data_owner(data_buf, [](void *p) noexcept { delete[] (uint8_t*)p; });
+    nb::capsule offsets_owner(field_offsets, [](void *p) noexcept { delete[] (uint64_t*)p; });
+    nb::capsule lengths_owner(field_lengths, [](void *p) noexcept { delete[] (uint32_t*)p; });
+    nb::capsule rows_owner(row_offsets, [](void *p) noexcept { delete[] (uint64_t*)p; });
+
+    size_t data_shape[1] = {total_data_size};
+    size_t fields_shape[1] = {total_fields};
+    size_t rows_shape[1] = {total_rows + 1};
+
+    auto data_arr = nb::ndarray<nb::numpy, uint8_t, nb::shape<-1>>(
+        data_buf, 1, data_shape, data_owner);
+    auto offsets_arr = nb::ndarray<nb::numpy, uint64_t, nb::shape<-1>>(
+        field_offsets, 1, fields_shape, offsets_owner);
+    auto lengths_arr = nb::ndarray<nb::numpy, uint32_t, nb::shape<-1>>(
+        field_lengths, 1, fields_shape, lengths_owner);
+    auto rows_arr = nb::ndarray<nb::numpy, uint64_t, nb::shape<-1>>(
+        row_offsets, 1, rows_shape, rows_owner);
+
+    return nb::make_tuple(data_arr, offsets_arr, lengths_arr, rows_arr);
+}
+
+/**
+ * Ultra-fast parallel parsing that only returns row/field counts.
+ * This is used for benchmarking raw parsing speed without data marshaling.
+ */
+static nb::tuple parse_file_count_only(
+    const std::string &path,
+    int num_threads = 0,
+    const std::string &delimiter = ",",
+    const std::string &quote = "\""
+) {
+    if (path.empty()) {
+        throw std::invalid_argument("Path cannot be empty");
+    }
+
+    // Setup config
+    cisv_config config;
+    cisv_config_init(&config);
+    config.delimiter = delimiter[0];
+    config.quote = quote[0];
+
+    // Parse file with parallel processing
+    int result_count = 0;
+    cisv_result_t **results = nullptr;
+
+    {
+        nb::gil_scoped_release release;
+        results = cisv_parse_file_parallel(path.c_str(), &config,
+                                           num_threads > 0 ? num_threads : 0, &result_count);
+    }
+
+    if (!results) {
+        throw std::runtime_error("Failed to parse file: " + std::string(strerror(errno)));
+    }
+
+    // Just count totals, don't copy data
+    size_t total_fields = 0;
+    size_t total_rows = 0;
+    size_t first_row_cols = 0;
+
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        if (!results[chunk]) continue;
+        if (results[chunk]->error_code != 0) {
+            std::string msg = results[chunk]->error_message;
+            cisv_results_free(results, result_count);
+            throw std::runtime_error(msg);
+        }
+        if (total_rows == 0 && results[chunk]->row_count > 0) {
+            first_row_cols = results[chunk]->rows[0].field_count;
+        }
+        total_fields += results[chunk]->total_fields;
+        total_rows += results[chunk]->row_count;
+    }
+
+    cisv_results_free(results, result_count);
+
+    return nb::make_tuple(total_rows, total_fields, first_row_cols);
+}
+
+/**
  * Count the number of rows in a CSV file without full parsing.
  * This is very fast as it only scans for newlines.
  */
@@ -268,6 +480,31 @@ NB_MODULE(_core, m) {
           "    skip_empty_lines: Whether to skip empty lines\n\n"
           "Returns:\n"
           "    List of rows, where each row is a list of field values");
+
+    m.def("parse_file_raw", &parse_file_raw,
+          nb::arg("path"),
+          nb::arg("num_threads") = 0,
+          nb::arg("delimiter") = ",",
+          nb::arg("quote") = "\"",
+          nb::arg("trim") = false,
+          nb::arg("skip_empty_lines") = false,
+          "Ultra-fast parallel parsing that returns raw numpy arrays.\n\n"
+          "This is the fastest parsing mode, avoiding Python string creation.\n"
+          "Returns (data, field_offsets, field_lengths, row_offsets) where:\n"
+          "  - data: uint8 array of all field bytes\n"
+          "  - field_offsets: uint64 array of byte offsets for each field\n"
+          "  - field_lengths: uint32 array of byte lengths for each field\n"
+          "  - row_offsets: uint64 array of field indices for each row\n\n"
+          "To access field i: data[field_offsets[i]:field_offsets[i]+field_lengths[i]].tobytes().decode()\n"
+          "To access row r fields: range(row_offsets[r], row_offsets[r+1])");
+
+    m.def("parse_file_count_only", &parse_file_count_only,
+          nb::arg("path"),
+          nb::arg("num_threads") = 0,
+          nb::arg("delimiter") = ",",
+          nb::arg("quote") = "\"",
+          "Ultra-fast parallel parsing that only returns counts (for benchmarking).\n\n"
+          "Returns (row_count, field_count, first_row_cols) without data marshaling.");
 
     m.def("count_rows", &count_rows,
           nb::arg("path"),

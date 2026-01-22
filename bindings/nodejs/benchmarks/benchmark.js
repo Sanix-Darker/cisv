@@ -1,6 +1,6 @@
 'use strict';
 // Load cisv parser using the module's entry point
-const cisv = require('./cisv');
+const cisv = require('../cisv');
 const cisvParser = cisv.cisvParser;
 const { parse: csvParseSync } = require('csv-parse/sync');
 const { parse: csvParseStream } = require('csv-parse');
@@ -14,14 +14,14 @@ const { Suite } = require('benchmark');
 const stream = require('stream');
 const path = require('path');
 
-// Initial file path from arguments or default to './fixtures/data.csv'
-let benchFilePath = process.argv[2] || './fixtures/data.csv';
+// Initial file path from arguments or default to '../fixtures/data.csv'
+let benchFilePath = process.argv[2] || '../fixtures/data.csv';
 
 try {
   // Resolve to an absolute path
   if (!fs.existsSync(benchFilePath)) {
-    // If the initial path doesn't exist, try '../fixtures/data.csv'
-    const alternativePath = '../fixtures/data.csv';
+    // If the initial path doesn't exist, try '../../fixtures/data.csv'
+    const alternativePath = '../../fixtures/data.csv';
     if (fs.existsSync(alternativePath)) {
       benchFilePath = alternativePath;
     } else {
@@ -30,7 +30,7 @@ try {
     }
   }
 } catch (error) {
-  console.error("Failed to locate benchmark file in either specified path or '../fixtures':", error);
+  console.error("Failed to locate benchmark file in either specified path or '../../fixtures':", error);
   throw error;
 }
 

@@ -1,0 +1,39 @@
+# Build directories
+core/build/
+core/build-asan/
+cli/build/
+build_cmake/
+
+# Node.js
+bindings/nodejs/node_modules/
+bindings/nodejs/build/
+
+# Python
+bindings/python-nanobind/build/
+bindings/python-nanobind/*.egg-info/
+bindings/python-nanobind/dist/
+__pycache__/
+*.pyc
+*.pyo
+
+# PHP
+bindings/php/modules/
+bindings/php/.libs/
+bindings/php/build/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Claude
+.claude/
+
+# Test artifacts
+*.csv
+*.log
