@@ -122,6 +122,28 @@ class CisvParser {
      * @return $this Fluent interface
      */
     public function setQuote(string $quote): self;
+
+    /**
+     * Open a file for row-by-row iteration.
+     *
+     * @param string $filename Path to CSV file
+     * @return $this Fluent interface
+     */
+    public function openIterator(string $filename): self;
+
+    /**
+     * Fetch the next row from the iterator.
+     *
+     * @return array|false Array of field values, or false at EOF
+     */
+    public function fetchRow(): array|false;
+
+    /**
+     * Close the iterator and release resources.
+     *
+     * @return $this Fluent interface
+     */
+    public function closeIterator(): self;
 }
 ```
 
@@ -170,14 +192,58 @@ $data = array_map(function($row) use ($headers) {
 print_r($data);
 ```
 
-### Process Large Files
+### Row-by-Row Iterator (Memory Efficient)
+
+For large files, use the iterator API to process rows one at a time without loading the entire file into memory:
+
+```php
+$parser = new CisvParser(['delimiter' => ',', 'trim' => true]);
+$parser->openIterator('large.csv');
+
+while (($row = $parser->fetchRow()) !== false) {
+    print_r($row);
+
+    // Early exit is fully supported - stops parsing immediately
+    if ($row[0] === 'stop') {
+        break;
+    }
+}
+
+$parser->closeIterator();
+```
+
+### Iterator with Progress Tracking
 
 ```php
 // Count before processing
 $total = CisvParser::countRows('huge.csv');
 echo "Processing $total rows...\n";
 
-// Parse file
+$parser = new CisvParser(['skip_empty' => true]);
+$parser->openIterator('huge.csv');
+
+$processed = 0;
+while (($row = $parser->fetchRow()) !== false) {
+    // Your processing logic
+    $processed++;
+
+    if ($processed % 100000 === 0) {
+        echo "Processed $processed / $total\n";
+    }
+}
+
+$parser->closeIterator();
+echo "Done! Processed $processed rows.\n";
+```
+
+### Process Large Files (Load All)
+
+```php
+// Count before processing
+$total = CisvParser::countRows('huge.csv');
+echo "Processing $total rows...\n";
+
+// Parse file - loads all rows into memory
 $parser = new CisvParser(['skip_empty' => true]);
 $rows = $parser->parseFile('huge.csv');
 
@@ -204,9 +270,17 @@ CISV uses SIMD optimizations (AVX-512, AVX2, SSE2) for high-performance parsing.
 ## Comparison with Native PHP
 
 ```php
-// CISV (fast)
+// CISV - Load all (fast)
 $parser = new CisvParser();
 $rows = $parser->parseFile('large.csv');
+
+// CISV - Iterator (fast, memory efficient)
+$parser = new CisvParser();
+$parser->openIterator('large.csv');
+while (($row = $parser->fetchRow()) !== false) {
+    // Process row
+}
+$parser->closeIterator();
 
 // Native PHP (slow)
 $rows = [];

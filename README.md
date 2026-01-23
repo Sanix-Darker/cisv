@@ -246,18 +246,25 @@ for row in cisv.open_iterator('data.csv'):
 
 ```php
 <?php
-$parser = new Cisv\Parser([
+$parser = new CisvParser([
     'delimiter' => ',',
     'quote' => '"',
     'trim' => true
 ]);
 
+// Parse entire file
 $rows = $parser->parseFile('data.csv');
 
-// With transforms
-$parser->addTransform(0, 'uppercase');
-$parser->addTransform(1, 'trim');
-$rows = $parser->parseFile('data.csv');
+// Row-by-row iteration (memory efficient, supports early exit)
+$parser->openIterator('large.csv');
+while (($row = $parser->fetchRow()) !== false) {
+    print_r($row);
+    if ($row[0] === 'stop') break;  // Early exit
+}
+$parser->closeIterator();
+
+// Count rows (fast)
+$count = CisvParser::countRows('data.csv');
 ```
 
 ## TRANSFORMS

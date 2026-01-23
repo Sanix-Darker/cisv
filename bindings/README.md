@@ -65,15 +65,15 @@ parser.closeIterator();
 ### PHP Example
 
 ```php
-$parser = new Cisv\Parser(['delimiter' => ',']);
-$iterator = $parser->openIterator('large.csv');
+$parser = new CisvParser(['delimiter' => ',']);
+$parser->openIterator('large.csv');
 
-while (($row = $iterator->fetch()) !== null) {
+while (($row = $parser->fetchRow()) !== false) {
     print_r($row);
     if ($row[0] === 'stop') break;  // Early exit
 }
 
-$iterator->close();
+$parser->closeIterator();
 ```
 
 ## Installation

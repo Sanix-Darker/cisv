@@ -67,5 +67,34 @@ if (false) {
          * @return $this Fluent interface
          */
         public function setQuote(string $quote): self {}
+
+        /**
+         * Open a file for row-by-row iteration.
+         *
+         * Provides fgetcsv-style streaming with minimal memory footprint.
+         * Supports early exit - breaking stops parsing immediately.
+         *
+         * @param string $filename Path to CSV file
+         * @return $this Fluent interface
+         * @throws \RuntimeException If file cannot be opened
+         */
+        public function openIterator(string $filename): self {}
+
+        /**
+         * Fetch the next row from the iterator.
+         *
+         * @return array<int, string>|false Array of field values, or false at EOF
+         * @throws \RuntimeException If no iterator is open
+         */
+        public function fetchRow(): array|false {}
+
+        /**
+         * Close the iterator and release resources.
+         *
+         * Automatically called when parser object is destroyed.
+         *
+         * @return $this Fluent interface
+         */
+        public function closeIterator(): self {}
     }
 }

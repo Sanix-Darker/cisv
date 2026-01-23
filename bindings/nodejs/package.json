@@ -1,6 +1,6 @@
 {
   "name": "cisv",
-  "version": "0.0.7",
+  "version": "0.2.0",
   "description": "The csv parser on steroids.",
   "author": "sanix<s4nixd@gmail.com>",
   "main": "./build/Release/cisv.node",
