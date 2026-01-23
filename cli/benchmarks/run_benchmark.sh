@@ -1,30 +1,52 @@
 #!/bin/bash
 #
 # CISV CLI Benchmark
-# Compares cisv CLI performance against other CSV CLI tools
+#
+# Compares cisv CLI performance against other popular CSV command-line tools.
+#
+# Tools compared:
+# - cisv: High-performance C CSV parser with SIMD optimizations
+# - qsv: Rust-based xsv fork with 80+ commands, SIMD-accelerated
+# - xsv: Original Rust CSV toolkit
+# - csvtk: Go-based cross-platform CSV/TSV toolkit
+# - tsv-utils: D-based tools optimized for large datasets (eBay)
+# - frawk: Rust AWK-like tool with native CSV support
+# - miller: Go-based awk/sed/cut for name-indexed data
+# - datamash: GNU statistical operations tool
+# - goawk: Go AWK with native CSV support
+# - csvkit: Python-based CSV utilities
+# - wc/awk/cut: Unix baseline tools
+#
+# Usage:
+#   ./run_benchmark.sh [OPTIONS]
+#
+# Options:
+#   --rows=N        Number of rows to generate (default: 1000000)
+#   --cols=N        Number of columns (default: 7)
+#   --iterations=N  Benchmark iterations (default: 5)
+#   --file=PATH     Use existing CSV file instead of generating
+#   --fast          Skip slow tools (csvkit) and medium tools (miller, datamash, goawk)
+#   --help          Show this help
 #
 
-set -uo pipefail
+set -o pipefail
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
-ITERATIONS=${ITERATIONS:-5}
-ROWS=${ROWS:-1000000}
-COLS=${COLS:-7}
-NO_CLEANUP=${NO_CLEANUP:-false}
+ITERATIONS=5
+ROWS=1000000
+COLS=7
+FAST_MODE=false
+INPUT_FILE=""
 
-# Results storage
-declare -A RESULTS
+# Temp file for results
+RESULTS_FILE=""
 
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-
-log() {
-    echo "$@" >&2
-}
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -38,9 +60,8 @@ get_file_size() {
     fi
 }
 
-get_file_size_mb() {
-    local size=$(get_file_size "$1")
-    awk "BEGIN {printf \"%.2f\", ${size:-0} / 1048576}"
+format_number() {
+    printf "%'d" "$1" 2>/dev/null || echo "$1"
 }
 
 # ============================================================================
@@ -52,27 +73,32 @@ generate_csv() {
     local cols=$2
     local filename=$3
 
-    log "Generating CSV: ${rows} rows × ${cols} columns..."
+    echo "Generating CSV: $(format_number $rows) rows × ${cols} columns..."
+
+    local start=$(date +%s.%N 2>/dev/null || date +%s)
 
     python3 << PYEOF
-import csv
-import random
-import string
+import sys
 
-def rs(n=10):
-    return ''.join(random.choices(string.ascii_letters, k=n))
+rows = $rows
+cols = $cols
+filename = '$filename'
 
-with open('$filename', 'w', newline='') as f:
-    w = csv.writer(f)
-    headers = ['col' + str(i) for i in range($cols)]
-    w.writerow(headers)
-    for i in range($rows):
-        row = ['value_' + str(i) + '_' + str(j) for j in range($cols)]
-        w.writerow(row)
+with open(filename, 'w') as f:
+    # Header
+    f.write(','.join(['col' + str(i) for i in range(cols)]) + '\n')
+    # Data rows
+    for i in range(rows):
+        f.write(','.join(['value_' + str(i) + '_' + str(j) for j in range(cols)]) + '\n')
+        if i > 0 and i % 500000 == 0:
+            print(f"  Generated {i:,} rows...", file=sys.stderr)
 PYEOF
 
-    local size_mb=$(get_file_size_mb "$filename")
-    log "  Done: ${size_mb} MB"
+    local end=$(date +%s.%N 2>/dev/null || date +%s)
+    local elapsed=$(awk "BEGIN {printf \"%.2f\", $end - $start}")
+    local size=$(get_file_size "$filename")
+    local size_mb=$(awk "BEGIN {printf \"%.1f\", $size / 1048576}")
+    echo "  Done in ${elapsed}s, file size: ${size_mb} MB"
 }
 
 # ============================================================================
@@ -82,193 +108,81 @@ PYEOF
 run_benchmark() {
     local name="$1"
     local cmd="$2"
-    local file="$3"
-    local extra="${4:-}"
+    local category="$3"
 
-    local total_time=0
-    local success_count=0
+    echo "Benchmarking ${name}..."
 
-    for _ in $(seq 1 $ITERATIONS); do
+    local times=()
+    local row_count=0
+
+    for i in $(seq 1 $ITERATIONS); do
         local start=$(date +%s.%N 2>/dev/null || date +%s)
 
-        local full_cmd="$cmd \"$file\""
-        [ -n "$extra" ] && full_cmd="$cmd \"$file\" $extra"
-
-        if timeout 120 bash -c "$full_cmd" >/dev/null 2>&1; then
+        local output
+        if output=$(timeout 300 bash -c "$cmd" 2>/dev/null); then
             local end=$(date +%s.%N 2>/dev/null || date +%s)
             local elapsed=$(awk "BEGIN {print $end - $start}")
-            total_time=$(awk "BEGIN {print $total_time + $elapsed}")
-            success_count=$((success_count + 1))
+            times+=("$elapsed")
+            # Try to get row count from output (for counting operations)
+            local trimmed=$(echo "$output" | tr -d '[:space:]')
+            if [[ "$trimmed" =~ ^[0-9]+$ ]]; then
+                row_count="$trimmed"
+            fi
+        else
+            echo "  Error: command failed"
+            return 1
         fi
     done
 
-    if [ $success_count -eq 0 ]; then
-        echo "FAILED|0"
+    if [ ${#times[@]} -eq 0 ]; then
+        return 1
+    fi
+
+    # Calculate average
+    local total=0
+    for t in "${times[@]}"; do
+        total=$(awk "BEGIN {print $total + $t}")
+    done
+    local avg=$(awk "BEGIN {printf \"%.3f\", $total / ${#times[@]}}")
+
+    # Store result
+    echo "$category|$name|$avg|$row_count" >> "$RESULTS_FILE"
+}
+
+# ============================================================================
+# FORMAT OUTPUT
+# ============================================================================
+
+format_throughput() {
+    local file_size=$1
+    local time=$2
+
+    if [ "$time" = "0" ] || [ -z "$time" ]; then
+        echo "N/A"
     else
-        local avg=$(awk "BEGIN {printf \"%.4f\", $total_time / $success_count}")
-        echo "$avg|$success_count"
+        local mb_per_sec=$(awk "BEGIN {printf \"%.1f\", ($file_size / 1048576) / $time}")
+        echo "${mb_per_sec} MB/s"
     fi
 }
 
-# ============================================================================
-# CLI BENCHMARKS
-# ============================================================================
+print_results_table() {
+    local category="$1"
+    local file_size="$2"
+    local default_rows="$3"
 
-run_cli_benchmarks() {
-    local file="$1"
-    local file_size_mb=$(get_file_size_mb "$file")
+    echo ""
+    echo "============================================================"
+    echo "RESULTS: $category"
+    echo "============================================================"
+    printf "%-16s %12s %14s %12s\n" "Library" "Parse Time" "Throughput" "Rows"
+    echo "------------------------------------------------------------"
 
-    # Find cisv binary
-    local CISV_BIN=""
-    if [ -f "./cli/build/cisv" ]; then
-        CISV_BIN="./cli/build/cisv"
-        export LD_LIBRARY_PATH="./core/build:${LD_LIBRARY_PATH:-}"
-    elif [ -f "/benchmark/cisv/cli/build/cisv" ]; then
-        CISV_BIN="/benchmark/cisv/cli/build/cisv"
-        export LD_LIBRARY_PATH="/benchmark/cisv/core/build:${LD_LIBRARY_PATH:-}"
-    elif [ -f "/usr/local/bin/cisv" ]; then
-        CISV_BIN="/usr/local/bin/cisv"
-    fi
-
-    log ""
-    log "============================================================"
-    log "CLI BENCHMARK: $(echo "$file_size_mb" | xargs) MB file"
-    log "============================================================"
-    log ""
-
-    # Row counting benchmarks
-    log "--- Row Counting Benchmarks ---"
-    log ""
-
-    [ -n "$CISV_BIN" ] && {
-        RESULTS["count_cisv"]=$(run_benchmark "cisv -c" "$CISV_BIN -c" "$file")
-        log "  cisv: ${RESULTS[count_cisv]}"
-    }
-
-    command_exists xsv && {
-        RESULTS["count_xsv"]=$(run_benchmark "xsv count" "xsv count" "$file")
-        log "  xsv: ${RESULTS[count_xsv]}"
-    }
-
-    RESULTS["count_wc"]=$(run_benchmark "wc -l" "wc -l" "$file")
-    log "  wc -l: ${RESULTS[count_wc]}"
-
-    RESULTS["count_awk"]=$(run_benchmark "awk" "awk 'END{print NR}'" "$file")
-    log "  awk: ${RESULTS[count_awk]}"
-
-    command_exists mlr && {
-        RESULTS["count_mlr"]=$(run_benchmark "miller" "mlr --csv count" "$file")
-        log "  miller: ${RESULTS[count_mlr]}"
-    }
-
-    log ""
-
-    # Column selection benchmarks
-    log "--- Column Selection Benchmarks (cols 0,2,3) ---"
-    log ""
-
-    [ -n "$CISV_BIN" ] && {
-        RESULTS["select_cisv"]=$(run_benchmark "cisv -s" "$CISV_BIN -s 0,2,3" "$file")
-        log "  cisv: ${RESULTS[select_cisv]}"
-    }
-
-    command_exists xsv && {
-        RESULTS["select_xsv"]=$(run_benchmark "xsv select" "xsv select 1,3,4" "$file")
-        log "  xsv: ${RESULTS[select_xsv]}"
-    }
-
-    RESULTS["select_awk"]=$(run_benchmark "awk" "awk -F',' '{print \$1,\$3,\$4}'" "$file")
-    log "  awk: ${RESULTS[select_awk]}"
-
-    RESULTS["select_cut"]=$(run_benchmark "cut" "cut -d',' -f1,3,4" "$file")
-    log "  cut: ${RESULTS[select_cut]}"
-
-    command_exists mlr && {
-        RESULTS["select_mlr"]=$(run_benchmark "miller" "mlr --csv cut -f col0,col2,col3" "$file")
-        log "  miller: ${RESULTS[select_mlr]}"
-    }
-
-    log ""
-}
-
-# ============================================================================
-# MARKDOWN REPORT
-# ============================================================================
-
-format_result() {
-    local key="$1"
-    local file_size_mb="$2"
-    local result="${RESULTS[$key]:-FAILED|0}"
-    local time=$(echo "$result" | cut -d'|' -f1)
-    local runs=$(echo "$result" | cut -d'|' -f2)
-
-    if [ "$time" = "FAILED" ] || [ -z "$time" ] || [ "$time" = "0" ]; then
-        echo "| - | - | - |"
-    else
-        local speed=$(awk "BEGIN {printf \"%.2f\", $file_size_mb / $time}")
-        echo "| $time | $speed | $runs/$ITERATIONS |"
-    fi
-}
-
-generate_markdown_report() {
-    local file="$1"
-    local file_size_mb=$(get_file_size_mb "$file")
-    local row_count=$(wc -l < "$file" | tr -d ' ')
-
-    cat << EOF
-# CISV CLI Benchmark Report
-
-## Test Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| **Generated** | $(date -u +"%Y-%m-%d %H:%M:%S UTC") |
-| **File Size** | ${file_size_mb} MB |
-| **Row Count** | ${row_count} |
-| **Iterations** | ${ITERATIONS} |
-| **Platform** | $(uname -s) $(uname -m) |
-
----
-
-## Row Counting Performance
-
-| Tool | Time (s) | Speed (MB/s) | Runs |
-|------|----------|--------------|------|
-| **cisv** $(format_result "count_cisv" "$file_size_mb")
-| xsv $(format_result "count_xsv" "$file_size_mb")
-| wc -l $(format_result "count_wc" "$file_size_mb")
-| awk $(format_result "count_awk" "$file_size_mb")
-| miller $(format_result "count_mlr" "$file_size_mb")
-
----
-
-## Column Selection Performance
-
-| Tool | Time (s) | Speed (MB/s) | Runs |
-|------|----------|--------------|------|
-| **cisv** $(format_result "select_cisv" "$file_size_mb")
-| xsv $(format_result "select_xsv" "$file_size_mb")
-| awk $(format_result "select_awk" "$file_size_mb")
-| cut $(format_result "select_cut" "$file_size_mb")
-| miller $(format_result "select_mlr" "$file_size_mb")
-
----
-
-## Tool Descriptions
-
-| Tool | Description |
-|------|-------------|
-| cisv | High-performance C CSV parser with SIMD optimizations |
-| xsv | Rust-based CSV toolkit |
-| wc -l | Unix line counter (baseline, counts newlines only) |
-| awk | Text processing tool |
-| cut | Column extraction tool (delimiter-based) |
-| miller | Like awk/sed/cut for name-indexed data |
-
----
-
-*Report generated by CISV CLI Benchmark*
-EOF
+    # Filter and sort results by time
+    grep "^${category}|" "$RESULTS_FILE" 2>/dev/null | sort -t'|' -k3 -n | while IFS='|' read cat name time rows; do
+        [ -z "$rows" ] || [ "$rows" = "0" ] && rows="$default_rows"
+        local throughput=$(format_throughput "$file_size" "$time")
+        printf "%-16s %10ss %14s %12s\n" "$name" "$time" "$throughput" "$(format_number $rows)"
+    done
 }
 
 # ============================================================================
@@ -286,62 +200,275 @@ Options:
     --cols=N        Number of columns (default: 7)
     --iterations=N  Benchmark iterations (default: 5)
     --file=PATH     Use existing CSV file instead of generating
-    --no-cleanup    Keep test file after benchmark
+    --fast          Skip slow tools (csvkit) and medium tools (miller, datamash, goawk)
     --help          Show this help
 
-Environment Variables:
-    ROWS            Same as --rows
-    COLS            Same as --cols
-    ITERATIONS      Same as --iterations
-    NO_CLEANUP      Set to 'true' to keep test files
+Tool categories:
+    Fast (always run):   cisv, qsv, xsv, csvtk, tsv-utils, frawk, wc, awk, cut
+    Medium (skip --fast): miller, datamash, goawk
+    Slow (skip --fast):   csvkit
 
 Examples:
-    $0 --rows=1000000
+    $0 --rows=100000
     $0 --file=/data/large.csv
-    ROWS=500000 ITERATIONS=10 $0
+    $0 --rows=1000000 --fast
 
 EOF
 }
 
 main() {
-    local file=""
-
+    # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
             --rows=*) ROWS="${1#*=}"; shift ;;
             --cols=*) COLS="${1#*=}"; shift ;;
             --iterations=*) ITERATIONS="${1#*=}"; shift ;;
-            --file=*) file="${1#*=}"; shift ;;
-            --no-cleanup) NO_CLEANUP=true; shift ;;
+            --file=*) INPUT_FILE="${1#*=}"; shift ;;
+            --fast) FAST_MODE=true; shift ;;
             --help|-h) show_help; exit 0 ;;
             *) shift ;;
         esac
     done
 
+    # Create temp file for results
+    RESULTS_FILE=$(mktemp)
+    trap "rm -f $RESULTS_FILE" EXIT
+
+    echo "============================================================"
+    echo "CISV CLI Benchmark"
+    echo "============================================================"
+    echo ""
+
     # Generate or use existing file
-    if [ -n "$file" ]; then
-        if [ ! -f "$file" ]; then
-            log "Error: File not found: $file"
+    local filepath
+    local file_size
+
+    if [ -n "$INPUT_FILE" ]; then
+        filepath="$INPUT_FILE"
+        if [ ! -f "$filepath" ]; then
+            echo "Error: File not found: $filepath"
             exit 1
         fi
+        file_size=$(get_file_size "$filepath")
+        local size_mb=$(awk "BEGIN {printf \"%.1f\", $file_size / 1048576}")
+        echo "Using existing file: $filepath (${size_mb} MB)"
     else
-        file="benchmark_data.csv"
-        generate_csv "$ROWS" "$COLS" "$file"
+        filepath="/tmp/cisv_benchmark_$$.csv"
+        generate_csv "$ROWS" "$COLS" "$filepath"
+        file_size=$(get_file_size "$filepath")
     fi
 
-    # Run benchmarks
-    run_cli_benchmarks "$file"
+    local size_mb=$(awk "BEGIN {printf \"%.1f\", $file_size / 1048576}")
+    local row_count=$(wc -l < "$filepath" | tr -d ' ')
 
-    # Generate markdown report to stdout
-    generate_markdown_report "$file"
+    echo ""
+    echo "============================================================"
+    echo "BENCHMARK: $(format_number $ROWS) rows × $COLS columns"
+    echo "File size: ${size_mb} MB"
+    echo "Iterations: $ITERATIONS"
+    echo "Fast mode: $FAST_MODE"
+    echo "============================================================"
+    echo ""
+
+    # Find cisv binary
+    local CISV_BIN=""
+    if [ -f "./cli/build/cisv" ]; then
+        CISV_BIN="./cli/build/cisv"
+        export LD_LIBRARY_PATH="./core/build:${LD_LIBRARY_PATH:-}"
+    elif [ -f "/benchmark/cisv/cli/build/cisv" ]; then
+        CISV_BIN="/benchmark/cisv/cli/build/cisv"
+        export LD_LIBRARY_PATH="/benchmark/cisv/core/build:${LD_LIBRARY_PATH:-}"
+    elif [ -f "/usr/local/bin/cisv" ]; then
+        CISV_BIN="/usr/local/bin/cisv"
+    fi
+
+    # ========================================================================
+    # ROW COUNTING BENCHMARKS
+    # ========================================================================
+
+    echo "--- Row Counting Benchmarks ---"
+    echo ""
+
+    # ---- FAST TOOLS (always run) ----
+
+    # cisv -c
+    if [ -n "$CISV_BIN" ]; then
+        run_benchmark "cisv" "$CISV_BIN -c \"$filepath\"" "count"
+    else
+        echo "Benchmarking cisv..."
+        echo "  Skipped: cisv not available"
+    fi
+
+    # qsv count
+    if command_exists qsv; then
+        run_benchmark "qsv" "qsv count \"$filepath\"" "count"
+    else
+        echo "Benchmarking qsv..."
+        echo "  Skipped: qsv not installed"
+    fi
+
+    # xsv count
+    if command_exists xsv; then
+        run_benchmark "xsv" "xsv count \"$filepath\"" "count"
+    else
+        echo "Benchmarking xsv..."
+        echo "  Skipped: xsv not installed"
+    fi
+
+    # csvtk nrow
+    if command_exists csvtk; then
+        run_benchmark "csvtk" "csvtk nrow \"$filepath\"" "count"
+    else
+        echo "Benchmarking csvtk..."
+        echo "  Skipped: csvtk not installed"
+    fi
+
+    # tsv-utils: tsv-summarize (needs CSV to be treated properly)
+    if command_exists tsv-summarize; then
+        run_benchmark "tsv-utils" "tsv-summarize --count \"$filepath\"" "count"
+    else
+        echo "Benchmarking tsv-utils..."
+        echo "  Skipped: tsv-utils not installed"
+    fi
+
+    # frawk
+    if command_exists frawk; then
+        run_benchmark "frawk" "frawk -i csv 'END{print NR}' \"$filepath\"" "count"
+    else
+        echo "Benchmarking frawk..."
+        echo "  Skipped: frawk not installed"
+    fi
+
+    # wc -l (baseline)
+    run_benchmark "wc" "wc -l < \"$filepath\"" "count"
+
+    # awk (baseline)
+    run_benchmark "awk" "awk 'END{print NR}' \"$filepath\"" "count"
+
+    # ---- MEDIUM TOOLS (skip with --fast) ----
+
+    if [ "$FAST_MODE" != "true" ]; then
+        # miller
+        if command_exists mlr; then
+            run_benchmark "miller" "mlr --csv count \"$filepath\"" "count"
+        else
+            echo "Benchmarking miller..."
+            echo "  Skipped: miller not installed"
+        fi
+
+        # datamash
+        if command_exists datamash; then
+            run_benchmark "datamash" "datamash -H count 1 < \"$filepath\"" "count"
+        else
+            echo "Benchmarking datamash..."
+            echo "  Skipped: datamash not installed"
+        fi
+
+        # goawk
+        if command_exists goawk; then
+            run_benchmark "goawk" "goawk --csv 'END{print NR}' \"$filepath\"" "count"
+        else
+            echo "Benchmarking goawk..."
+            echo "  Skipped: goawk not installed"
+        fi
+    fi
+
+    # ---- SLOW TOOLS (skip with --fast) ----
+
+    if [ "$FAST_MODE" != "true" ]; then
+        # csvkit (Python-based, slow)
+        if command_exists csvstat; then
+            run_benchmark "csvkit" "csvstat --count \"$filepath\"" "count"
+        else
+            echo "Benchmarking csvkit..."
+            echo "  Skipped: csvkit not installed"
+        fi
+    fi
+
+    # Print row counting results
+    print_results_table "count" "$file_size" "$row_count"
+
+    # ========================================================================
+    # COLUMN SELECTION BENCHMARKS
+    # ========================================================================
+
+    echo ""
+    echo "--- Column Selection Benchmarks ---"
+    echo ""
+
+    # ---- FAST TOOLS (always run) ----
+
+    # cisv -s (0-indexed)
+    if [ -n "$CISV_BIN" ]; then
+        run_benchmark "cisv" "$CISV_BIN -s 0,2,3 \"$filepath\" | wc -l" "select"
+    fi
+
+    # qsv select (1-indexed)
+    if command_exists qsv; then
+        run_benchmark "qsv" "qsv select 1,3,4 \"$filepath\" | wc -l" "select"
+    fi
+
+    # xsv select (1-indexed)
+    if command_exists xsv; then
+        run_benchmark "xsv" "xsv select 1,3,4 \"$filepath\" | wc -l" "select"
+    fi
+
+    # csvtk cut (1-indexed)
+    if command_exists csvtk; then
+        run_benchmark "csvtk" "csvtk cut -f 1,3,4 \"$filepath\" | wc -l" "select"
+    fi
+
+    # tsv-select (1-indexed, works on CSV with -d)
+    if command_exists tsv-select; then
+        run_benchmark "tsv-utils" "tsv-select -d, -f 1,3,4 \"$filepath\" | wc -l" "select"
+    fi
+
+    # frawk (1-indexed with CSV mode)
+    if command_exists frawk; then
+        run_benchmark "frawk" "frawk -i csv -o csv '{print \$1,\$3,\$4}' \"$filepath\" | wc -l" "select"
+    fi
+
+    # cut (baseline, 1-indexed)
+    run_benchmark "cut" "cut -d',' -f1,3,4 \"$filepath\" | wc -l" "select"
+
+    # awk (baseline, 1-indexed)
+    run_benchmark "awk" "awk -F',' '{print \$1,\$3,\$4}' \"$filepath\" | wc -l" "select"
+
+    # ---- MEDIUM TOOLS (skip with --fast) ----
+
+    if [ "$FAST_MODE" != "true" ]; then
+        # miller
+        if command_exists mlr; then
+            run_benchmark "miller" "mlr --csv cut -f col0,col2,col3 \"$filepath\" | wc -l" "select"
+        fi
+
+        # goawk (1-indexed)
+        if command_exists goawk; then
+            run_benchmark "goawk" "goawk --csv '{print \$1,\$3,\$4}' \"$filepath\" | wc -l" "select"
+        fi
+    fi
+
+    # ---- SLOW TOOLS (skip with --fast) ----
+
+    if [ "$FAST_MODE" != "true" ]; then
+        # csvkit (1-indexed)
+        if command_exists csvcut; then
+            run_benchmark "csvkit" "csvcut -c 1,3,4 \"$filepath\" | wc -l" "select"
+        fi
+    fi
+
+    # Print column selection results
+    print_results_table "select" "$file_size" "$row_count"
 
     # Cleanup
-    if [ "$NO_CLEANUP" != "true" ] && [ -z "${file:-}" ]; then
-        rm -f "benchmark_data.csv"
+    if [ -z "$INPUT_FILE" ]; then
+        rm -f "$filepath"
+        echo ""
+        echo "Cleaned up temporary file"
     fi
 
-    log ""
-    log "Benchmark complete!"
+    echo ""
+    echo "Benchmark complete!"
 }
 
 main "$@"
