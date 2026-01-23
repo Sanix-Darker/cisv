@@ -1,447 +1,323 @@
 'use strict';
-// Load cisv parser using the module's entry point
-const cisv = require('../cisv');
-const cisvParser = cisv.cisvParser;
-const { parse: csvParseSync } = require('csv-parse/sync');
-const { parse: csvParseStream } = require('csv-parse');
-const Papa = require('papaparse');
-const fastCsv = require('fast-csv');
-const { inferSchema, initParser } = require('udsv');
-const d3 = require('d3-dsv');
-// const { iter } = require('but-csv');
+/**
+ * CISV Node.js Benchmark
+ *
+ * Compares cisv Node.js binding against popular CSV parsing libraries.
+ *
+ * Libraries compared:
+ * - cisv: High-performance C parser with SIMD optimizations
+ * - udsv: Ultra-fast DSV parser
+ * - papaparse: Popular browser/node CSV parser
+ * - csv-parse: Node.js stream/sync CSV parser
+ * - d3-dsv: D3's delimiter-separated values parser
+ * - fast-csv: Fast CSV parser with streaming support
+ * - neat-csv: Promise-based CSV parser
+ *
+ * Usage:
+ *   node benchmark.js [options]
+ *
+ * Options:
+ *   --rows=N        Number of rows to generate (default: 100000)
+ *   --cols=N        Number of columns (default: 5)
+ *   --file=PATH     Use existing CSV file instead of generating
+ *   --iterations=N  Number of iterations (default: 5)
+ *   --fast          Skip slow libraries (neat-csv, fast-csv)
+ */
+
 const fs = require('fs');
-const { Suite } = require('benchmark');
-const stream = require('stream');
 const path = require('path');
+const os = require('os');
+const { performance } = require('perf_hooks');
 
-// Initial file path from arguments or default to '../fixtures/data.csv'
-let benchFilePath = process.argv[2] || '../fixtures/data.csv';
+// Parse command line arguments
+function parseArgs() {
+    const args = {
+        rows: 100000,
+        cols: 5,
+        file: null,
+        iterations: 5,
+        fast: false,
+    };
 
-try {
-  // Resolve to an absolute path
-  if (!fs.existsSync(benchFilePath)) {
-    // If the initial path doesn't exist, try '../../fixtures/data.csv'
-    const alternativePath = '../../fixtures/data.csv';
-    if (fs.existsSync(alternativePath)) {
-      benchFilePath = alternativePath;
-    } else {
-      // If none of the files exist, throw an error
-      throw new Error("File not found");
-    }
-  }
-} catch (error) {
-  console.error("Failed to locate benchmark file in either specified path or '../../fixtures':", error);
-  throw error;
-}
+    for (let i = 2; i < process.argv.length; i++) {
+        const arg = process.argv[i];
+        let match;
 
-const BENCH_FILE = path.resolve(benchFilePath);
-console.log(" Using benchmark file:", BENCH_FILE);
-
-// We set a row to retrieve.
-// This ensures all parsers do the work to make data accessible.
-const TARGET_ROW_INDEX = 4;
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const results = { sync: [], sync_data: [], async: [], async_data: [] };
-
-async function runAllBenchmarks() {
-    const neatCsv = (await import('neat-csv')).default;
-
-    console.log(`Starting benchmark with file: ${BENCH_FILE}`);
-    console.log(`All tests will retrieve row index: ${TARGET_ROW_INDEX}\n`);
-
-    // Prepare and Verify Data
-    let fileBuffer;
-    try {
-        fileBuffer = fs.readFileSync(BENCH_FILE);
-    } catch (e) {
-        console.error(`Error: Could not read the file "${BENCH_FILE}".`);
-        process.exit(1);
-    }
-    const fileString = fileBuffer.toString();
-    const fileSizeMB = fileBuffer.length / (1024 * 1024);
-    console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
-
-    // Pre-run one parser to show the target row and confirm it's readable
-    try {
-        const sampleRows = csvParseSync(fileBuffer);
-        if (sampleRows.length > TARGET_ROW_INDEX) {
-            console.log('Sample of target row:', sampleRows[TARGET_ROW_INDEX]);
-        } else {
-            console.warn(`Warning: File has fewer than ${TARGET_ROW_INDEX + 1} rows. Tests will run but may not retrieve data.`);
+        if ((match = arg.match(/^--rows=(\d+)$/))) {
+            args.rows = parseInt(match[1], 10);
+        } else if ((match = arg.match(/^--cols=(\d+)$/))) {
+            args.cols = parseInt(match[1], 10);
+        } else if ((match = arg.match(/^--file=(.+)$/))) {
+            args.file = match[1];
+        } else if ((match = arg.match(/^--iterations=(\d+)$/))) {
+            args.iterations = parseInt(match[1], 10);
+        } else if (arg === '--fast') {
+            args.fast = true;
         }
-    } catch(e) {
-        console.error('Could not pre-parse the file to get sample row.', e);
-        process.exit(1);
-    }
-    console.log('\n');
-
-    // Synchronous Benchmark Suite
-    await new Promise((resolve, reject) => {
-        const syncSuite = new Suite('Sync (Parse only) Benchmark');
-        console.log('--- Running: Sync (Parse only) Benchmarks ---');
-
-        syncSuite
-          .add('cisv (sync)', () => {
-            const parser = new cisvParser();
-            parser.write(fileBuffer);
-            parser.end();
-          })
-          .add('csv-parse (sync)', () => {
-            csvParseSync(fileBuffer);
-          })
-          .add('papaparse (sync)', () => {
-            Papa.parse(fileString, { fastMode: true });
-          })
-          .add('udsv (sync)', () => {
-            const schema = inferSchema(fileString);
-            const parser = initParser(schema);
-            parser.stringArrs(fileString);
-          })
-          .add('d3-dsv (sync)', () => {
-            d3.csvParse(fileString);
-          })
-          // .add('but-csv (sync)', () => {
-          //   Array.from(iter(fileString));
-          // })
-          .on('cycle', (event) => logCycle(event, 'sync'))
-          .on('error', reject)
-          .on('complete', function() {
-            console.log(`\n Fastest Sync is ${this.filter('fastest').map('name')}\n`);
-            resolve();
-          })
-          .run();
-    });
-
-    console.log('-'.repeat(50) + '\n');
-    await sleep(3000);
-
-    // Synchronous Benchmark Suite with data access
-    await new Promise((resolve, reject) => {
-        const syncSuite = new Suite('Sync (Parse + Access) Benchmark');
-        console.log('--- Running: Sync (Parse + Access) Benchmarks ---');
-
-        syncSuite
-          .add('cisv (sync)', () => {
-            const parser = new cisvParser();
-            parser.write(fileBuffer);
-            parser.end();
-            const specificRow = parser[TARGET_ROW_INDEX];
-          })
-          .add('csv-parse (sync)', () => {
-            const rows = csvParseSync(fileBuffer);
-            const specificRow = rows[TARGET_ROW_INDEX];
-          })
-          .add('papaparse (sync)', () => {
-            const result = Papa.parse(fileString, { fastMode: true });
-            const specificRow = result.data[TARGET_ROW_INDEX];
-          })
-          .add('udsv (sync)', () => {
-            const schema = inferSchema(fileString);
-            const parser = initParser(schema);
-            const rows = parser.stringArrs(fileString);
-            const specificRow = rows[TARGET_ROW_INDEX];
-          })
-          .add('d3-dsv (sync)', () => {
-            const rows = d3.csvParse(fileString);
-            const specificRow = rows[TARGET_ROW_INDEX];
-          })
-          //.add('but-csv (sync)', () => {
-          //  const rows = Array.from(iter(fileString));
-          //  const specificRow = rows[TARGET_ROW_INDEX];
-          //})
-          .on('cycle', (event) => logCycle(event, 'sync_data'))
-          .on('error', reject)
-          .on('complete', function() {
-            console.log(`\n Fastest Sync is ${this.filter('fastest').map('name')}\n`);
-            resolve();
-          })
-          .run();
-    });
-
-    console.log('-'.repeat(50) + '\n');
-    await sleep(3000);
-
-    // Asynchronous Benchmark Suite
-    await new Promise((resolve, reject) => {
-        const asyncSuite = new Suite('Async (Parse only) Benchmark');
-        console.log('--- Running: Async (Parse only) Benchmarks ---');
-
-        asyncSuite
-          .add('cisv (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const parser = new cisvParser();
-              const readable = stream.Readable.from(fileBuffer);
-              readable
-                .on('data', (chunk) => parser.write(chunk))
-                .on('end', () => {
-                  parser.end();
-                  deferred.resolve();
-                })
-                .on('error', (err) => deferred.reject(err));
-            }
-          })
-          .add('papaparse (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const records = [];
-              const readable = stream.Readable.from(fileBuffer);
-              Papa.parse(readable, {
-                step: (result) => records.push(result.data),
-                complete: () => {
-                    deferred.resolve();
-                },
-                error: (err) => deferred.reject(err)
-              });
-            }
-          })
-          .add('fast-csv (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const rows = [];
-              const readable = stream.Readable.from(fileBuffer);
-              readable
-                .pipe(fastCsv.parse({ headers: true }))
-                .on('data', (row) => rows.push(row))
-                .on('end', () => deferred.resolve())
-                .on('error', (err) => deferred.reject(err));
-            }
-          })
-          .add('neat-csv (async/promise)', {
-            defer: true,
-            fn: (deferred) => {
-              neatCsv(fileBuffer)
-                .then(() => {
-                    deferred.resolve()
-                })
-                .catch((err) => deferred.reject(err));
-            }
-          })
-          .add('udsv (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const readable = stream.Readable.from(fileString);
-              let parser = null;
-
-              readable
-                .on('data', (chunk) => {
-                  const strChunk = chunk.toString();
-                  if (parser == null) {
-                    const schema = inferSchema(strChunk);
-                    parser = initParser(schema);
-                  }
-                  parser.chunk(strChunk);
-                })
-                .on('end', () => {
-                  if (parser != null) {
-                    parser.end();
-                  }
-                  deferred.resolve();
-                })
-                .on('error', (err) => deferred.reject(err));
-            }
-          })
-          // Note: d3-dsv and but-csv don't have native async streaming support
-          // so they are only included in sync benchmarks
-          .on('cycle', (event) => logCycle(event, 'async'))
-          .on('error', reject)
-          .on('complete', function() {
-            console.log(`\n Fastest Async is ${this.filter('fastest').map('name')}\n`);
-            resolve();
-          })
-          .run({ async: true });
-    });
-
-    console.log('-'.repeat(50) + '\n');
-    await sleep(3000);
-
-    // Asynchronous Benchmark Suite with data access
-    await new Promise((resolve, reject) => {
-        const asyncSuite = new Suite('Async (Parse + Access) Benchmark');
-        console.log('--- Running: Async (Parse + Access) Benchmarks ---');
-
-        asyncSuite
-          .add('cisv (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const parser = new cisvParser();
-              const readable = stream.Readable.from(fileBuffer);
-              readable
-                .on('data', (chunk) => parser.write(chunk))
-                .on('end', () => {
-                  parser.end();
-                  const rows = parser.getRows();
-                  const specificRow = rows[TARGET_ROW_INDEX];
-                  deferred.resolve();
-                })
-                .on('error', (err) => deferred.reject(err));
-            }
-          })
-          .add('papaparse (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const records = [];
-              const readable = stream.Readable.from(fileBuffer);
-              Papa.parse(readable, {
-                step: (result) => records.push(result.data),
-                complete: () => {
-                    const specificRow = records[TARGET_ROW_INDEX];
-                    deferred.resolve();
-                },
-                error: (err) => deferred.reject(err)
-              });
-            }
-          })
-          .add('fast-csv (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const rows = [];
-              const readable = stream.Readable.from(fileBuffer);
-              readable
-                .pipe(fastCsv.parse({ headers: true }))
-                .on('data', (row) => rows.push(row))
-                .on('end', () => {
-                  const specificRow = rows[TARGET_ROW_INDEX];
-                  deferred.resolve();
-                })
-                .on('error', (err) => deferred.reject(err));
-            }
-          })
-          .add('neat-csv (async/promise)', {
-            defer: true,
-            fn: (deferred) => {
-              neatCsv(fileBuffer)
-                .then((rows) => {
-                    const specificRow = rows[TARGET_ROW_INDEX];
-                    deferred.resolve()
-                })
-                .catch((err) => deferred.reject(err));
-            }
-          })
-          .add('udsv (async/stream)', {
-            defer: true,
-            fn: (deferred) => {
-              const readable = stream.Readable.from(fileString);
-              let parser = null;
-              let result = null;
-
-              readable
-                .on('data', (chunk) => {
-                  const strChunk = chunk.toString();
-                  if (!parser) {
-                    const schema = inferSchema(strChunk);
-                    parser = initParser(schema);
-                  }
-                  parser.chunk(strChunk, parser.stringArrs);
-                })
-                .on('end', () => {
-                  if (parser) {
-                    result = parser.end();
-                    const specificRow = result[TARGET_ROW_INDEX];
-                  }
-                  deferred.resolve();
-                })
-                .on('error', (err) => deferred.reject(err));
-            }
-          })
-          .on('cycle', (event) => logCycle(event, 'async_data'))
-          .on('error', reject)
-          .on('complete', function() {
-            console.log(`\n Fastest Async is ${this.filter('fastest').map('name')}\n`);
-            resolve();
-          })
-          .run({ async: true });
-    });
-
-    generateMarkdownReport();
-
-    function logCycle(event, type) {
-        const stats = event.target.stats;
-        const meanTime = stats.mean;
-        const opsPerSec = event.target.hz;
-        const speedMBps = (fileSizeMB * opsPerSec);
-
-        console.log('```');
-        const resultLine = `  ${String(event.target)}\n    Speed: ${speedMBps.toFixed(2)} MB/s | Avg Time: ${(meanTime * 1000).toFixed(2)} ms | Ops/sec: ${opsPerSec.toFixed(0)}`;
-        console.log(resultLine);
-
-        results[type].push({
-            name: String(event.target.name),
-            speed: speedMBps.toFixed(2),
-            avgTime: (meanTime * 1000).toFixed(2),
-            ops: opsPerSec.toFixed(0)
-        });
-
-        console.log('    (cooling down...)\n');
-        console.log('```');
     }
 
-    function generateMarkdownReport() {
-        console.log('-'.repeat(50));
-        console.log('\nBenchmark Results Table (Markdown)\n');
+    return args;
+}
 
-        // Sort results by speed (fastest first) for each category
-        const sortBySpeed = (a, b) => parseFloat(b.speed) - parseFloat(a.speed);
-        const sortByOps = (a, b) => parseFloat(b.ops) - parseFloat(a.ops);
+/**
+ * Generate a test CSV file
+ */
+function generateCsv(filepath, rows, cols) {
+    console.log(`Generating CSV: ${rows.toLocaleString()} rows × ${cols} columns...`);
+    const start = performance.now();
 
-        // Synchronous Results - sorted by speed
-        console.log('### Synchronous Results (sorted by speed - fastest first)\n');
-        let syncTable = '| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
-        syncTable +=    '|--------------------|--------------|---------------|----------------|\n';
-        results.sync.sort(sortBySpeed).forEach(r => {
-            syncTable += `| ${r.name.padEnd(18)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
-        });
-        console.log(syncTable);
+    const lines = [];
 
-        // Synchronous Results with data access - sorted by speed
-        console.log('### Synchronous Results (with data access - sorted by speed)\n');
-        let syncTabled = '| Library            | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
-        syncTabled +=    '|--------------------|--------------|---------------|----------------|\n';
-        results.sync_data.sort(sortBySpeed).forEach(r => {
-            syncTabled += `| ${r.name.padEnd(18)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
-        });
-        console.log(syncTabled);
+    // Header
+    const header = [];
+    for (let i = 0; i < cols; i++) {
+        header.push(`col${i}`);
+    }
+    lines.push(header.join(','));
 
-        // Asynchronous Results - sorted by speed
-        console.log('\n### Asynchronous Results (sorted by speed - fastest first)\n');
-        let asyncTable = '| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
-        asyncTable +=    '|--------------------------|--------------|---------------|----------------|\n';
-        results.async.sort(sortBySpeed).forEach(r => {
-            asyncTable += `| ${r.name.padEnd(24)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
-        });
-        console.log(asyncTable);
+    // Data rows
+    for (let row = 0; row < rows; row++) {
+        const rowData = [];
+        for (let col = 0; col < cols; col++) {
+            rowData.push(`value_${row}_${col}`);
+        }
+        lines.push(rowData.join(','));
 
-        // Asynchronous Results with data access - sorted by speed
-        console.log('\n### Asynchronous Results (with data access - sorted by speed)\n');
-        let asyncTabled = '| Library                  | Speed (MB/s) | Avg Time (ms) | Operations/sec |\n';
-        asyncTabled +=    '|--------------------------|--------------|---------------|----------------|\n';
-        results.async_data.sort(sortBySpeed).forEach(r => {
-            asyncTabled += `| ${r.name.padEnd(24)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} | ${r.ops.padEnd(14)} |\n`;
-        });
-        console.log(asyncTabled);
+        if (row > 0 && row % 500000 === 0) {
+            console.log(`  Generated ${row.toLocaleString()} rows...`);
+        }
+    }
 
-        // sorted by Operations/sec tables
-        console.log('\n## Alternative Sorting: By Operations/sec\n');
+    fs.writeFileSync(filepath, lines.join('\n'));
 
-        console.log('### Synchronous Results (sorted by operations/sec)\n');
-        let syncOpsTable = '| Library            | Operations/sec | Speed (MB/s) | Avg Time (ms) |\n';
-        syncOpsTable +=    '|--------------------|----------------|--------------|---------------|\n';
-        results.sync.sort(sortByOps).forEach(r => {
-            syncOpsTable += `| ${r.name.padEnd(18)} | ${r.ops.padEnd(14)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} |\n`;
-        });
-        console.log(syncOpsTable);
+    const elapsed = (performance.now() - start) / 1000;
+    const size = fs.statSync(filepath).size;
+    const sizeMb = size / (1024 * 1024);
+    console.log(`  Done in ${elapsed.toFixed(2)}s, file size: ${sizeMb.toFixed(1)} MB`);
 
-        console.log('### Asynchronous Results (sorted by operations/sec)\n');
-        let asyncOpsTable = '| Library                  | Operations/sec | Speed (MB/s) | Avg Time (ms) |\n';
-        asyncOpsTable +=    '|--------------------------|----------------|--------------|---------------|\n';
-        results.async.sort(sortByOps).forEach(r => {
-            asyncOpsTable += `| ${r.name.padEnd(24)} | ${r.ops.padEnd(14)} | ${r.speed.padEnd(12)} | ${r.avgTime.padEnd(13)} |\n`;
-        });
-        console.log(asyncOpsTable);
+    return size;
+}
+
+/**
+ * Run a benchmark function multiple times
+ */
+async function benchmark(name, fn, iterations) {
+    console.log(`Benchmarking ${name}...`);
+
+    const times = [];
+    let rowCount = 0;
+
+    for (let i = 0; i < iterations; i++) {
+        const start = performance.now();
+        try {
+            const result = await fn();
+            rowCount = Array.isArray(result) ? result.length : result;
+        } catch (e) {
+            console.log(`  Error: ${e.message}`);
+            return null;
+        }
+        const elapsed = (performance.now() - start) / 1000;
+        times.push(elapsed);
+    }
+
+    const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
+
+    return {
+        time: avgTime,
+        rows: rowCount,
+        iterations: times.length,
+    };
+}
+
+/**
+ * Format throughput as MB/s
+ */
+function formatThroughput(fileSize, time) {
+    if (time > 0) {
+        const mbPerSec = (fileSize / (1024 * 1024)) / time;
+        return `${mbPerSec.toFixed(1)} MB/s`;
+    }
+    return 'N/A';
+}
+
+/**
+ * Load libraries dynamically to handle missing dependencies
+ */
+function tryRequire(name) {
+    try {
+        return require(name);
+    } catch (e) {
+        return null;
     }
 }
 
-runAllBenchmarks().catch(err => {
-    console.error('A benchmark test failed and was caught:', err);
+async function main() {
+    const args = parseArgs();
+
+    // Load libraries
+    const cisv = tryRequire('../cisv');
+    const csvParseSync = tryRequire('csv-parse/sync');
+    const Papa = tryRequire('papaparse');
+    const fastCsv = tryRequire('fast-csv');
+    const udsv = tryRequire('udsv');
+    const d3 = tryRequire('d3-dsv');
+    let neatCsv = null;
+    try {
+        neatCsv = (await import('neat-csv')).default;
+    } catch (e) {
+        // neat-csv not available
+    }
+
+    console.log('============================================================');
+    console.log('CISV Node.js Benchmark');
+    console.log('============================================================\n');
+
+    // Generate or use existing file
+    let filepath;
+    let fileSize;
+
+    if (args.file) {
+        filepath = path.resolve(args.file);
+        if (!fs.existsSync(filepath)) {
+            console.error(`Error: File not found: ${filepath}`);
+            process.exit(1);
+        }
+        fileSize = fs.statSync(filepath).size;
+        console.log(`Using existing file: ${filepath} (${(fileSize / (1024 * 1024)).toFixed(1)} MB)`);
+    } else {
+        filepath = path.join(os.tmpdir(), `cisv_benchmark_${process.pid}.csv`);
+        fileSize = generateCsv(filepath, args.rows, args.cols);
+    }
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`BENCHMARK: ${args.rows.toLocaleString()} rows × ${args.cols} columns`);
+    console.log(`File size: ${(fileSize / (1024 * 1024)).toFixed(1)} MB`);
+    console.log(`Iterations: ${args.iterations}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    // Read file contents (some parsers need string, some need buffer)
+    const fileBuffer = fs.readFileSync(filepath);
+    const fileString = fileBuffer.toString();
+
+    const results = {};
+
+    // Benchmark: cisv
+    if (cisv && cisv.cisvParser) {
+        results['cisv'] = await benchmark('cisv', () => {
+            const parser = new cisv.cisvParser();
+            parser.write(fileBuffer);
+            parser.end();
+            return parser.getRows();
+        }, args.iterations);
+    } else {
+        console.log('Benchmarking cisv...');
+        console.log('  Skipped: cisv not available');
+    }
+
+    // Benchmark: udsv
+    if (udsv) {
+        results['udsv'] = await benchmark('udsv', () => {
+            const schema = udsv.inferSchema(fileString);
+            const parser = udsv.initParser(schema);
+            return parser.stringArrs(fileString);
+        }, args.iterations);
+    } else {
+        console.log('Benchmarking udsv...');
+        console.log('  Skipped: udsv not installed');
+    }
+
+    // Benchmark: papaparse
+    if (Papa) {
+        results['papaparse'] = await benchmark('papaparse', () => {
+            const result = Papa.parse(fileString, { fastMode: true });
+            return result.data;
+        }, args.iterations);
+    } else {
+        console.log('Benchmarking papaparse...');
+        console.log('  Skipped: papaparse not installed');
+    }
+
+    // Benchmark: csv-parse
+    if (csvParseSync) {
+        results['csv-parse'] = await benchmark('csv-parse', () => {
+            return csvParseSync.parse(fileBuffer);
+        }, args.iterations);
+    } else {
+        console.log('Benchmarking csv-parse...');
+        console.log('  Skipped: csv-parse not installed');
+    }
+
+    // Benchmark: d3-dsv
+    if (d3) {
+        results['d3-dsv'] = await benchmark('d3-dsv', () => {
+            return d3.csvParseRows(fileString);
+        }, args.iterations);
+    } else {
+        console.log('Benchmarking d3-dsv...');
+        console.log('  Skipped: d3-dsv not installed');
+    }
+
+    // Slow libraries (skip with --fast flag)
+    if (!args.fast) {
+        // Benchmark: fast-csv
+        if (fastCsv) {
+            results['fast-csv'] = await benchmark('fast-csv', () => {
+                return new Promise((resolve, reject) => {
+                    const rows = [];
+                    const stream = require('stream');
+                    const readable = stream.Readable.from(fileBuffer);
+                    readable
+                        .pipe(fastCsv.parse())
+                        .on('data', (row) => rows.push(row))
+                        .on('end', () => resolve(rows))
+                        .on('error', reject);
+                });
+            }, args.iterations);
+        } else {
+            console.log('Benchmarking fast-csv...');
+            console.log('  Skipped: fast-csv not installed');
+        }
+
+        // Benchmark: neat-csv
+        if (neatCsv) {
+            results['neat-csv'] = await benchmark('neat-csv', async () => {
+                return await neatCsv(fileBuffer);
+            }, args.iterations);
+        } else {
+            console.log('Benchmarking neat-csv...');
+            console.log('  Skipped: neat-csv not installed');
+        }
+    }
+
+    // Print results
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('RESULTS');
+    console.log(`${'='.repeat(60)}`);
+    console.log(`${'Library'.padEnd(16)} ${'Parse Time'.padStart(12)} ${'Throughput'.padStart(14)} ${'Rows'.padStart(12)}`);
+    console.log('-'.repeat(60));
+
+    // Sort by time (fastest first)
+    const sortedResults = Object.entries(results)
+        .filter(([_, result]) => result !== null)
+        .sort(([_, a], [__, b]) => a.time - b.time);
+
+    for (const [name, result] of sortedResults) {
+        const throughput = formatThroughput(fileSize, result.time);
+        console.log(
+            `${name.padEnd(16)} ${result.time.toFixed(3).padStart(10)}s ${throughput.padStart(14)} ${result.rows.toLocaleString().padStart(12)}`
+        );
+    }
+
+    // Cleanup
+    if (!args.file) {
+        fs.unlinkSync(filepath);
+        console.log('\nCleaned up temporary file');
+    }
+
+    console.log('\nBenchmark complete!');
+}
+
+main().catch((err) => {
+    console.error('Benchmark failed:', err);
+    process.exit(1);
 });

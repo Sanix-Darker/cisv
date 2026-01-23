@@ -17,12 +17,9 @@ RUN make clean || true && make core
 WORKDIR /benchmark/cisv/bindings/nodejs
 RUN npm install
 RUN npm run build
-RUN npm install --no-save papaparse csv-parse fast-csv csv-parser d3-dsv udsv neat-csv benchmark
+RUN npm install --no-save papaparse csv-parse fast-csv d3-dsv udsv neat-csv
 
-# Generate test data in the benchmarks directory
+# Run benchmark from the benchmarks directory
 WORKDIR /benchmark/cisv/bindings/nodejs/benchmarks
-RUN node -e "const fs = require('fs'); const rows = 100000; let csv = 'id,name,email,value,date\\n'; for(let i=0; i<rows; i++) csv += i+',User_'+i+',user'+i+'@test.com,'+(i*1.23).toFixed(2)+',2024-01-01\\n'; fs.writeFileSync('data.csv', csv);"
-
-# Run benchmark from the benchmarks directory (so ../cisv path works)
-WORKDIR /benchmark/cisv/bindings/nodejs/benchmarks
-ENTRYPOINT ["node", "benchmark.js", "data.csv"]
+ENTRYPOINT ["node", "benchmark.js"]
+CMD ["--rows=100000", "--cols=5", "--iterations=5"]
