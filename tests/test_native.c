@@ -6,9 +6,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "../lib/cisv_parser.h"
-#include "../lib/cisv_transformer.h"
-#include "../lib/cisv_writer.h"
+#include "cisv/parser.h"
+#include "cisv/transformer.h"
+#include "cisv/writer.h"
 
 // Test result tracking
 typedef struct {
@@ -138,39 +138,39 @@ static void test_parser_basic() {
     TEST_PASS();
 }
 
-// static void test_parser_quoted_fields() {
-//     TEST_START("parser_quoted_fields");
-//
-//     const char *csv = "\"name\",\"description\"\n\"John Doe\",\"Has, comma\"\n\"Jane\",\"Uses \"\"quotes\"\"\"\n";
-//     const char *file = create_test_file(csv);
-//     TEST_ASSERT(file != NULL);
-//
-//     test_parser_data_t td = {0};
-//     cisv_config config;
-//     cisv_config_init(&config);
-//     config.field_cb = test_field_cb;
-//     config.row_cb = test_row_cb;
-//     config.user = &td;
-//
-//     cisv_parser *parser = cisv_parser_create_with_config(&config);
-//     TEST_ASSERT(parser != NULL);
-//
-//     int result = cisv_parser_parse_file(parser, file);
-//     TEST_ASSERT(result == 0);
-//     TEST_ASSERT(td.row_count == 3);
-//
-//     // Check handling of comma inside quotes
-//     TEST_ASSERT(strcmp(td.fields[3], "Has, comma") == 0);
-//
-//     // Check handling of escaped quotes
-//     TEST_ASSERT(strcmp(td.fields[5], "Uses \"quotes\"") == 0);
-//
-//     cisv_parser_destroy(parser);
-//     cleanup_test_data(&td);
-//     unlink(file);
-//
-//     TEST_PASS();
-// }
+static void test_parser_quoted_fields() {
+    TEST_START("parser_quoted_fields");
+
+    const char *csv = "\"name\",\"description\"\n\"John Doe\",\"Has, comma\"\n\"Jane\",\"Uses \"\"quotes\"\"\"\n";
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    test_parser_data_t td = {0};
+    cisv_config config;
+    cisv_config_init(&config);
+    config.field_cb = test_field_cb;
+    config.row_cb = test_row_cb;
+    config.user = &td;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&config);
+    TEST_ASSERT(parser != NULL);
+
+    int result = cisv_parser_parse_file(parser, file);
+    TEST_ASSERT(result == 0);
+    TEST_ASSERT(td.row_count == 3);
+
+    // Check handling of comma inside quotes
+    TEST_ASSERT(strcmp(td.fields[3], "Has, comma") == 0);
+
+    // Check handling of escaped quotes
+    TEST_ASSERT(strcmp(td.fields[5], "Uses \"quotes\"") == 0);
+
+    cisv_parser_destroy(parser);
+    cleanup_test_data(&td);
+    unlink(file);
+
+    TEST_PASS();
+}
 
 static void test_parser_custom_delimiter() {
     TEST_START("parser_custom_delimiter");
@@ -793,14 +793,157 @@ static void test_edge_newline_in_quotes() {
     cisv_parser *parser = cisv_parser_create_with_config(&config);
     cisv_parser_parse_file(parser, file);
 
-    // FIXME : handle this edgecase
-    // TEST_ASSERT(td.field_count == 4);
-    // TEST_ASSERT(strstr(td.fields[1], "\n") != NULL);  // Should preserve newlines in quotes
+    TEST_ASSERT(td.field_count == 4);
+    TEST_ASSERT(strstr(td.fields[1], "\n") != NULL);  // Should preserve newlines in quotes
 
     cisv_parser_destroy(parser);
     cleanup_test_data(&td);
     unlink(file);
 
+    TEST_PASS();
+}
+
+// ==================== Multiline Tests (Issue #108) ====================
+
+static void test_multiline_quoted() {
+    TEST_START("multiline_quoted");
+
+    const char *csv = "a,b\n\"line1\nline2\",c\n";
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    test_parser_data_t td = {0};
+    cisv_config config;
+    cisv_config_init(&config);
+    config.field_cb = test_field_cb;
+    config.row_cb = test_row_cb;
+    config.user = &td;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&config);
+    TEST_ASSERT(parser != NULL);
+
+    int result = cisv_parser_parse_file(parser, file);
+    TEST_ASSERT(result == 0);
+    TEST_ASSERT(td.row_count == 2);
+    TEST_ASSERT(td.field_count == 4);
+    TEST_ASSERT(strcmp(td.fields[2], "line1\nline2") == 0);
+
+    cisv_parser_destroy(parser);
+    cleanup_test_data(&td);
+    unlink(file);
+
+    TEST_PASS();
+}
+
+static void test_multiline_row_count() {
+    TEST_START("multiline_row_count");
+
+    const char *csv = "h1,h2\n\"line1\nline2\nline3\",simple\n";
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    size_t count = cisv_parser_count_rows(file);
+    TEST_ASSERT(count == 2);
+
+    unlink(file);
+    TEST_PASS();
+}
+
+static void test_multiline_multiple_fields() {
+    TEST_START("multiline_multiple_fields");
+
+    const char *csv = "a,b,c\n\"x\ny\",middle,\"p\nq\nr\"\n";
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    test_parser_data_t td = {0};
+    cisv_config config;
+    cisv_config_init(&config);
+    config.field_cb = test_field_cb;
+    config.row_cb = test_row_cb;
+    config.user = &td;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&config);
+    TEST_ASSERT(parser != NULL);
+
+    cisv_parser_parse_file(parser, file);
+    TEST_ASSERT(td.row_count == 2);
+    TEST_ASSERT(td.field_count == 6);
+    TEST_ASSERT(strcmp(td.fields[3], "x\ny") == 0);
+    TEST_ASSERT(strcmp(td.fields[5], "p\nq\nr") == 0);
+
+    cisv_parser_destroy(parser);
+    cleanup_test_data(&td);
+    unlink(file);
+
+    TEST_PASS();
+}
+
+static void test_multiline_escaped_quotes() {
+    TEST_START("multiline_escaped_quotes");
+
+    const char *csv = "a,b\n\"she said \"\"hi\"\"\nthen left\",ok\n";
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    test_parser_data_t td = {0};
+    cisv_config config;
+    cisv_config_init(&config);
+    config.field_cb = test_field_cb;
+    config.row_cb = test_row_cb;
+    config.user = &td;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&config);
+    TEST_ASSERT(parser != NULL);
+
+    cisv_parser_parse_file(parser, file);
+    TEST_ASSERT(td.row_count == 2);
+    TEST_ASSERT(td.field_count == 4);
+    TEST_ASSERT(strcmp(td.fields[2], "she said \"hi\"\nthen left") == 0);
+
+    cisv_parser_destroy(parser);
+    cleanup_test_data(&td);
+    unlink(file);
+
+    TEST_PASS();
+}
+
+static void test_multiline_issue108() {
+    TEST_START("multiline_issue108");
+
+    const char *csv =
+        "\"h1\",\"h2\",\"h3\",\"h4\",\"h5\"\n"
+        "\"a\nb\nc\nd\ne\nf\ng\nh\ni\nj\","
+        "\"k\nl\nm\nn\no\np\nq\nr\ns\nt\","
+        "\"u\nv\nw\nx\ny\nz\n1\n2\n3\n4\","
+        "\"5\n6\n7\n8\n9\n0\na\nb\nc\nd\","
+        "\"e\nf\ng\nh\ni\nj\nk\nl\nm\nn\"\n";
+
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    size_t count = cisv_parser_count_rows(file);
+    TEST_ASSERT(count == 2);
+
+    unlink(file);
+    TEST_PASS();
+}
+
+static void test_count_rows_custom_quote() {
+    TEST_START("count_rows_custom_quote");
+
+    const char *csv = "h1,h2\n'line1\nline2',simple\n";
+    const char *file = create_test_file(csv);
+    TEST_ASSERT(file != NULL);
+
+    cisv_config config;
+    cisv_config_init(&config);
+    config.quote = '\'';
+
+    size_t count = cisv_parser_count_rows_with_config(file, &config);
+    TEST_ASSERT(count == 2);
+
+    unlink(file);
     TEST_PASS();
 }
 
@@ -831,12 +974,10 @@ int main(int argc, char *argv[]) {
     // Parser tests
     printf("Parser Tests:\n");
     test_parser_basic();
-    // FIXME: fix this implementation part for later
-    // test_parser_quoted_fields();
+    test_parser_quoted_fields();
     test_parser_custom_delimiter();
     test_parser_empty_fields();
     test_parser_trim();
-    // FIXME: fix this implementation part for later
     // test_parser_comments();
     // test_parser_streaming();
 
@@ -868,6 +1009,15 @@ int main(int argc, char *argv[]) {
     test_edge_empty_file();
     test_edge_single_field();
     test_edge_newline_in_quotes();
+
+    // Multiline tests (Issue #108)
+    printf("\nMultiline Tests (Issue #108):\n");
+    test_multiline_quoted();
+    test_multiline_row_count();
+    test_multiline_multiple_fields();
+    test_multiline_escaped_quotes();
+    test_multiline_issue108();
+    test_count_rows_custom_quote();
 
     print_test_summary();
 
