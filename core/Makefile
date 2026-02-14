@@ -88,7 +88,7 @@ else
 endif
 
 # Targets
-.PHONY: all static shared clean test test-debug install
+.PHONY: all static shared clean test test-native test-debug install
 
 all: static shared
 
@@ -128,6 +128,17 @@ test: $(TEST_BIN)
 
 $(TEST_BIN): $(TEST_SRCS) $(STATIC_LIB)
 	$(CC) $(CFLAGS) -I$(INC_DIR) -o $@ $(TEST_SRCS) $(STATIC_LIB) -lm -lpthread
+
+# Native tests (tests/test_native.c)
+NATIVE_TEST_SRC = ../tests/test_native.c
+NATIVE_TEST_BIN = $(BUILD_DIR)/test_native
+
+test-native: $(NATIVE_TEST_BIN)
+	@echo "Running native tests..."
+	@./$(NATIVE_TEST_BIN)
+
+$(NATIVE_TEST_BIN): $(NATIVE_TEST_SRC) $(STATIC_LIB)
+	$(CC) $(CFLAGS) -I$(INC_DIR) -o $@ $(NATIVE_TEST_SRC) $(STATIC_LIB) -lm -lpthread
 
 test-debug: $(OBJS_DEBUG)
 	$(CC) $(CFLAGS_DEBUG) -I$(INC_DIR) -o $(BUILD_DIR)/test_core_debug \

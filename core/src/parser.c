@@ -1468,7 +1468,42 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
     return 0;
 }
 
-// Ultra-fast row counting
+// Quote-aware row counting helper
+// Counts actual CSV rows by tracking whether newlines are inside quoted fields
+static size_t count_rows_internal(const uint8_t *data, size_t size, char quote_char) {
+    size_t count = 0;
+    bool in_quote = false;
+
+    for (size_t i = 0; i < size; i++) {
+        uint8_t c = data[i];
+        if (in_quote) {
+            if (c == (uint8_t)quote_char) {
+                // Look ahead for escaped quote ("")
+                if (i + 1 < size && data[i + 1] == (uint8_t)quote_char) {
+                    i++;  // Skip escaped quote
+                } else {
+                    in_quote = false;
+                }
+            }
+            // Newlines inside quotes are NOT row boundaries
+        } else {
+            if (c == '\n') {
+                count++;
+            } else if (c == (uint8_t)quote_char) {
+                in_quote = true;
+            }
+        }
+    }
+
+    // If file doesn't end with newline, count the last row
+    if (size > 0 && data[size - 1] != '\n') {
+        count++;
+    }
+
+    return count;
+}
+
+// Quote-aware row counting
 size_t cisv_parser_count_rows(const char *path) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) return 0;
@@ -1492,113 +1527,7 @@ size_t cisv_parser_count_rows(const char *path) {
 
     madvise(base, st.st_size, MADV_SEQUENTIAL);
 
-    size_t count = 0;
-
-#ifdef __AVX512F__
-    const __m512i nl = _mm512_set1_epi8('\n');
-    size_t i = 0;
-
-    for (; i + 64 <= (size_t)st.st_size; i += 64) {
-        __m512i chunk = _mm512_loadu_si512((__m512i*)(base + i));
-        __mmask64 mask = _mm512_cmpeq_epi8_mask(chunk, nl);
-        count += __builtin_popcountll(mask);
-    }
-
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#elif defined(__AVX2__)
-    const __m256i nl = _mm256_set1_epi8('\n');
-    size_t i = 0;
-
-    // Unrolled loop: process 64 bytes (2x 32-byte chunks) per iteration
-    for (; i + 64 <= (size_t)st.st_size; i += 64) {
-        __m256i chunk1 = _mm256_loadu_si256((__m256i*)(base + i));
-        __m256i chunk2 = _mm256_loadu_si256((__m256i*)(base + i + 32));
-        count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk1, nl)));
-        count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk2, nl)));
-    }
-
-    // Handle remaining 32-byte chunk
-    for (; i + 32 <= (size_t)st.st_size; i += 32) {
-        __m256i chunk = _mm256_loadu_si256((__m256i*)(base + i));
-        __m256i cmp = _mm256_cmpeq_epi8(chunk, nl);
-        uint32_t mask = _mm256_movemask_epi8(cmp);
-        count += __builtin_popcount(mask);
-    }
-
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    // ARM NEON row counting (16 bytes at a time)
-    const uint8x16_t nl = vdupq_n_u8('\n');
-    size_t i = 0;
-
-    // Unrolled: process 32 bytes per iteration
-    for (; i + 32 <= (size_t)st.st_size; i += 32) {
-        uint8x16_t chunk1 = vld1q_u8(base + i);
-        uint8x16_t chunk2 = vld1q_u8(base + i + 16);
-        uint8x16_t cmp1 = vceqq_u8(chunk1, nl);
-        uint8x16_t cmp2 = vceqq_u8(chunk2, nl);
-        // Count matches: each 0xFF byte becomes 1 when right-shifted
-        count += vaddvq_u8(vshrq_n_u8(cmp1, 7));
-        count += vaddvq_u8(vshrq_n_u8(cmp2, 7));
-    }
-
-    // Handle remaining 16-byte chunk
-    for (; i + 16 <= (size_t)st.st_size; i += 16) {
-        uint8x16_t chunk = vld1q_u8(base + i);
-        uint8x16_t cmp = vceqq_u8(chunk, nl);
-        count += vaddvq_u8(vshrq_n_u8(cmp, 7));
-    }
-
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#elif defined(__SSE2__)
-    // SSE2 row counting (16 bytes at a time)
-    const __m128i nl = _mm_set1_epi8('\n');
-    size_t i = 0;
-
-    // Unrolled: process 32 bytes per iteration
-    for (; i + 32 <= (size_t)st.st_size; i += 32) {
-        __m128i chunk1 = _mm_loadu_si128((const __m128i*)(base + i));
-        __m128i chunk2 = _mm_loadu_si128((const __m128i*)(base + i + 16));
-        count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk1, nl)));
-        count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk2, nl)));
-    }
-
-    // Handle remaining 16-byte chunk
-    for (; i + 16 <= (size_t)st.st_size; i += 16) {
-        __m128i chunk = _mm_loadu_si128((const __m128i*)(base + i));
-        count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk, nl)));
-    }
-
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#else
-    // Scalar fallback using proper SWAR (SIMD Within A Register)
-    size_t i = 0;
-    for (; i + 8 <= (size_t)st.st_size; i += 8) {
-        // Use memcpy for safe unaligned access (optimized by compiler)
-        uint64_t word;
-        memcpy(&word, base + i, sizeof(word));
-        // SWAR: each matching byte has its high bit set in the mask
-        uint64_t nl_mask = swar_has_byte(word, '\n');
-        // Each match sets 0x80 in that byte position, popcount gives 8x actual count
-        count += __builtin_popcountll(nl_mask) >> 3;
-    }
-
-    for (; i < (size_t)st.st_size; i++) {
-        count += (base[i] == '\n');
-    }
-#endif
-
-    if (st.st_size > 0 && base[st.st_size - 1] != '\n') {
-        count++;
-    }
+    size_t count = count_rows_internal(base, st.st_size, '"');
 
     munmap(base, st.st_size);
     close(fd);
@@ -1606,8 +1535,35 @@ size_t cisv_parser_count_rows(const char *path) {
 }
 
 size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *config) {
-    (void)config;
-    return cisv_parser_count_rows(path);
+    if (!config) return cisv_parser_count_rows(path);
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return 0;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        return 0;
+    }
+
+    if (st.st_size == 0) {
+        close(fd);
+        return 0;
+    }
+
+    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (base == MAP_FAILED) {
+        close(fd);
+        return 0;
+    }
+
+    madvise(base, st.st_size, MADV_SEQUENTIAL);
+
+    size_t count = count_rows_internal(base, st.st_size, config->quote);
+
+    munmap(base, st.st_size);
+    close(fd);
+    return count;
 }
 
 int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
@@ -1746,95 +1702,72 @@ cisv_chunk_t *cisv_split_chunks(
             // Last chunk gets everything remaining
             target_end = end;
         } else {
-            // Find newline near target boundary
+            // Find newline near target boundary, respecting quoted fields
             target_end = chunk_start + chunk_size;
             if (target_end > end) target_end = end;
 
-            // Search forward for newline (row boundary)
-            while (target_end < end && *target_end != '\n') {
-                target_end++;
+            // Count quote characters from chunk_start to target_end
+            // to determine if we're inside a quoted field
+            size_t quote_count = 0;
+            for (const uint8_t *q = chunk_start; q < target_end; q++) {
+                if (*q == '"') quote_count++;
             }
-            if (target_end < end) {
-                target_end++;  // Include the newline
+
+            if (quote_count & 1) {
+                // Odd number of quotes: we're inside a quoted field.
+                // Scan forward past the closing quote, then find next newline
+                const uint8_t *scan = target_end;
+                bool in_q = true;
+                while (scan < end && in_q) {
+                    if (*scan == '"') {
+                        if (scan + 1 < end && *(scan + 1) == '"') {
+                            scan += 2;  // Skip escaped quote
+                            continue;
+                        }
+                        in_q = false;
+                    }
+                    scan++;
+                }
+                // Now find the next newline after the closing quote
+                while (scan < end && *scan != '\n') {
+                    scan++;
+                }
+                if (scan < end) {
+                    scan++;  // Include the newline
+                }
+                target_end = scan;
+            } else {
+                // Even quotes: safe to split, scan forward to next newline
+                while (target_end < end && *target_end != '\n') {
+                    target_end++;
+                }
+                if (target_end < end) {
+                    target_end++;  // Include the newline
+                }
             }
         }
 
-        // Count rows in this chunk using SIMD when available
+        // Count rows in this chunk using quote-aware scalar loop
+        // chunk_start is always at a row boundary, so initial state is outside quotes
         size_t row_count = 0;
-        const uint8_t *p = chunk_start;
-
-#ifdef __AVX512F__
-        const __m512i nl_v = _mm512_set1_epi8('\n');
-        while (p + 64 <= target_end) {
-            __m512i chunk = _mm512_loadu_si512((__m512i*)p);
-            __mmask64 mask = _mm512_cmpeq_epi8_mask(chunk, nl_v);
-            row_count += __builtin_popcountll(mask);
-            p += 64;
-        }
-#elif defined(__AVX2__)
-        const __m256i nl_v = _mm256_set1_epi8('\n');
-        // Unrolled: process 64 bytes per iteration
-        while (p + 64 <= target_end) {
-            __m256i chunk1 = _mm256_loadu_si256((__m256i*)p);
-            __m256i chunk2 = _mm256_loadu_si256((__m256i*)(p + 32));
-            row_count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk1, nl_v)));
-            row_count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk2, nl_v)));
-            p += 64;
-        }
-        // Handle remaining 32-byte chunk
-        while (p + 32 <= target_end) {
-            __m256i chunk = _mm256_loadu_si256((__m256i*)p);
-            row_count += __builtin_popcount(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, nl_v)));
-            p += 32;
-        }
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-        // ARM NEON newline counting
-        const uint8x16_t nl_v = vdupq_n_u8('\n');
-        while (p + 32 <= target_end) {
-            uint8x16_t chunk1 = vld1q_u8(p);
-            uint8x16_t chunk2 = vld1q_u8(p + 16);
-            uint8x16_t cmp1 = vceqq_u8(chunk1, nl_v);
-            uint8x16_t cmp2 = vceqq_u8(chunk2, nl_v);
-            row_count += vaddvq_u8(vshrq_n_u8(cmp1, 7));
-            row_count += vaddvq_u8(vshrq_n_u8(cmp2, 7));
-            p += 32;
-        }
-        while (p + 16 <= target_end) {
-            uint8x16_t chunk = vld1q_u8(p);
-            uint8x16_t cmp = vceqq_u8(chunk, nl_v);
-            row_count += vaddvq_u8(vshrq_n_u8(cmp, 7));
-            p += 16;
-        }
-#elif defined(__SSE2__)
-        // SSE2 newline counting
-        const __m128i nl_v = _mm_set1_epi8('\n');
-        while (p + 32 <= target_end) {
-            __m128i chunk1 = _mm_loadu_si128((const __m128i*)p);
-            __m128i chunk2 = _mm_loadu_si128((const __m128i*)(p + 16));
-            row_count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk1, nl_v)));
-            row_count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk2, nl_v)));
-            p += 32;
-        }
-        while (p + 16 <= target_end) {
-            __m128i chunk = _mm_loadu_si128((const __m128i*)p);
-            row_count += __builtin_popcount(_mm_movemask_epi8(_mm_cmpeq_epi8(chunk, nl_v)));
-            p += 16;
-        }
-#else
-        // SWAR newline counting
-        while (p + 8 <= target_end) {
-            uint64_t word;
-            memcpy(&word, p, sizeof(word));
-            uint64_t nl_mask = swar_has_byte(word, '\n');
-            // Each match sets 0x80 in that byte position, popcount gives 8x actual count
-            row_count += __builtin_popcountll(nl_mask) >> 3;
-            p += 8;
-        }
-#endif
-
-        // Remainder
-        while (p < target_end) {
-            if (*p++ == '\n') row_count++;
+        bool in_quote = false;
+        for (const uint8_t *p = chunk_start; p < target_end; p++) {
+            uint8_t c = *p;
+            if (in_quote) {
+                if (c == '"') {
+                    if (p + 1 < target_end && *(p + 1) == '"') {
+                        p++;  // Skip escaped quote
+                    } else {
+                        in_quote = false;
+                    }
+                }
+            } else {
+                if (c == '\n') {
+                    row_count++;
+                } else if (c == '"') {
+                    in_quote = true;
+                }
+            }
         }
 
         chunks[actual_chunks].start = chunk_start;
