@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(cisv VERSION 0.0.8 LANGUAGES C CXX)
+project(cisv VERSION 0.2.6 LANGUAGES C CXX)
 
 # C standard
 set(CMAKE_C_STANDARD 11)

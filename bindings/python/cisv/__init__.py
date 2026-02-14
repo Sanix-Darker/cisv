@@ -15,7 +15,7 @@ from .parser import (
     MAX_FILE_SIZE,
 )
 
-__version__ = '0.1.0'
+__version__ = '0.2.6'
 __all__ = [
     'CisvParser',
     'parse_file',
