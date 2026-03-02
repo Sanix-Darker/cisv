@@ -271,3 +271,17 @@ class TestValidation:
         """Test error for multi-character quote."""
         with pytest.raises((ValueError, cisv.CisvError)):
             cisv.parse_string("a,b", quote='""')
+
+    def test_invalid_delimiter_parse_file_fast(self, tmp_path):
+        """parse_file_fast should reject empty delimiter."""
+        csv_file = tmp_path / "invalid_fast.csv"
+        csv_file.write_text("a,b\n1,2\n")
+        with pytest.raises((ValueError, cisv.CisvError)):
+            cisv.parse_file_fast(str(csv_file), delimiter="")
+
+    def test_invalid_quote_parse_file_benchmark(self, tmp_path):
+        """parse_file_benchmark should reject multi-character quote."""
+        csv_file = tmp_path / "invalid_bench.csv"
+        csv_file.write_text("a,b\n1,2\n")
+        with pytest.raises((ValueError, cisv.CisvError)):
+            cisv.parse_file_benchmark(str(csv_file), quote='""')

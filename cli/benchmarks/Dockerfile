@@ -5,15 +5,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Base dependencies
 RUN apt-get update && apt-get install -y \
     build-essential curl wget bc time python3 python3-pip unzip \
-    miller datamash \
+    miller datamash cargo rustc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install csvkit (Python-based CSV toolkit)
 RUN pip3 install --no-cache-dir csvkit
 
-# Install Rust and xsv (from source - fast to compile)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Install xsv from source using distro cargo/rustc.
 RUN cargo install xsv
 
 # Install qsv (prebuilt musl binary - statically linked, no external deps)

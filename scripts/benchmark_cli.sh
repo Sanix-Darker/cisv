@@ -432,30 +432,39 @@ PYEOF
     fi
 }
 
-# Validate Python cisv parse result (validates via row count since ctypes binding uses count API)
+# Validate Python cisv parse result (full parse validation)
 validate_python_parse() {
     local file="$1"
-    local lib_path="${PROJECT_ROOT}/core/build/libcisv.so"
+    local py_pkg_path="${PROJECT_ROOT}/bindings/python"
 
-    if [ ! -f "$lib_path" ]; then
+    if [ ! -d "$py_pkg_path/cisv" ]; then
         echo "SKIP"
         return
     fi
 
-    # Python binding validates parsing via count - if count is correct, parsing works
-    local count=$(python3 << PYEOF 2>/dev/null
-import ctypes
-lib = ctypes.CDLL("$lib_path")
-lib.cisv_parser_count_rows.argtypes = [ctypes.c_char_p]
-lib.cisv_parser_count_rows.restype = ctypes.c_size_t
-print(lib.cisv_parser_count_rows(b"$file"))
+    local result=$(python3 << PYEOF 2>/dev/null
+import sys
+sys.path.insert(0, "${py_pkg_path}")
+import cisv
+
+rows = cisv.parse_file("${file}")
+row_count = len(rows)
+field_count = len(rows[0]) if rows else 0
+first_id = rows[1][0] if len(rows) > 1 and rows[1] else ""
+headers = ",".join(rows[0]) if rows else ""
+print(f"{row_count}|{field_count}|{first_id}|{headers}")
 PYEOF
 )
+    local row_count=$(echo "$result" | cut -d'|' -f1)
+    local field_count=$(echo "$result" | cut -d'|' -f2)
+    local first_id=$(echo "$result" | cut -d'|' -f3)
+    local headers=$(echo "$result" | cut -d'|' -f4)
 
-    if [ "$count" = "$EXPECTED_ROW_COUNT" ]; then
+    if [ "$row_count" = "$EXPECTED_ROW_COUNT" ] && [ "$field_count" = "$EXPECTED_FIELD_COUNT" ] && \
+       [ "$first_id" = "$EXPECTED_FIRST_ID" ] && [ "$headers" = "$EXPECTED_HEADERS" ]; then
         echo "PASS"
     else
-        echo "FAIL:expected=$EXPECTED_ROW_COUNT,got=$count"
+        echo "FAIL:rows=$row_count,fields=$field_count"
     fi
 }
 
@@ -740,13 +749,14 @@ JSEOF
 }
 
 # ============================================================================
-# PYTHON BENCHMARKS (7 parsers)
+# PYTHON BENCHMARKS (8 parsers)
 # ============================================================================
 
 run_python_benchmarks() {
     local file="$1"
     local abs_file="${PROJECT_ROOT}/${file}"
     local lib_path="${PROJECT_ROOT}/core/build/libcisv.so"
+    local result
 
     if ! command_exists python3; then
         log "Skipping Python benchmarks (python3 not available)"
@@ -755,8 +765,37 @@ run_python_benchmarks() {
 
     log "Running Python benchmarks..."
 
-    # cisv-python benchmark (using direct ctypes loading with explicit path)
-    local result
+    # cisv-python parse benchmark (real parse through Python binding)
+    result=$(python3 << PYEOF 2>/dev/null
+import sys
+import time
+
+sys.path.insert(0, "${PROJECT_ROOT}/bindings/python")
+import cisv
+
+iterations = 5
+total_time = 0
+success = 0
+
+for _ in range(iterations):
+    start = time.perf_counter()
+    rows = cisv.parse_file("${abs_file}")
+    end = time.perf_counter()
+    if len(rows) > 0:
+        total_time += (end - start)
+        success += 1
+
+if success == 0:
+    print("FAILED|0")
+else:
+    print(f"{total_time/success:.4f}|{success}")
+PYEOF
+) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["python_cisv"]="$result"
+    log "    cisv (parse): $result"
+
+    # cisv-python count benchmark (raw C performance path)
     result=$(python3 << PYEOF 2>/dev/null
 import time
 import ctypes
@@ -792,8 +831,8 @@ except Exception as e:
 PYEOF
 ) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
-    RESULTS["python_cisv"]="$result"
-    log "    cisv: $result"
+    RESULTS["python_cisv-count"]="$result"
+    log "    cisv (count): $result"
 
     # polars benchmark (fastest Python CSV parser)
     result=$(python3 << PYEOF 2>/dev/null
@@ -1294,13 +1333,17 @@ Task: Parse the entire CSV file using Python parsers.
 
 | Parser | Time (s) | Speed (MB/s) | Runs | Valid |
 |--------|----------|--------------|------|-------|
-| **cisv** $(format_result_validated "python_cisv" "$file_size_mb" "python_count")
+| **cisv (parse)** $(format_result_validated "python_cisv" "$file_size_mb" "python_parse")
+| **cisv (count)** $(format_result_validated "python_cisv-count" "$file_size_mb" "python_count")
 | polars $(format_result "python_polars" "$file_size_mb") - |
 | pyarrow $(format_result "python_pyarrow" "$file_size_mb") - |
 | pandas $(format_result "python_pandas" "$file_size_mb") - |
 | csv (stdlib) $(format_result "python_csv-stdlib" "$file_size_mb") - |
 | DictReader $(format_result "python_dictreader" "$file_size_mb") - |
 | numpy $(format_result "python_numpy" "$file_size_mb") - |
+
+> **Note:** cisv (count) shows native C performance without Python list marshaling overhead.
+> cisv (parse) includes the cost of converting C data to Python lists.
 
 ---
 
