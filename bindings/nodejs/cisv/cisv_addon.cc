@@ -454,6 +454,7 @@ public:
         is_destroyed_ = false;
         iterator_ = nullptr;
         batch_result_ = nullptr;
+        stream_buffering_active_ = true;
 
         // Initialize configuration with defaults
         cisv_config_init(&config_);
@@ -768,47 +769,99 @@ public:
         // Set environment for JS transforms
         rc_->env = env;
 
+        const uint8_t* chunk_data = nullptr;
+        size_t chunk_size = 0;
+        std::string chunk_storage;
+
         if (info[0].IsBuffer()) {
             auto buf = info[0].As<Napi::Buffer<uint8_t>>();
-            size_t buf_len = buf.Length();
-            // Check for overflow before adding to total_bytes_
-            if (buf_len > SIZE_MAX - total_bytes_) {
-                throw Napi::Error::New(env, "Total bytes would overflow");
-            }
-            cisv_parser_write(parser_, buf.Data(), buf_len);
-            total_bytes_ += buf_len;
-            return;
+            chunk_data = buf.Data();
+            chunk_size = buf.Length();
+        } else if (info[0].IsString()) {
+            chunk_storage = info[0].As<Napi::String>();
+            chunk_data = reinterpret_cast<const uint8_t*>(chunk_storage.data());
+            chunk_size = chunk_storage.size();
+        } else {
+            throw Napi::TypeError::New(env, "Expected Buffer or String");
         }
 
-        if (info[0].IsString()) {
-            std::string chunk = info[0].As<Napi::String>();
-            size_t chunk_size = chunk.size();
-            // Check for overflow before adding to total_bytes_
-            if (chunk_size > SIZE_MAX - total_bytes_) {
-                throw Napi::Error::New(env, "Total bytes would overflow");
-            }
-            cisv_parser_write(parser_, reinterpret_cast<const uint8_t*>(chunk.data()), chunk_size);
-            total_bytes_ += chunk_size;
-            return;
+        // Check for overflow before adding to total_bytes_
+        if (chunk_size > SIZE_MAX - total_bytes_) {
+            throw Napi::Error::New(env, "Total bytes would overflow");
         }
 
-        throw Napi::TypeError::New(env, "Expected Buffer or String");
+        // Fast streaming mode:
+        // Buffer chunks when no transforms/iterator are active and batch-parse on end().
+        // If buffered payload exceeds threshold, flush once to parser and continue streaming.
+        if (!hasTransforms() && iterator_ == nullptr) {
+            if (chunk_size > SIZE_MAX - pending_stream_.size()) {
+                throw Napi::Error::New(env, "Buffered stream size would overflow");
+            }
+
+            if (stream_buffering_active_) {
+                pending_stream_.append(reinterpret_cast<const char*>(chunk_data), chunk_size);
+                total_bytes_ += chunk_size;
+
+                if (pending_stream_.size() > kStreamBufferLimitBytes) {
+                    flushPendingStreamToParser();
+                    stream_buffering_active_ = false;
+                }
+                return;
+            }
+        } else if (!pending_stream_.empty()) {
+            flushPendingStreamToParser();
+            stream_buffering_active_ = false;
+        }
+
+        cisv_parser_write(parser_, chunk_data, chunk_size);
+        total_bytes_ += chunk_size;
     }
 
     void End(const Napi::CallbackInfo &info) {
-        if (!is_destroyed_) {
-            cisv_parser_end(parser_);
-            // Clear the environment reference after ending to prevent stale references
-            rc_->env = nullptr;
-            // Note: JS transforms stored in rc_->js_transforms remain valid
-            // as they are Persistent references managed by the addon lifecycle
+        if (is_destroyed_) {
+            return;
         }
+
+        if (stream_buffering_active_ && !pending_stream_.empty() &&
+            !hasTransforms() && iterator_ == nullptr &&
+            rc_ && rc_->rows.empty() && rc_->current.empty()) {
+            cisv_result_t *batch = cisv_parse_string_batch(
+                pending_stream_.data(), pending_stream_.size(), &config_);
+            if (!batch) {
+                throw Napi::Error::New(info.Env(), "parse error: " + std::string(strerror(errno)));
+            }
+            if (batch->error_code != 0) {
+                std::string msg = batch->error_message[0] ? batch->error_message : "parse error";
+                cisv_result_free(batch);
+                throw Napi::Error::New(info.Env(), msg);
+            }
+            clearBatchResult();
+            batch_result_ = batch;
+            pending_stream_.clear();
+            rc_->env = nullptr;
+            return;
+        }
+
+        if (!pending_stream_.empty()) {
+            flushPendingStreamToParser();
+            stream_buffering_active_ = false;
+        }
+
+        cisv_parser_end(parser_);
+        // Clear the environment reference after ending to prevent stale references
+        rc_->env = nullptr;
+        // Note: JS transforms stored in rc_->js_transforms remain valid
+        // as they are Persistent references managed by the addon lifecycle
     }
 
     Napi::Value GetRows(const Napi::CallbackInfo &info) {
         if (is_destroyed_) {
             Napi::Env env = info.Env();
             throw Napi::Error::New(env, "Parser has been destroyed");
+        }
+        if (!pending_stream_.empty()) {
+            flushPendingStreamToParser();
+            stream_buffering_active_ = false;
         }
         return drainRows(info.Env());
     }
@@ -821,6 +874,8 @@ public:
             rc_->current_field_index = 0;
             total_bytes_ = 0;
             parse_time_ = 0;
+            pending_stream_.clear();
+            stream_buffering_active_ = true;
             // Also clear the environment reference
             rc_->env = nullptr;
         }
@@ -1492,10 +1547,23 @@ private:
 
     void resetRowState() {
         clearBatchResult();
+        pending_stream_.clear();
+        stream_buffering_active_ = true;
         if (!rc_) return;
         rc_->rows.clear();
         rc_->current.clear();
         rc_->current_field_index = 0;
+    }
+
+    void flushPendingStreamToParser() {
+        if (pending_stream_.empty()) {
+            return;
+        }
+        cisv_parser_write(
+            parser_,
+            reinterpret_cast<const uint8_t*>(pending_stream_.data()),
+            pending_stream_.size());
+        pending_stream_.clear();
     }
 
     void loadRowsFromBatch(const cisv_result_t *result) {
@@ -1562,6 +1630,9 @@ private:
     bool is_destroyed_;
     cisv_iterator_t *iterator_;  // For row-by-row iteration
     cisv_result_t *batch_result_;
+    std::string pending_stream_;
+    bool stream_buffering_active_;
+    static constexpr size_t kStreamBufferLimitBytes = 8 * 1024 * 1024;
 };
 
 // Initialize all exports
