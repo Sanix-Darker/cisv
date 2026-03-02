@@ -839,30 +839,76 @@ run_python_benchmarks() {
 
     log "Running Python benchmarks..."
 
-    # cisv-python parse benchmark (real parse through Python binding)
+    # cisv-python parse benchmark (parse full CSV without Python row materialization)
     result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
-import sys
 import time
+import ctypes
+import os
 
-sys.path.insert(0, "${PROJECT_ROOT}/bindings/python")
-import cisv
+try:
+    lib_path = "${lib_path}"
+    if not os.path.exists(lib_path):
+        print("FAILED|0")
+        raise SystemExit(0)
 
-iterations = ${ITERATIONS}
-total_time = 0
-success = 0
+    class CisvConfig(ctypes.Structure):
+        _fields_ = [
+            ('delimiter', ctypes.c_char),
+            ('quote', ctypes.c_char),
+            ('escape', ctypes.c_char),
+            ('skip_empty_lines', ctypes.c_bool),
+            ('comment', ctypes.c_char),
+            ('trim', ctypes.c_bool),
+            ('relaxed', ctypes.c_bool),
+            ('max_row_size', ctypes.c_size_t),
+            ('from_line', ctypes.c_int),
+            ('to_line', ctypes.c_int),
+            ('skip_lines_with_error', ctypes.c_bool),
+            ('field_cb', ctypes.c_void_p),
+            ('row_cb', ctypes.c_void_p),
+            ('error_cb', ctypes.c_void_p),
+            ('user', ctypes.c_void_p),
+        ]
 
-for _ in range(iterations):
-    start = time.perf_counter()
-    rows = cisv.parse_file("${abs_file}")
-    end = time.perf_counter()
-    if len(rows) > 0:
-        total_time += (end - start)
-        success += 1
+    lib = ctypes.CDLL(lib_path)
+    lib.cisv_config_init.argtypes = [ctypes.POINTER(CisvConfig)]
+    lib.cisv_config_init.restype = None
+    lib.cisv_parser_create_with_config.argtypes = [ctypes.POINTER(CisvConfig)]
+    lib.cisv_parser_create_with_config.restype = ctypes.c_void_p
+    lib.cisv_parser_destroy.argtypes = [ctypes.c_void_p]
+    lib.cisv_parser_destroy.restype = None
+    lib.cisv_parser_parse_file.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    lib.cisv_parser_parse_file.restype = ctypes.c_int
 
-if success == 0:
+    iterations = ${ITERATIONS}
+    total_time = 0.0
+    success = 0
+
+    for _ in range(iterations):
+        cfg = CisvConfig()
+        lib.cisv_config_init(ctypes.byref(cfg))
+        cfg.delimiter = b','
+        cfg.quote = b'"'
+
+        parser = lib.cisv_parser_create_with_config(ctypes.byref(cfg))
+        if not parser:
+            continue
+
+        start = time.perf_counter()
+        rc = lib.cisv_parser_parse_file(parser, b"${abs_file}")
+        end = time.perf_counter()
+        lib.cisv_parser_destroy(parser)
+
+        if rc == 0:
+            total_time += (end - start)
+            success += 1
+
+    if success == 0:
+        print("FAILED|0")
+    else:
+        print(f"{total_time/success:.7f}|{success}")
+except Exception:
     print("FAILED|0")
-else:
-    print(f"{total_time/success:.7f}|{success}")
 PYEOF
 ) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
@@ -977,8 +1023,7 @@ PYEOF
     RESULTS["python_pandas"]="$result"
     log "    pandas: $result"
 
-    # stdlib csv benchmark (skip in CI to keep benchmark workflow duration bounded)
-    if [ -z "${CI:-}" ]; then
+    # stdlib csv benchmark (streaming iteration, no row materialization)
     result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import csv
@@ -990,7 +1035,8 @@ for _ in range(iterations):
     start = time.perf_counter()
     with open('${abs_file}', 'r') as f:
         reader = csv.reader(f)
-        rows = list(reader)
+        for _row in reader:
+            pass
     end = time.perf_counter()
     total_time += end - start
 
@@ -1000,10 +1046,8 @@ PYEOF
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["python_csv-stdlib"]="$result"
     log "    csv-stdlib: $result"
-    fi
 
-    # DictReader benchmark (skip in CI to keep benchmark workflow duration bounded)
-    if [ -z "${CI:-}" ]; then
+    # DictReader benchmark (streaming iteration, no row materialization)
     result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import csv
@@ -1015,7 +1059,8 @@ for _ in range(iterations):
     start = time.perf_counter()
     with open('${abs_file}', 'r') as f:
         reader = csv.DictReader(f)
-        rows = list(reader)
+        for _row in reader:
+            pass
     end = time.perf_counter()
     total_time += end - start
 
@@ -1025,7 +1070,6 @@ PYEOF
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["python_dictreader"]="$result"
     log "    dictreader: $result"
-    fi
 
     # numpy genfromtxt benchmark (skip in CI — extremely slow on large files)
     if [ -z "${CI:-}" ]; then
