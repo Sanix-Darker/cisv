@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <chrono>
+#include <cstdint>
 
 namespace {
 
@@ -60,9 +61,43 @@ static bool isValidUtf8(const char* data, size_t len) {
     return true;
 }
 
+// Fast path for common ASCII-only CSV data.
+static inline bool isAllAscii(const char* data, size_t len) {
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data);
+    size_t i = 0;
+
+    // Check machine-word chunks first.
+    const size_t word_size = sizeof(uintptr_t);
+    const uintptr_t high_mask = sizeof(uintptr_t) == 8
+        ? static_cast<uintptr_t>(0x8080808080808080ULL)
+        : static_cast<uintptr_t>(0x80808080UL);
+
+    while (i + word_size <= len) {
+        uintptr_t word;
+        memcpy(&word, bytes + i, word_size);
+        if (word & high_mask) {
+            return false;
+        }
+        i += word_size;
+    }
+
+    while (i < len) {
+        if (bytes[i] & 0x80) {
+            return false;
+        }
+        i++;
+    }
+    return true;
+}
+
 // Create Napi::String with UTF-8 validation (safe version)
 // Falls back to replacement character representation for invalid UTF-8
 static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
+    // Fastest path: ASCII-only data is always valid UTF-8.
+    if (isAllAscii(data, len)) {
+        return Napi::String::New(env, data, len);
+    }
+
     if (isValidUtf8(data, len)) {
         return Napi::String::New(env, data, len);
     }
@@ -376,6 +411,7 @@ public:
         total_bytes_ = 0;
         is_destroyed_ = false;
         iterator_ = nullptr;
+        batch_result_ = nullptr;
 
         // Initialize configuration with defaults
         cisv_config_init(&config_);
@@ -569,6 +605,7 @@ public:
                 delete rc_;
                 rc_ = nullptr;
             }
+            clearBatchResult();
             is_destroyed_ = true;
         }
     }
@@ -607,8 +644,8 @@ public:
                 cisv_result_free(batch);
                 throw Napi::Error::New(env, msg);
             }
-            loadRowsFromBatch(batch);
-            cisv_result_free(batch);
+            clearBatchResult();
+            batch_result_ = batch;
         } else {
             // Set environment for JS transforms
             rc_->env = env;
@@ -652,8 +689,8 @@ public:
                 cisv_result_free(batch);
                 throw Napi::Error::New(env, msg);
             }
-            loadRowsFromBatch(batch);
-            cisv_result_free(batch);
+            clearBatchResult();
+            batch_result_ = batch;
         } else {
             // Set environment for JS transforms
             rc_->env = env;
@@ -682,6 +719,9 @@ public:
         if (info.Length() != 1) {
             throw Napi::TypeError::New(env, "Expected one argument");
         }
+
+        // Streaming writes produce row-callback data, not batch results.
+        clearBatchResult();
 
         // Set environment for JS transforms
         rc_->env = env;
@@ -733,6 +773,7 @@ public:
 
     void Clear(const Napi::CallbackInfo &info) {
         if (!is_destroyed_ && rc_) {
+            clearBatchResult();
             rc_->rows.clear();
             rc_->current.clear();
             rc_->current_field_index = 0;
@@ -1383,6 +1424,13 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
     }
 
 private:
+    void clearBatchResult() {
+        if (batch_result_) {
+            cisv_result_free(batch_result_);
+            batch_result_ = nullptr;
+        }
+    }
+
     bool hasTransforms() const {
         bool has_c_transforms = rc_ && rc_->pipeline && rc_->pipeline->count > 0;
         bool has_js_transforms = rc_ && !rc_->js_transforms.empty();
@@ -1390,6 +1438,7 @@ private:
     }
 
     void resetRowState() {
+        clearBatchResult();
         if (!rc_) return;
         rc_->rows.clear();
         rc_->current.clear();
@@ -1413,6 +1462,19 @@ private:
     }
 
     Napi::Value drainRows(Napi::Env env) {
+        if (batch_result_) {
+            Napi::Array rows = Napi::Array::New(env, batch_result_->row_count);
+            for (size_t i = 0; i < batch_result_->row_count; ++i) {
+                const cisv_row_t *src_row = &batch_result_->rows[i];
+                Napi::Array row = Napi::Array::New(env, src_row->field_count);
+                for (size_t j = 0; j < src_row->field_count; ++j) {
+                    row[j] = SafeNewString(env, src_row->fields[j], src_row->field_lengths[j]);
+                }
+                rows[i] = row;
+            }
+            return rows;
+        }
+
         if (!rc_) {
             return Napi::Array::New(env, 0);
         }
@@ -1442,6 +1504,7 @@ private:
     double parse_time_;
     bool is_destroyed_;
     cisv_iterator_t *iterator_;  // For row-by-row iteration
+    cisv_result_t *batch_result_;
 };
 
 // Initialize all exports
