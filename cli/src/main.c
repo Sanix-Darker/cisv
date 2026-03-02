@@ -302,6 +302,9 @@ static int stream_rows_with_iterator(const char *filename, cisv_config *config, 
     int rc;
     char *row_buf = NULL;
     size_t row_buf_cap = 0;
+    char *out_buf = NULL;
+    size_t out_buf_cap = 0;
+    size_t out_buf_used = 0;
 
     while ((rc = cisv_iterator_next(it, &fields, &lengths, &field_count)) == CISV_ITER_OK) {
         if (row_buf_cap == 0) {
@@ -309,6 +312,15 @@ static int stream_rows_with_iterator(const char *filename, cisv_config *config, 
             row_buf = malloc(row_buf_cap);
             if (!row_buf) {
                 fprintf(stderr, "Failed to allocate row output buffer\n");
+                cisv_iterator_close(it);
+                return -1;
+            }
+
+            out_buf_cap = 1 << 20;  // 1 MiB batched output buffer
+            out_buf = malloc(out_buf_cap);
+            if (!out_buf) {
+                fprintf(stderr, "Failed to allocate output flush buffer\n");
+                free(row_buf);
                 cisv_iterator_close(it);
                 return -1;
             }
@@ -370,12 +382,54 @@ static int stream_rows_with_iterator(const char *filename, cisv_config *config, 
 
         ENSURE_ROW_BUF(1);
         row_buf[used++] = '\n';
-        fwrite(row_buf, 1, used, ctx->output);
+        if (used >= out_buf_cap) {
+            if (out_buf_used > 0) {
+                if (fwrite(out_buf, 1, out_buf_used, ctx->output) != out_buf_used) {
+                    fprintf(stderr, "Failed writing buffered output\n");
+                    free(out_buf);
+                    free(row_buf);
+                    cisv_iterator_close(it);
+                    return -1;
+                }
+                out_buf_used = 0;
+            }
+            if (fwrite(row_buf, 1, used, ctx->output) != used) {
+                fprintf(stderr, "Failed writing row output\n");
+                free(out_buf);
+                free(row_buf);
+                cisv_iterator_close(it);
+                return -1;
+            }
+        } else {
+            if (out_buf_used + used > out_buf_cap) {
+                if (fwrite(out_buf, 1, out_buf_used, ctx->output) != out_buf_used) {
+                    fprintf(stderr, "Failed writing buffered output\n");
+                    free(out_buf);
+                    free(row_buf);
+                    cisv_iterator_close(it);
+                    return -1;
+                }
+                out_buf_used = 0;
+            }
+            memcpy(out_buf + out_buf_used, row_buf, used);
+            out_buf_used += used;
+        }
         ctx->row_count++;
 
 #undef ENSURE_ROW_BUF
     }
 
+    if (out_buf_used > 0) {
+        if (fwrite(out_buf, 1, out_buf_used, ctx->output) != out_buf_used) {
+            fprintf(stderr, "Failed final buffered output flush\n");
+            free(out_buf);
+            free(row_buf);
+            cisv_iterator_close(it);
+            return -1;
+        }
+    }
+
+    free(out_buf);
     free(row_buf);
     cisv_iterator_close(it);
     if (rc == CISV_ITER_ERROR) {
