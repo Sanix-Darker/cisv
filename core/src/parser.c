@@ -1645,8 +1645,58 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
 static size_t count_rows_internal(const uint8_t *data, size_t size, char quote_char) {
     size_t count = 0;
     bool in_quote = false;
+    size_t i = 0;
 
-    for (size_t i = 0; i < size; i++) {
+    // SWAR-accelerated quote-aware counting. We keep the exact behavior but
+    // skip byte-by-byte checks on common fast paths.
+    while (i + 8 <= size) {
+        uint64_t word;
+        memcpy(&word, data + i, sizeof(word));
+
+        if (in_quote) {
+            // While in quoted mode, only quote bytes can change state.
+            uint64_t quote_mask = swar_has_byte(word, (uint8_t)quote_char);
+            if (!quote_mask) {
+                i += 8;
+                continue;
+            }
+        } else {
+            uint64_t quote_mask = swar_has_byte(word, (uint8_t)quote_char);
+            uint64_t nl_mask = swar_has_byte(word, '\n');
+
+            // Fast path: no quotes in this lane, count all newlines via popcount.
+            if (!quote_mask) {
+                count += (size_t)__builtin_popcountll(nl_mask);
+                i += 8;
+                continue;
+            }
+        }
+
+        // Slow path for mixed/special lanes.
+        for (size_t j = 0; j < 8; j++) {
+            uint8_t c = data[i + j];
+            if (in_quote) {
+                if (c == (uint8_t)quote_char) {
+                    // Look ahead for escaped quote ("")
+                    if (i + j + 1 < size && data[i + j + 1] == (uint8_t)quote_char) {
+                        j++;
+                    } else {
+                        in_quote = false;
+                    }
+                }
+            } else {
+                if (c == '\n') {
+                    count++;
+                } else if (c == (uint8_t)quote_char) {
+                    in_quote = true;
+                }
+            }
+        }
+        i += 8;
+    }
+
+    // Scalar tail
+    for (; i < size; i++) {
         uint8_t c = data[i];
         if (in_quote) {
             if (c == (uint8_t)quote_char) {
@@ -1657,7 +1707,6 @@ static size_t count_rows_internal(const uint8_t *data, size_t size, char quote_c
                     in_quote = false;
                 }
             }
-            // Newlines inside quotes are NOT row boundaries
         } else {
             if (c == '\n') {
                 count++;
