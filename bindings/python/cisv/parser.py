@@ -3,6 +3,7 @@ CISV Parser - Python bindings using ctypes
 """
 
 import ctypes
+import ctypes.util
 import os
 import stat
 from pathlib import Path
@@ -137,7 +138,7 @@ def _setup_bindings(lib):
 
     # cisv_parser_write
     lib.cisv_parser_write.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
-    lib.cisv_parser_write.restype = None
+    lib.cisv_parser_write.restype = ctypes.c_int
 
     # cisv_parser_end
     lib.cisv_parser_end.argtypes = [ctypes.c_void_p]

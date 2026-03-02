@@ -870,10 +870,25 @@ Napi::Value TransformByName(const Napi::CallbackInfo &info) {
         // Handle JavaScript function transforms by name
         Napi::Function func = info[1].As<Napi::Function>();
 
-        // Add to the C transform pipeline by name
-        if (cisv_transform_pipeline_add_js_by_name(rc_->pipeline, field_name.c_str(), &func) < 0) {
-            throw Napi::Error::New(env, "Failed to add JS transform for field: " + field_name);
+        if (!rc_->pipeline || !rc_->pipeline->header_fields) {
+            throw Napi::Error::New(env,
+                "Header fields are not set. Call setHeaderFields([...]) before transformByName(..., fn).");
         }
+
+        int field_index = -1;
+        for (size_t i = 0; i < rc_->pipeline->header_count; i++) {
+            if (strcmp(rc_->pipeline->header_fields[i], field_name.c_str()) == 0) {
+                field_index = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (field_index < 0) {
+            throw Napi::Error::New(env, "Unknown field name: " + field_name);
+        }
+
+        // Store callback in the same map used by applyTransforms().
+        rc_->js_transforms[field_index] = Napi::Persistent(func);
 
     } else {
         throw Napi::TypeError::New(env, "Transform must be a string type or function");
@@ -1008,6 +1023,11 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
         }
 
         // Clear JavaScript transforms
+        for (auto &pair : rc_->js_transforms) {
+            if (!pair.second.IsEmpty()) {
+                pair.second.Reset();
+            }
+        }
         rc_->js_transforms.clear();
 
         // Clear C transforms - destroy and DON'T recreate pipeline yet
