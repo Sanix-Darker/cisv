@@ -207,6 +207,7 @@ jobs:
   benchmark:
     name: Performance Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: [setup, cli-build-test]
     if: |
       github.event_name == 'pull_request' &&

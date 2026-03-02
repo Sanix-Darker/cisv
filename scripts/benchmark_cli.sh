@@ -10,7 +10,9 @@ set -uo pipefail
 # CONFIGURATION
 # ============================================================================
 
-ITERATIONS=5
+ITERATIONS=${CI:+3}
+ITERATIONS=${ITERATIONS:-5}
+BENCH_TIMEOUT=120
 SIZES=("large")
 FORCE_REGENERATE=false
 NO_CLEANUP=false
@@ -93,7 +95,13 @@ install_csvkit() {
 install_xsv() {
     if ! command_exists xsv; then
         log "Installing xsv..."
-        if command_exists cargo; then
+        local XSV_VERSION="0.13.0"
+        if [[ "$OSTYPE" == "linux-gnu"* ]] && [[ "$(uname -m)" == "x86_64" ]]; then
+            curl -sL "https://github.com/BurntSushi/xsv/releases/download/${XSV_VERSION}/xsv-${XSV_VERSION}-x86_64-unknown-linux-musl.tar.gz" 2>/dev/null | tar xz 2>/dev/null
+            sudo mv xsv /usr/local/bin/ 2>/dev/null || true
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            brew install xsv >/dev/null 2>&1 || true
+        elif command_exists cargo; then
             cargo install xsv >/dev/null 2>&1 || true
         fi
     fi
@@ -200,8 +208,7 @@ name = "csv-select"
 path = "src/select.rs"
 
 [profile.release]
-lto = true
-codegen-units = 1
+opt-level = 3
 CARGO_EOF
 
     mkdir -p src
@@ -674,11 +681,13 @@ run_nodejs_benchmarks() {
     )
 
     # Create benchmark script
-    cat > ./bindings/nodejs/_bench.js << 'JSEOF'
+    cat > ./bindings/nodejs/_bench.js <<JSEOF
 const fs = require('fs');
 const file = process.argv[2];
 const parser = process.argv[3];
-const iterations = 5;
+const iterations = ${ITERATIONS};
+JSEOF
+    cat >> ./bindings/nodejs/_bench.js << 'JSEOF'
 
 async function benchmark() {
     let totalTime = 0;
@@ -750,7 +759,7 @@ JSEOF
     # Run benchmarks for 8 parsers (including cisv-count to show raw C performance)
     for parser in "cisv" "cisv-count" "papaparse" "csv-parse" "fast-csv" "csv-parser" "d3-dsv" "csv-string"; do
         local result
-        result=$(cd ./bindings/nodejs && node _bench.js "$abs_file" "$parser" 2>/dev/null) || result="FAILED|0"
+        result=$(timeout "$BENCH_TIMEOUT" bash -c "cd ./bindings/nodejs && node _bench.js \"$abs_file\" \"$parser\"" 2>/dev/null) || result="FAILED|0"
         [ -z "$result" ] && result="FAILED|0"
         RESULTS["nodejs_${parser}"]="$result"
         log "    ${parser}: $result"
@@ -777,14 +786,14 @@ run_python_benchmarks() {
     log "Running Python benchmarks..."
 
     # cisv-python parse benchmark (real parse through Python binding)
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import sys
 import time
 
 sys.path.insert(0, "${PROJECT_ROOT}/bindings/python")
 import cisv
 
-iterations = 5
+iterations = ${ITERATIONS}
 total_time = 0
 success = 0
 
@@ -807,7 +816,7 @@ PYEOF
     log "    cisv (parse): $result"
 
     # cisv-python count benchmark (raw C performance path)
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import ctypes
 import os
@@ -825,7 +834,7 @@ try:
     lib.cisv_parser_count_rows.argtypes = [ctypes.c_char_p]
     lib.cisv_parser_count_rows.restype = ctypes.c_size_t
 
-    iterations = 5
+    iterations = ${ITERATIONS}
     total_time = 0
     success = 0
 
@@ -846,11 +855,11 @@ PYEOF
     log "    cisv (count): $result"
 
     # polars benchmark (fastest Python CSV parser)
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 try:
     import polars as pl
-    iterations = 5
+    iterations = ${ITERATIONS}
     total_time = 0
 
     for _ in range(iterations):
@@ -869,11 +878,11 @@ PYEOF
     log "    polars: $result"
 
     # pyarrow benchmark
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 try:
     import pyarrow.csv as pa_csv
-    iterations = 5
+    iterations = ${ITERATIONS}
     total_time = 0
 
     for _ in range(iterations):
@@ -892,11 +901,11 @@ PYEOF
     log "    pyarrow: $result"
 
     # pandas benchmark
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 try:
     import pandas as pd
-    iterations = 5
+    iterations = ${ITERATIONS}
     total_time = 0
 
     for _ in range(iterations):
@@ -915,11 +924,11 @@ PYEOF
     log "    pandas: $result"
 
     # stdlib csv benchmark
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import csv
 
-iterations = 5
+iterations = ${ITERATIONS}
 total_time = 0
 
 for _ in range(iterations):
@@ -938,11 +947,11 @@ PYEOF
     log "    csv-stdlib: $result"
 
     # DictReader benchmark
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import csv
 
-iterations = 5
+iterations = ${ITERATIONS}
 total_time = 0
 
 for _ in range(iterations):
@@ -961,11 +970,11 @@ PYEOF
     log "    dictreader: $result"
 
     # numpy genfromtxt benchmark
-    result=$(python3 << PYEOF 2>/dev/null
+    result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 try:
     import numpy as np
-    iterations = 5
+    iterations = ${ITERATIONS}
     total_time = 0
 
     for _ in range(iterations):
@@ -1006,9 +1015,9 @@ run_php_benchmarks() {
     # cisv PHP extension benchmark (parse)
     local result
     if [ -f "$php_ext" ]; then
-        result=$(LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+        result=$(timeout "$BENCH_TIMEOUT" env LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1031,9 +1040,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
 
     # cisv PHP extension benchmark (count) - shows raw C performance
     if [ -f "$php_ext" ]; then
-        result=$(LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+        result=$(timeout "$BENCH_TIMEOUT" env LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1053,9 +1062,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     log "    cisv (count): $result"
 
     # PHP native fgetcsv benchmark
-    result=$(BENCH_FILE="$abs_file" php -r "
+    result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1077,9 +1086,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     log "    fgetcsv: $result"
 
     # PHP str_getcsv benchmark
-    result=$(BENCH_FILE="$abs_file" php -r "
+    result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1101,9 +1110,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     log "    str_getcsv: $result"
 
     # PHP SplFileObject benchmark
-    result=$(BENCH_FILE="$abs_file" php -r "
+    result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1126,13 +1135,13 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
 
     # PHP League CSV benchmark (from composer)
     if [ -f "/tmp/csv_bench/vendor/autoload.php" ]; then
-        result=$(BENCH_FILE="$abs_file" php -r "
+        result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 require '/tmp/csv_bench/vendor/autoload.php';
 
 use League\Csv\Reader;
 
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1154,9 +1163,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     log "    league-csv: $result"
 
     # PHP explode benchmark (simple but fast)
-    result=$(BENCH_FILE="$abs_file" php -r "
+    result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1178,9 +1187,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     log "    explode: $result"
 
     # PHP preg_split benchmark
-    result=$(BENCH_FILE="$abs_file" php -r "
+    result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
@@ -1202,9 +1211,9 @@ echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
     log "    preg_split: $result"
 
     # PHP array_map + str_getcsv benchmark
-    result=$(BENCH_FILE="$abs_file" php -r "
+    result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
-\$iterations = 5;
+\$iterations = ${ITERATIONS};
 \$totalTime = 0;
 
 for (\$i = 0; \$i < \$iterations; \$i++) {
