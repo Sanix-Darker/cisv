@@ -17,6 +17,10 @@ SIZES=("large")
 FORCE_REGENERATE=false
 NO_CLEANUP=false
 PROJECT_ROOT="${PWD}"
+RUN_CLI=true
+RUN_NODEJS=true
+RUN_PYTHON=true
+RUN_PHP=true
 
 # Results storage
 declare -A RESULTS
@@ -35,6 +39,28 @@ log() {
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+set_all_components() {
+    RUN_CLI=true
+    RUN_NODEJS=true
+    RUN_PYTHON=true
+    RUN_PHP=true
+}
+
+set_only_component() {
+    local component="$1"
+    RUN_CLI=false
+    RUN_NODEJS=false
+    RUN_PYTHON=false
+    RUN_PHP=false
+
+    case "$component" in
+        cli) RUN_CLI=true ;;
+        nodejs) RUN_NODEJS=true ;;
+        python) RUN_PYTHON=true ;;
+        php) RUN_PHP=true ;;
+    esac
 }
 
 get_file_size() {
@@ -256,7 +282,7 @@ build_cisv() {
     make all >/dev/null 2>&1
 
     # Rebuild PHP extension if phpize is available (since make clean might have deleted it)
-    if command_exists phpize && [ -d "./bindings/php" ]; then
+    if [ "$RUN_PHP" = "true" ] && command_exists phpize && [ -d "./bindings/php" ]; then
         local php_ext="${PROJECT_ROOT}/bindings/php/modules/cisv.so"
         if [ ! -f "$php_ext" ]; then
             log "  Rebuilding PHP extension..."
@@ -267,14 +293,20 @@ build_cisv() {
 
 install_dependencies() {
     log "Installing benchmark dependencies..."
-    install_rust
-    build_rust_csv_tools
-    install_miller
-    install_csvkit
-    install_xsv
-    install_php_league_csv
-    build_php_extension
-    install_python_deps
+    if [ "$RUN_CLI" = "true" ]; then
+        install_rust
+        build_rust_csv_tools
+        install_miller
+        install_csvkit
+        install_xsv
+    fi
+    if [ "$RUN_PHP" = "true" ]; then
+        install_php_league_csv
+        build_php_extension
+    fi
+    if [ "$RUN_PYTHON" = "true" ]; then
+        install_python_deps
+    fi
     log "Dependencies installed."
 }
 
@@ -535,29 +567,45 @@ run_validations() {
 
     log "Running validation checks..."
 
-    VALIDATIONS["cli_count"]=$(validate_cli_count "$abs_file")
-    log "  CLI count: ${VALIDATIONS[cli_count]}"
+    if [ "$RUN_CLI" = "true" ]; then
+        VALIDATIONS["cli_count"]=$(validate_cli_count "$abs_file")
+        VALIDATIONS["cli_parse"]=$(validate_cli_parse "$abs_file")
+        log "  CLI count: ${VALIDATIONS[cli_count]}"
+        log "  CLI parse: ${VALIDATIONS[cli_parse]}"
+    else
+        VALIDATIONS["cli_count"]="SKIP"
+        VALIDATIONS["cli_parse"]="SKIP"
+    fi
 
-    VALIDATIONS["cli_parse"]=$(validate_cli_parse "$abs_file")
-    log "  CLI parse: ${VALIDATIONS[cli_parse]}"
+    if [ "$RUN_NODEJS" = "true" ]; then
+        VALIDATIONS["nodejs_count"]=$(validate_nodejs_count "$abs_file")
+        VALIDATIONS["nodejs_parse"]=$(validate_nodejs_parse "$abs_file")
+        log "  Node.js count: ${VALIDATIONS[nodejs_count]}"
+        log "  Node.js parse: ${VALIDATIONS[nodejs_parse]}"
+    else
+        VALIDATIONS["nodejs_count"]="SKIP"
+        VALIDATIONS["nodejs_parse"]="SKIP"
+    fi
 
-    VALIDATIONS["nodejs_count"]=$(validate_nodejs_count "$abs_file")
-    log "  Node.js count: ${VALIDATIONS[nodejs_count]}"
+    if [ "$RUN_PYTHON" = "true" ]; then
+        VALIDATIONS["python_count"]=$(validate_python_count "$abs_file")
+        VALIDATIONS["python_parse"]=$(validate_python_parse "$abs_file")
+        log "  Python count: ${VALIDATIONS[python_count]}"
+        log "  Python parse: ${VALIDATIONS[python_parse]}"
+    else
+        VALIDATIONS["python_count"]="SKIP"
+        VALIDATIONS["python_parse"]="SKIP"
+    fi
 
-    VALIDATIONS["nodejs_parse"]=$(validate_nodejs_parse "$abs_file")
-    log "  Node.js parse: ${VALIDATIONS[nodejs_parse]}"
-
-    VALIDATIONS["python_count"]=$(validate_python_count "$abs_file")
-    log "  Python count: ${VALIDATIONS[python_count]}"
-
-    VALIDATIONS["python_parse"]=$(validate_python_parse "$abs_file")
-    log "  Python parse: ${VALIDATIONS[python_parse]}"
-
-    VALIDATIONS["php_count"]=$(validate_php_count "$abs_file")
-    log "  PHP count: ${VALIDATIONS[php_count]}"
-
-    VALIDATIONS["php_parse"]=$(validate_php_parse "$abs_file")
-    log "  PHP parse: ${VALIDATIONS[php_parse]}"
+    if [ "$RUN_PHP" = "true" ]; then
+        VALIDATIONS["php_count"]=$(validate_php_count "$abs_file")
+        VALIDATIONS["php_parse"]=$(validate_php_parse "$abs_file")
+        log "  PHP count: ${VALIDATIONS[php_count]}"
+        log "  PHP parse: ${VALIDATIONS[php_parse]}"
+    else
+        VALIDATIONS["php_count"]="SKIP"
+        VALIDATIONS["php_parse"]="SKIP"
+    fi
 }
 
 # Format validation result for markdown
@@ -605,7 +653,7 @@ generate_test_files() {
     fi
 
     # Derive validation expectations from the actual benchmark file to keep
-    # BENCHMARKS.md validation columns accurate even if test data changes.
+    # benchmark validation columns accurate even if test data changes.
     EXPECTED_ROW_COUNT=$(get_row_count "large.csv")
     EXPECTED_HEADERS=$(head -n 1 "large.csv" | tr -d '\r')
     EXPECTED_FIELD_COUNT=$(awk -F',' 'NR==1 {print NF; exit}' "large.csv")
@@ -1294,6 +1342,10 @@ generate_markdown_report() {
 CISV is a high-performance CSV parser written in C with SIMD optimizations (AVX-512, AVX2, SSE2). This benchmark compares CISV against popular CSV parsing tools across different languages and use cases.
 
 ---
+EOF
+
+    if [ "$RUN_CLI" = "true" ]; then
+        cat << EOF
 
 ## 1. CLI Tools Comparison
 
@@ -1326,6 +1378,11 @@ Task: Select columns 0, 2, 3 from the CSV file.
 | csvkit $(format_result "select_csvkit" "$file_size_mb") - |
 
 ---
+EOF
+    fi
+
+    if [ "$RUN_NODEJS" = "true" ]; then
+        cat << EOF
 
 ## 2. Node.js Binding Comparison
 
@@ -1346,6 +1403,11 @@ Task: Parse the entire CSV file using Node.js parsers.
 > cisv (parse) includes the cost of converting C data to JavaScript arrays.
 
 ---
+EOF
+    fi
+
+    if [ "$RUN_PYTHON" = "true" ]; then
+        cat << EOF
 
 ## 3. Python Binding Comparison
 
@@ -1366,6 +1428,11 @@ Task: Parse the entire CSV file using Python parsers.
 > cisv (parse) includes the cost of converting C data to Python lists.
 
 ---
+EOF
+    fi
+
+    if [ "$RUN_PHP" = "true" ]; then
+        cat << EOF
 
 ## 4. PHP Binding Comparison
 
@@ -1387,6 +1454,10 @@ Task: Parse the entire CSV file using PHP parsers.
 > cisv (parse) includes the cost of converting C data to PHP arrays.
 
 ---
+EOF
+    fi
+
+    cat << EOF
 
 ## 5. Technology Notes
 
@@ -1435,10 +1506,22 @@ For each CISV binding, the following validations are performed:
 
 | Binding | Count | Parse |
 |---------|-------|-------|
-| CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") |
-| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") |
-| Python | $(format_validation "python_count") | $(format_validation "python_parse") |
-| PHP | $(format_validation "php_count") | $(format_validation "php_parse") |
+EOF
+
+    if [ "$RUN_CLI" = "true" ]; then
+        echo "| CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") |"
+    fi
+    if [ "$RUN_NODEJS" = "true" ]; then
+        echo "| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") |"
+    fi
+    if [ "$RUN_PYTHON" = "true" ]; then
+        echo "| Python | $(format_validation "python_count") | $(format_validation "python_parse") |"
+    fi
+    if [ "$RUN_PHP" = "true" ]; then
+        echo "| PHP | $(format_validation "php_count") | $(format_validation "php_parse") |"
+    fi
+
+    cat << EOF
 
 ---
 
@@ -1472,18 +1555,24 @@ Modes:
 
 Options:
     --all               Run all benchmarks (default)
+    --cli               Run only CLI benchmarks
+    --nodejs            Run only Node.js benchmarks
+    --python            Run only Python benchmarks
+    --php               Run only PHP benchmarks
     --force-regenerate  Regenerate test CSV files
     --no-cleanup        Keep test files after benchmark
     --help              Show this help
 
 Examples:
     $0 install
-    $0 benchmark --all > BENCHMARKS.md
+    $0 benchmark --all > benchmark-all.md
+    $0 benchmark --nodejs > BENCHMARKS_NODEJS.md
 EOF
 }
 
 main() {
     local MODE=""
+    local component_selected=false
 
     [ $# -eq 0 ] && { show_help; exit 0; }
 
@@ -1494,9 +1583,27 @@ main() {
         *) log "Unknown mode: $1"; show_help; exit 1 ;;
     esac
 
+    set_all_components
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --all) SIZES=("large"); shift ;;
+            --cli)
+                [ "$component_selected" = "false" ] && { set_only_component "cli"; component_selected=true; } || RUN_CLI=true
+                shift
+                ;;
+            --nodejs)
+                [ "$component_selected" = "false" ] && { set_only_component "nodejs"; component_selected=true; } || RUN_NODEJS=true
+                shift
+                ;;
+            --python)
+                [ "$component_selected" = "false" ] && { set_only_component "python"; component_selected=true; } || RUN_PYTHON=true
+                shift
+                ;;
+            --php)
+                [ "$component_selected" = "false" ] && { set_only_component "php"; component_selected=true; } || RUN_PHP=true
+                shift
+                ;;
             --force-regenerate) FORCE_REGENERATE=true; shift ;;
             --no-cleanup) NO_CLEANUP=true; shift ;;
             --help|-h) show_help; exit 0 ;;
@@ -1516,10 +1623,10 @@ main() {
                 local file="${size}.csv"
                 [ ! -f "$file" ] && continue
 
-                run_cli_benchmarks "$file"
-                run_nodejs_benchmarks "$file"
-                run_python_benchmarks "$file"
-                run_php_benchmarks "$file"
+                [ "$RUN_CLI" = "true" ] && run_cli_benchmarks "$file"
+                [ "$RUN_NODEJS" = "true" ] && run_nodejs_benchmarks "$file"
+                [ "$RUN_PYTHON" = "true" ] && run_python_benchmarks "$file"
+                [ "$RUN_PHP" = "true" ] && run_php_benchmarks "$file"
 
                 # Run validation checks for cisv
                 run_validations "$file"
