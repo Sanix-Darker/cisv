@@ -380,6 +380,29 @@ static inline void yield_quoted_field(cisv_parser *p) {
     p->quote_buffer_pos = 0;
 }
 
+// Flush buffered streaming data as a complete field at end-of-stream.
+// We cannot call yield_field() directly here because it would re-append data
+// to stream_buffer while streaming_mode is enabled.
+static inline void yield_stream_buffer_field(cisv_parser *p) {
+    if (!p->fcb || p->stream_buffer_pos == 0) return;
+
+    const uint8_t *start = p->stream_buffer;
+    const uint8_t *end = p->stream_buffer + p->stream_buffer_pos;
+
+    if (__builtin_expect(p->trim, 0)) {
+        while (start < end && __builtin_expect(is_ws(*start), 0)) start++;
+        while (start < end && __builtin_expect(is_ws(*(end-1)), 0)) end--;
+    }
+
+    if (__builtin_expect(start < end || !p->skip_empty_lines, 1)) {
+        p->fcb(p->user, (const char*)start, end - start);
+        p->fields++;
+        p->current_row_fields++;
+    }
+
+    p->stream_buffer_pos = 0;
+}
+
 static inline void yield_row(cisv_parser *p) {
     // SECURITY: Protect against line number overflow (2+ billion rows)
     if (__builtin_expect(p->line_num < INT_MAX, 1)) {
@@ -562,9 +585,9 @@ static void parse_avx512(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         // SECURITY: Report unterminated quote at EOF
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
@@ -575,7 +598,7 @@ static void parse_avx512(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -734,9 +757,9 @@ static void parse_avx2(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         // SECURITY: Report unterminated quote at EOF
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
@@ -747,7 +770,7 @@ static void parse_avx2(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -925,9 +948,9 @@ static void parse_neon(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
         }
@@ -936,7 +959,7 @@ static void parse_neon(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -1093,9 +1116,9 @@ static void parse_sse2(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
         }
@@ -1104,7 +1127,7 @@ static void parse_sse2(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -1287,9 +1310,9 @@ static void parse_scalar(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         // SECURITY: Report unterminated quote at EOF
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
@@ -1300,7 +1323,7 @@ static void parse_scalar(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -1401,6 +1424,20 @@ void cisv_parser_destroy(cisv_parser *p) {
 }
 
 int cisv_parser_parse_file(cisv_parser *p, const char *path) {
+    if (!p || !path) return -EINVAL;
+
+    // If this parser instance was used previously, release old resources
+    // before opening a new file.
+    if (p->base) {
+        munmap(p->base, p->size);
+        p->base = NULL;
+        p->size = 0;
+    }
+    if (p->fd >= 0) {
+        close(p->fd);
+        p->fd = -1;
+    }
+
     p->fd = open(path, O_RDONLY);
     if (p->fd < 0) return -errno;
 
@@ -1451,6 +1488,8 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
     p->line_num = 0;
     p->current_row_fields = 0;
     p->quote_buffer_pos = 0;
+    p->stream_buffer_pos = 0;
+    p->streaming_mode = false;
 
     // Dispatch to best available SIMD implementation
 #ifdef __AVX512F__
@@ -1464,6 +1503,14 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
 #else
     parse_scalar(p);
 #endif
+
+    // Release file resources immediately after parse to avoid descriptor
+    // retention when parser objects are reused.
+    munmap(p->base, p->size);
+    p->base = NULL;
+    p->size = 0;
+    close(p->fd);
+    p->fd = -1;
 
     return 0;
 }
@@ -1567,6 +1614,8 @@ size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *c
 }
 
 int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
+    if (!p || (!chunk && len > 0)) return -EINVAL;
+
     // Enable streaming mode - fields may span chunks
     p->streaming_mode = true;
 
@@ -1601,10 +1650,31 @@ int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
 }
 
 void cisv_parser_end(cisv_parser *p) {
+    if (!p) return;
+
+    if (p->streaming_mode) {
+        if (p->state == S_NORMAL && p->stream_buffer_pos > 0) {
+            yield_stream_buffer_field(p);
+        } else if (p->state == S_QUOTED && p->quote_buffer_pos > 0) {
+            if (p->ecb) {
+                p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
+            }
+            yield_quoted_field(p);
+        }
+        if (p->current_row_fields > 0) {
+            yield_row(p);
+        }
+        p->streaming_mode = false;
+        return;
+    }
+
     if (p->state == S_NORMAL && p->field_start && p->field_start < p->cur) {
         yield_field(p, p->field_start, p->cur);
     } else if (p->state == S_QUOTED && p->quote_buffer_pos > 0) {
         yield_quoted_field(p);
+    }
+    if (p->current_row_fields > 0) {
+        yield_row(p);
     }
 }
 
