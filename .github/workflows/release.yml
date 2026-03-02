@@ -16,7 +16,35 @@ permissions:
   id-token: write  # Required for PyPI trusted publishing
 
 jobs:
+  release-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print GitHub event context
+        run: |
+          echo "event_name=${{ github.event_name }}"
+          echo "ref=${{ github.ref }}"
+          echo "ref_name=${{ github.ref_name }}"
+          echo "ref_type=${{ github.ref_type }}"
+          echo "sha=${{ github.sha }}"
+          echo "actor=${{ github.actor }}"
+          echo "workflow=${{ github.workflow }}"
+          echo "run_id=${{ github.run_id }}"
+          echo "repository=${{ github.repository }}"
+          echo "event_inputs_tag=${{ github.event.inputs.tag || '' }}"
+
+      - name: Checkout for tag diagnostics
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Print tag/commit diagnostics
+        run: |
+          git show -s --oneline --decorate HEAD
+          git tag --points-at HEAD || true
+
   create-release:
+    needs: release-diagnostics
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,6 +61,7 @@ jobs:
 
   # Build Python wheels for multiple platforms
   build-python-wheels:
+    needs: release-diagnostics
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -96,6 +125,7 @@ jobs:
 
   # Build source distribution
   build-python-sdist:
+    needs: release-diagnostics
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -168,7 +198,7 @@ jobs:
   # Publish to npm
   publish-npm:
     runs-on: ubuntu-latest
-    needs: create-release
+    needs: [release-diagnostics, create-release]
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
