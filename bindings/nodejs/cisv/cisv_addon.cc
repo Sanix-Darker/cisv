@@ -266,6 +266,72 @@ static void error_cb(void *user, int line, const char *msg) {
     fprintf(stderr, "CSV Parse Error at line %d: %s\n", line, msg);
 }
 
+class ParseFileWorker final : public Napi::AsyncWorker {
+public:
+    ParseFileWorker(
+        Napi::Env env,
+        std::string path,
+        cisv_config config,
+        Napi::Promise::Deferred deferred
+    ) : Napi::AsyncWorker(env),
+        path_(std::move(path)),
+        config_(config),
+        deferred_(deferred) {}
+
+    void Execute() override {
+        cisv_result_t *result = cisv_parse_file_batch(path_.c_str(), &config_);
+        if (!result) {
+            SetError("parse error: " + std::string(strerror(errno)));
+            return;
+        }
+
+        if (result->error_code != 0) {
+            SetError(result->error_message[0] ? result->error_message : "parse error");
+            cisv_result_free(result);
+            return;
+        }
+
+        rows_.reserve(result->row_count);
+        for (size_t i = 0; i < result->row_count; i++) {
+            cisv_row_t *row = &result->rows[i];
+            std::vector<std::string> out_row;
+            out_row.reserve(row->field_count);
+            for (size_t j = 0; j < row->field_count; j++) {
+                out_row.emplace_back(row->fields[j], row->field_lengths[j]);
+            }
+            rows_.emplace_back(std::move(out_row));
+        }
+
+        cisv_result_free(result);
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        Napi::Array out = Napi::Array::New(env, rows_.size());
+
+        for (size_t i = 0; i < rows_.size(); i++) {
+            Napi::Array row = Napi::Array::New(env, rows_[i].size());
+            for (size_t j = 0; j < rows_[i].size(); j++) {
+                const std::string &field = rows_[i][j];
+                row[j] = SafeNewString(env, field.c_str(), field.length());
+            }
+            out[i] = row;
+        }
+
+        deferred_.Resolve(out);
+    }
+
+    void OnError(const Napi::Error &e) override {
+        deferred_.Reject(e.Value());
+    }
+
+private:
+    std::string path_;
+    cisv_config config_;
+    Napi::Promise::Deferred deferred_;
+    std::vector<std::vector<std::string>> rows_;
+};
+
 } // namespace
 
 class CisvParser : public Napi::ObjectWrap<CisvParser> {
@@ -1053,17 +1119,17 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
 
         std::string path = info[0].As<Napi::String>();
 
-        // Create a promise
         auto deferred = Napi::Promise::Deferred::New(env);
 
-        // For simplicity, we'll use sync parsing here
-        // FIXME: In production, this should use worker threads
-        try {
-            Napi::Value result = ParseSync(info);
-            deferred.Resolve(result);
-        } catch (const Napi::Error& e) {
-            deferred.Reject(e.Value());
-        }
+        // Use batch parser in a worker thread to avoid blocking the event loop.
+        cisv_config worker_config = config_;
+        worker_config.field_cb = nullptr;
+        worker_config.row_cb = nullptr;
+        worker_config.error_cb = nullptr;
+        worker_config.user = nullptr;
+
+        auto *worker = new ParseFileWorker(env, path, worker_config, deferred);
+        worker->Queue();
 
         return deferred.Promise();
     }

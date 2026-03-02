@@ -64,11 +64,16 @@ typedef struct cisv_parser {
     char comment;
     int from_line;
     int to_line;
+    size_t max_row_size;
+    bool skip_lines_with_error;
 
     // Statistics
     size_t rows;
     size_t fields;
     size_t current_row_fields;
+    size_t current_row_size;
+    bool skip_current_row;
+    bool row_is_comment;
 
     // Buffer for accumulating quoted field content
     uint8_t *quote_buffer __attribute__((aligned(64)));
@@ -346,6 +351,36 @@ static inline void yield_field(cisv_parser *p, const uint8_t *start, const uint8
     }
 
     if (__builtin_expect(start < end || !p->skip_empty_lines, 1)) {
+        size_t field_len = (size_t)(end - start);
+
+        // Detect comment lines from the first unquoted field.
+        if (p->current_row_fields == 0) {
+            p->row_is_comment = (field_len > 0 && start[0] == (uint8_t)p->comment && p->comment != 0);
+            if (p->row_is_comment) {
+                p->skip_current_row = true;
+            }
+        }
+
+        if (!p->skip_current_row && p->max_row_size > 0) {
+            size_t next_size = p->current_row_size + field_len + 1;  // +1 delimiter/newline budget
+            if (next_size > p->max_row_size) {
+                if (p->ecb) {
+                    p->ecb(p->user, p->line_num + 1, "Row exceeds max_row_size");
+                }
+                if (p->skip_lines_with_error) {
+                    p->skip_current_row = true;
+                }
+            }
+            p->current_row_size = next_size;
+        }
+
+        if (p->skip_current_row) {
+            if (__builtin_expect(p->streaming_mode, 0)) {
+                p->stream_buffer_pos = 0;
+            }
+            return;
+        }
+
         p->fcb(p->user, (const char*)start, end - start);
         p->fields++;
         p->current_row_fields++;
@@ -372,6 +407,31 @@ static inline void yield_quoted_field(cisv_parser *p) {
     }
 
     if (__builtin_expect(start < end || !p->skip_empty_lines, 1)) {
+        size_t field_len = (size_t)(end - start);
+
+        // Quoted first fields are never comment-line prefixes.
+        if (p->current_row_fields == 0) {
+            p->row_is_comment = false;
+        }
+
+        if (!p->skip_current_row && p->max_row_size > 0) {
+            size_t next_size = p->current_row_size + field_len + 1;  // +1 delimiter/newline budget
+            if (next_size > p->max_row_size) {
+                if (p->ecb) {
+                    p->ecb(p->user, p->line_num + 1, "Row exceeds max_row_size");
+                }
+                if (p->skip_lines_with_error) {
+                    p->skip_current_row = true;
+                }
+            }
+            p->current_row_size = next_size;
+        }
+
+        if (p->skip_current_row) {
+            p->quote_buffer_pos = 0;
+            return;
+        }
+
         p->fcb(p->user, (const char*)start, end - start);
         p->fields++;
         p->current_row_fields++;
@@ -408,8 +468,27 @@ static inline void yield_row(cisv_parser *p) {
     if (__builtin_expect(p->line_num < INT_MAX, 1)) {
         p->line_num++;
     }
+    // Drop rows marked as invalid when skip_lines_with_error is enabled.
+    if (p->skip_current_row) {
+        p->skip_current_row = false;
+        p->current_row_fields = 0;
+        p->current_row_size = 0;
+        p->row_is_comment = false;
+        return;
+    }
+
+    // Skip comment lines.
+    if (p->row_is_comment) {
+        p->current_row_fields = 0;
+        p->current_row_size = 0;
+        p->row_is_comment = false;
+        return;
+    }
+
     // Skip empty rows if skip_empty_lines is enabled
     if (p->skip_empty_lines && p->current_row_fields == 0) {
+        p->current_row_size = 0;
+        p->row_is_comment = false;
         return;
     }
     if (p->rcb && p->line_num >= p->from_line &&
@@ -418,6 +497,8 @@ static inline void yield_row(cisv_parser *p) {
     }
     p->rows++;
     p->current_row_fields = 0;
+    p->current_row_size = 0;
+    p->row_is_comment = false;
 }
 
 // Forward declare all parse functions
@@ -435,6 +516,34 @@ static void parse_sse2(cisv_parser *p);
 #endif
 // Scalar fallback for platforms without SIMD
 static void parse_scalar(cisv_parser *p);
+
+static inline void parse_dispatch(cisv_parser *p) {
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+#ifdef __AVX512F__
+    if (__builtin_cpu_supports("avx512f")) {
+        parse_avx512(p);
+        return;
+    }
+#endif
+#ifdef __AVX2__
+    if (__builtin_cpu_supports("avx2")) {
+        parse_avx2(p);
+        return;
+    }
+#endif
+#if defined(__SSE2__) && !defined(__AVX2__) && !defined(__AVX512F__)
+    parse_sse2(p);
+    return;
+#endif
+#endif
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+    parse_neon(p);
+    return;
+#endif
+
+    parse_scalar(p);
+}
 
 #ifdef __AVX512F__
 // AVX-512 ultra-fast path
@@ -1370,6 +1479,8 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     p->comment = config->comment;
     p->from_line = config->from_line;
     p->to_line = config->to_line;
+    p->max_row_size = config->max_row_size;
+    p->skip_lines_with_error = config->skip_lines_with_error;
 
     p->fcb = config->field_cb;
     p->rcb = config->row_cb;
@@ -1379,6 +1490,9 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     p->fd = -1;
     p->line_num = 0;
     p->current_row_fields = 0;
+    p->current_row_size = 0;
+    p->skip_current_row = false;
+    p->row_is_comment = false;
 
     // Allocate quote buffer with cache-line alignment for SIMD access
     // Start at 64KB to avoid early reallocations and match MIN_BUFFER_INCREMENT
@@ -1490,19 +1604,12 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
     p->quote_buffer_pos = 0;
     p->stream_buffer_pos = 0;
     p->streaming_mode = false;
+    p->current_row_size = 0;
+    p->skip_current_row = false;
+    p->row_is_comment = false;
 
-    // Dispatch to best available SIMD implementation
-#ifdef __AVX512F__
-    parse_avx512(p);
-#elif defined(__AVX2__)
-    parse_avx2(p);
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    parse_neon(p);
-#elif defined(__SSE2__)
-    parse_sse2(p);
-#else
-    parse_scalar(p);
-#endif
+    // Runtime ISA dispatch with scalar fallback.
+    parse_dispatch(p);
 
     // Release file resources immediately after parse to avoid descriptor
     // retention when parser objects are reused.
@@ -1623,18 +1730,7 @@ int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
     p->end = chunk + len;
     p->field_start = p->cur;
 
-    // Dispatch to best available SIMD implementation
-#ifdef __AVX512F__
-    parse_avx512(p);
-#elif defined(__AVX2__)
-    parse_avx2(p);
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    parse_neon(p);
-#elif defined(__SSE2__)
-    parse_sse2(p);
-#else
-    parse_scalar(p);
-#endif
+    parse_dispatch(p);
 
     // After parsing, buffer any partial unquoted field for next chunk
     // (quoted fields are already handled by quote_buffer)
@@ -1863,19 +1959,11 @@ int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
     p->state = S_NORMAL;
     p->quote_buffer_pos = 0;
     p->current_row_fields = 0;
+    p->current_row_size = 0;
+    p->skip_current_row = false;
+    p->row_is_comment = false;
 
-    // Dispatch to best available SIMD implementation
-#ifdef __AVX512F__
-    parse_avx512(p);
-#elif defined(__AVX2__)
-    parse_avx2(p);
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    parse_neon(p);
-#elif defined(__SSE2__)
-    parse_sse2(p);
-#else
-    parse_scalar(p);
-#endif
+    parse_dispatch(p);
 
     return 0;
 }

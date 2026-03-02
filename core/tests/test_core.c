@@ -697,6 +697,70 @@ void test_streaming_chunk_boundaries(void) {
     }
 }
 
+void test_parse_comment_lines(void) {
+    TEST("parse with comment line prefix");
+    reset_test_state();
+
+    cisv_config config;
+    cisv_config_init(&config);
+    config.comment = '#';
+    config.field_cb = test_field_cb;
+    config.row_cb = test_row_cb;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&config);
+    if (!parser) { FAIL("failed to create parser"); return; }
+
+    const char *csv = "#meta\na,b\n#ignore this line\n1,2\n";
+    cisv_parser_write(parser, (const uint8_t *)csv, strlen(csv));
+    cisv_parser_end(parser);
+    cisv_parser_destroy(parser);
+
+    if (field_count == 4 && row_count == 2 &&
+        strcmp(stored_fields[0], "a") == 0 &&
+        strcmp(stored_fields[1], "b") == 0 &&
+        strcmp(stored_fields[2], "1") == 0 &&
+        strcmp(stored_fields[3], "2") == 0) {
+        PASS();
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "expected comments skipped, got fields=%d rows=%d", field_count, row_count);
+        FAIL(buf);
+    }
+}
+
+void test_max_row_size_skip_error_lines(void) {
+    TEST("max_row_size with skip_lines_with_error");
+    reset_test_state();
+
+    cisv_config config;
+    cisv_config_init(&config);
+    config.max_row_size = 10;
+    config.skip_lines_with_error = true;
+    config.field_cb = test_field_cb;
+    config.row_cb = test_row_cb;
+
+    cisv_parser *parser = cisv_parser_create_with_config(&config);
+    if (!parser) { FAIL("failed to create parser"); return; }
+
+    // Middle row is intentionally oversized and should be skipped.
+    const char *csv = "a,b\nverylongfield,2\n1,2\n";
+    cisv_parser_write(parser, (const uint8_t *)csv, strlen(csv));
+    cisv_parser_end(parser);
+    cisv_parser_destroy(parser);
+
+    if (field_count == 4 && row_count == 2 &&
+        strcmp(stored_fields[0], "a") == 0 &&
+        strcmp(stored_fields[1], "b") == 0 &&
+        strcmp(stored_fields[2], "1") == 0 &&
+        strcmp(stored_fields[3], "2") == 0) {
+        PASS();
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "expected oversized row skipped, got fields=%d rows=%d", field_count, row_count);
+        FAIL(buf);
+    }
+}
+
 int main(void) {
     printf("CISV Core Library Tests\n");
     printf("========================\n\n");
@@ -734,6 +798,8 @@ int main(void) {
     test_count_rows_with_config_custom_quote();
     test_parser_reuse_no_fd_leak();
     test_streaming_chunk_boundaries();
+    test_parse_comment_lines();
+    test_max_row_size_skip_error_lines();
 
     // Summary
     printf("\n========================\n");
