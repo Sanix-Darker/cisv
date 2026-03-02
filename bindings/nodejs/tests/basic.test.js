@@ -210,9 +210,9 @@ describe('CSV Parser Core Functionality', () => {
       parser.end();
 
       const rows = parser.getRows();
-      assert.strictEqual(rows.length, 3);
-      assert.deepStrictEqual(rows[0], ['id', 'name', 'emai']);
-      assert.deepStrictEqual(rows[2], ['1', 'John', 'john@test.com']);
+      assert.strictEqual(rows.length, 2);
+      assert.deepStrictEqual(rows[0], ['id', 'name', 'email']);
+      assert.deepStrictEqual(rows[1], ['1', 'John', 'john@test.com']);
 
       parser.clear();
     });

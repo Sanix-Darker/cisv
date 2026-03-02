@@ -286,7 +286,7 @@ jobs:
               const lines = content.split('\n').slice(0, 50);
               let summary = lines.join('\n');
               summary += '\n\n---\n\n';
-              summary += '> Full results: [BENCHMARKS.md](../blob/${{ github.head_ref }}/BENCHMARKS.md)\n';
+              summary += `> Full results: [BENCHMARKS.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${{ github.head_ref }}/BENCHMARKS.md)\n`;
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,

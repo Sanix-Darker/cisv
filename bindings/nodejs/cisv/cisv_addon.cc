@@ -92,20 +92,24 @@ static inline bool isAllAscii(const char* data, size_t len) {
 
 // Create Napi::String with UTF-8 validation (safe version)
 // Falls back to replacement character representation for invalid UTF-8
-static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
+static napi_value SafeNewStringValue(napi_env env, const char* data, size_t len) {
     // Fastest path: ASCII-only data is valid Latin-1.
     // Using Latin-1 creation avoids UTF-8 decoding overhead.
     if (isAllAscii(data, len)) {
         napi_value latin1_value = nullptr;
         if (napi_create_string_latin1(env, data, len, &latin1_value) == napi_ok && latin1_value) {
-            return Napi::String(env, latin1_value);
+            return latin1_value;
         }
         // Fallback to UTF-8 path if Latin-1 creation fails unexpectedly.
-        return Napi::String::New(env, data, len);
+        napi_value utf8_value = nullptr;
+        napi_create_string_utf8(env, data, len, &utf8_value);
+        return utf8_value;
     }
 
     if (isValidUtf8(data, len)) {
-        return Napi::String::New(env, data, len);
+        napi_value utf8_value = nullptr;
+        napi_create_string_utf8(env, data, len, &utf8_value);
+        return utf8_value;
     }
 
     // Invalid UTF-8 - replace invalid bytes with replacement character
@@ -150,7 +154,13 @@ static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
         }
     }
 
-    return Napi::String::New(env, safe_str);
+    napi_value safe_value = nullptr;
+    napi_create_string_utf8(env, safe_str.c_str(), safe_str.length(), &safe_value);
+    return safe_value;
+}
+
+static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
+    return Napi::String(env, SafeNewStringValue(env, data, len));
 }
 
 // Extended RowCollector that handles transforms
@@ -327,7 +337,11 @@ public:
         }
 
         if (result->error_code != 0) {
-            SetError(result->error_message[0] ? result->error_message : "parse error");
+            std::string msg = result->error_message[0] ? result->error_message : "parse error";
+            if (msg.rfind("parse error", 0) != 0) {
+                msg = "parse error: " + msg;
+            }
+            SetError(msg);
             cisv_result_free(result);
             return;
         }
@@ -1257,10 +1271,22 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
         }
 
         Napi::Object stats = Napi::Object::New(env);
+        size_t row_count = 0;
+        size_t field_count = 0;
+        if (batch_result_) {
+            row_count = batch_result_->row_count;
+            if (batch_result_->row_count > 0) {
+                field_count = batch_result_->rows[0].field_count;
+            }
+        } else if (rc_) {
+            row_count = rc_->rows.size();
+            if (!rc_->rows.empty()) {
+                field_count = rc_->rows[0].size();
+            }
+        }
 
-        stats.Set("rowCount", Napi::Number::New(env, rc_ ? rc_->rows.size() : 0));
-        stats.Set("fieldCount", Napi::Number::New(env,
-            (rc_ && !rc_->rows.empty()) ? rc_->rows[0].size() : 0));
+        stats.Set("rowCount", Napi::Number::New(env, row_count));
+        stats.Set("fieldCount", Napi::Number::New(env, field_count));
         stats.Set("totalBytes", Napi::Number::New(env, total_bytes_));
         stats.Set("parseTime", Napi::Number::New(env, parse_time_));
         stats.Set("currentLine", Napi::Number::New(env,
@@ -1400,14 +1426,13 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
             throw Napi::Error::New(env, "Error reading CSV row");
         }
 
-        // Create array of strings for the row
-        Napi::Array row = Napi::Array::New(env, field_count);
+        napi_value row;
+        napi_create_array_with_length(env, field_count, &row);
         for (size_t i = 0; i < field_count; i++) {
-            // SECURITY: Use safe string creation to handle invalid UTF-8
-            row.Set(i, SafeNewString(env, fields[i], lengths[i]));
+            napi_set_element(env, row, i, SafeNewStringValue(env, fields[i], lengths[i]));
         }
 
-        return row;
+        return Napi::Value(env, row);
     }
 
     /**
@@ -1469,38 +1494,42 @@ private:
 
     Napi::Value drainRows(Napi::Env env) {
         if (batch_result_) {
-            Napi::Array rows = Napi::Array::New(env, batch_result_->row_count);
+            napi_value rows;
+            napi_create_array_with_length(env, batch_result_->row_count, &rows);
             for (size_t i = 0; i < batch_result_->row_count; ++i) {
                 const cisv_row_t *src_row = &batch_result_->rows[i];
-                Napi::Array row = Napi::Array::New(env, src_row->field_count);
+                napi_value row;
+                napi_create_array_with_length(env, src_row->field_count, &row);
                 for (size_t j = 0; j < src_row->field_count; ++j) {
-                    row[j] = SafeNewString(env, src_row->fields[j], src_row->field_lengths[j]);
+                    napi_set_element(env, row, j, SafeNewStringValue(env, src_row->fields[j], src_row->field_lengths[j]));
                 }
-                rows[i] = row;
+                napi_set_element(env, rows, i, row);
             }
-            return rows;
+            return Napi::Value(env, rows);
         }
 
         if (!rc_) {
             return Napi::Array::New(env, 0);
         }
 
-        Napi::Array rows = Napi::Array::New(env, rc_->rows.size());
+        napi_value rows;
+        napi_create_array_with_length(env, rc_->rows.size(), &rows);
 
         for (size_t i = 0; i < rc_->rows.size(); ++i) {
-            Napi::Array row = Napi::Array::New(env, rc_->rows[i].size());
+            napi_value row;
+            napi_create_array_with_length(env, rc_->rows[i].size(), &row);
             for (size_t j = 0; j < rc_->rows[i].size(); ++j) {
                 // SECURITY: Use safe string creation to handle invalid UTF-8 in CSV data
                 const std::string& field = rc_->rows[i][j];
-                row[j] = SafeNewString(env, field.c_str(), field.length());
+                napi_set_element(env, row, j, SafeNewStringValue(env, field.c_str(), field.length()));
             }
-            rows[i] = row;
+            napi_set_element(env, rows, i, row);
         }
 
         // Don't clear here if we want to keep data for multiple reads
         // rc_->rows.clear();
 
-        return rows;
+        return Napi::Value(env, rows);
     }
 
     cisv_parser *parser_;

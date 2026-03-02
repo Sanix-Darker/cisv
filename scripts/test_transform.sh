@@ -8,6 +8,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Set up paths
 CISV_BIN="$PROJECT_ROOT/cli/build/cisv"
 export LD_LIBRARY_PATH="$PROJECT_ROOT/core/build:$LD_LIBRARY_PATH"
+VERSION_CHECK_LOG="${TMPDIR:-/tmp}/cisv_version_check.$$"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,9 +27,19 @@ if [ ! -f "$CISV_BIN" ]; then
     make -C "$PROJECT_ROOT" all
 fi
 
+# Rebuild when an existing binary is not executable on this architecture
+if ! "$CISV_BIN" --version >"$VERSION_CHECK_LOG" 2>&1; then
+    if grep -qi "Exec format error" "$VERSION_CHECK_LOG"; then
+        echo -e "${YELLOW}Detected architecture mismatch for CLI binary. Rebuilding...${NC}"
+        make -C "$PROJECT_ROOT" clean
+        make -C "$PROJECT_ROOT" all
+    fi
+fi
+
 # Verify binary exists
 if [ ! -f "$CISV_BIN" ]; then
     echo -e "${RED}Error: CLI binary not found at $CISV_BIN${NC}"
+    rm -f "$VERSION_CHECK_LOG"
     exit 1
 fi
 
@@ -154,7 +165,7 @@ else
 fi
 
 # Cleanup
-rm -f transform_test.csv valgrind_output.log valgrind_report.txt
+rm -f transform_test.csv valgrind_output.log valgrind_report.txt "$VERSION_CHECK_LOG"
 
 echo ""
 echo "============================================"
