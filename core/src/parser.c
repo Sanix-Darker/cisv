@@ -1740,13 +1740,18 @@ size_t cisv_parser_count_rows(const char *path) {
         return 0;
     }
 
-    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    int flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    flags |= MAP_POPULATE;
+#endif
+
+    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, flags, fd, 0);
     if (base == MAP_FAILED) {
         close(fd);
         return 0;
     }
 
-    madvise(base, st.st_size, MADV_SEQUENTIAL);
+    madvise(base, st.st_size, MADV_SEQUENTIAL | MADV_WILLNEED);
 
     size_t count = count_rows_internal(base, st.st_size, '"');
 
@@ -1772,13 +1777,18 @@ size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *c
         return 0;
     }
 
-    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    int flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    flags |= MAP_POPULATE;
+#endif
+
+    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, flags, fd, 0);
     if (base == MAP_FAILED) {
         close(fd);
         return 0;
     }
 
-    madvise(base, st.st_size, MADV_SEQUENTIAL);
+    madvise(base, st.st_size, MADV_SEQUENTIAL | MADV_WILLNEED);
 
     size_t count = count_rows_internal(base, st.st_size, config->quote);
 
