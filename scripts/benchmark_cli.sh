@@ -71,7 +71,6 @@ install_miller() {
         log "Installing Miller..."
         if [[ "$OSTYPE" == "linux-gnu"* ]]; then
             if command_exists apt-get; then
-                sudo apt-get update -qq >/dev/null 2>&1
                 sudo apt-get install -y miller >/dev/null 2>&1 || {
                     local MLR_VERSION="6.12.0"
                     curl -sL "https://github.com/johnkerl/miller/releases/download/v${MLR_VERSION}/miller-${MLR_VERSION}-linux-amd64.tar.gz" 2>/dev/null | tar xz 2>/dev/null
@@ -181,8 +180,11 @@ build_php_extension() {
 }
 
 install_python_deps() {
-    log "Installing Python dependencies..."
-    pip3 install --quiet polars pyarrow pandas >/dev/null 2>&1 || true
+    # Skip if CI workflow already installed these
+    if [ -z "${CI:-}" ]; then
+        log "Installing Python dependencies..."
+        pip3 install --quiet polars pyarrow pandas >/dev/null 2>&1 || true
+    fi
 }
 
 build_rust_csv_tools() {
@@ -251,9 +253,6 @@ RUST_EOF
 
 build_cisv() {
     log "Building cisv..."
-    # Only clean core and cli, not PHP extension
-    make -C core clean >/dev/null 2>&1 || true
-    make -C cli clean >/dev/null 2>&1 || true
     make all >/dev/null 2>&1
 
     # Rebuild PHP extension if phpize is available (since make clean might have deleted it)
@@ -288,29 +287,27 @@ run_benchmark() {
     local file="$2"
     local extra="${3:-}"
 
-    local total_time=0
-    local success_count=0
+    local full_cmd="$cmd \"$file\""
+    [ -n "$extra" ] && full_cmd="$cmd \"$file\" $extra"
 
-    for _ in $(seq 1 $ITERATIONS); do
-        local start=$(date +%s.%N 2>/dev/null || date +%s)
-
-        local full_cmd="$cmd \"$file\""
-        [ -n "$extra" ] && full_cmd="$cmd \"$file\" $extra"
-
-        if timeout 120 bash -c "$full_cmd" >/dev/null 2>&1; then
-            local end=$(date +%s.%N 2>/dev/null || date +%s)
-            local elapsed=$(awk "BEGIN {print $end - $start}")
-            total_time=$(awk "BEGIN {print $total_time + $elapsed}")
-            success_count=$((success_count + 1))
-        fi
-    done
-
-    if [ $success_count -eq 0 ]; then
-        echo "FAILED|0"
-    else
-        local avg=$(awk "BEGIN {printf \"%.7f\", $total_time / $success_count}")
-        echo "$avg|$success_count"
-    fi
+    local result
+    result=$(BENCH_CMD="$full_cmd" python3 -c "
+import subprocess, time, os
+cmd=os.environ['BENCH_CMD']
+total=0.0; ok=0
+for _ in range(${ITERATIONS}):
+    start=time.perf_counter()
+    try:
+        rc=subprocess.call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=${BENCH_TIMEOUT})
+    except subprocess.TimeoutExpired:
+        continue
+    if rc==0:
+        total+=time.perf_counter()-start; ok+=1
+if ok==0: print('FAILED|0')
+else: print(f'{total/ok:.7f}|{ok}')
+" 2>/dev/null) || result="FAILED|0"
+    [ -z "$result" ] && result="FAILED|0"
+    echo "$result"
 }
 
 # ============================================================================
@@ -586,18 +583,15 @@ generate_csv() {
     local filename=$2
 
     python3 << PYEOF
-import csv
-import random
-import string
+import sys
 
-def rs(n=10):
-    return ''.join(random.choices(string.ascii_letters, k=n))
-
-with open('$filename', 'w', newline='') as f:
-    w = csv.writer(f)
-    w.writerow(['id', 'name', 'email', 'address', 'phone', 'date', 'amount'])
-    for i in range($rows):
-        w.writerow([i, f'Person {rs(8)}', f'p{i}@test.com', f'{i} {rs(6)} St', f'555-{i:04d}', f'2024-{(i%12)+1:02d}-{(i%28)+1:02d}', f'{i*1.23:.2f}'])
+rows = $rows
+with open('$filename', 'w') as f:
+    f.write('id,name,email,address,phone,date,amount\n')
+    for i in range(rows):
+        m = (i % 12) + 1
+        d = (i % 28) + 1
+        f.write(f'{i},Person_{i:08x},p{i}@test.com,{i} Main St,555-{i%10000:04d},2024-{m:02d}-{d:02d},{i*1.23:.2f}\n')
 PYEOF
 }
 
@@ -646,7 +640,8 @@ run_cli_benchmarks() {
     RESULTS["count_wc"]=$(run_benchmark "wc -l" "$file")
     RESULTS["count_awk"]=$(run_benchmark "awk 'END{print NR}'" "$file")
     command_exists mlr && RESULTS["count_miller"]=$(run_benchmark "mlr --csv count" "$file")
-    command_exists csvstat && RESULTS["count_csvkit"]=$(run_benchmark "csvstat --count" "$file")
+    # csvkit is pure Python and extremely slow on large files; skip in CI
+    [ -z "${CI:-}" ] && command_exists csvstat && RESULTS["count_csvkit"]=$(run_benchmark "csvstat --count" "$file")
 
     # Column selection (7 tools)
     log "  Column selection tests..."
@@ -656,7 +651,7 @@ run_cli_benchmarks() {
     RESULTS["select_awk"]=$(run_benchmark "awk -F',' '{print \$1,\$3,\$4}'" "$file")
     RESULTS["select_cut"]=$(run_benchmark "cut -d',' -f1,3,4" "$file")
     command_exists mlr && RESULTS["select_miller"]=$(run_benchmark "mlr --csv cut -f id,email,address" "$file")
-    command_exists csvcut && RESULTS["select_csvkit"]=$(run_benchmark "csvcut -c 1,3,4" "$file")
+    [ -z "${CI:-}" ] && command_exists csvcut && RESULTS["select_csvkit"]=$(run_benchmark "csvcut -c 1,3,4" "$file")
 }
 
 # ============================================================================
@@ -674,14 +669,14 @@ run_nodejs_benchmarks() {
 
     log "Running Node.js benchmarks..."
 
-    # Build Node.js binding
-    (
-        cd ./bindings/nodejs
-        npm install >/dev/null 2>&1
-        npm run build >/dev/null 2>&1
-        # Install additional parsers for comparison
-        npm install papaparse csv-parse fast-csv csv-parser d3-dsv csv-string --save-dev >/dev/null 2>&1 || true
-    )
+    # Build Node.js binding (skip if CI already built it)
+    if [ ! -f "./bindings/nodejs/build/Release/cisv_addon.node" ]; then
+        (
+            cd ./bindings/nodejs
+            npm install >/dev/null 2>&1
+            npm run build >/dev/null 2>&1
+        )
+    fi
 
     # Create benchmark script
     cat > ./bindings/nodejs/_bench.js <<JSEOF
@@ -972,7 +967,8 @@ PYEOF
     RESULTS["python_dictreader"]="$result"
     log "    dictreader: $result"
 
-    # numpy genfromtxt benchmark
+    # numpy genfromtxt benchmark (skip in CI — extremely slow on large files)
+    if [ -z "${CI:-}" ]; then
     result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 try:
@@ -994,6 +990,7 @@ PYEOF
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["python_numpy"]="$result"
     log "    numpy: $result"
+    fi
 }
 
 # ============================================================================

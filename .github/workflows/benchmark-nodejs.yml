@@ -1,0 +1,87 @@
+name: Benchmark Node.js
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  NODE_VERSION: '23.x'
+
+jobs:
+  benchmark-nodejs:
+    name: Node.js Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'benchmarks-nodejs'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Node benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3
+          cd bindings/nodejs
+          npm ci
+          npm install papaparse csv-parse fast-csv csv-parser d3-dsv csv-string --save-dev || true
+          cd ../..
+
+      - name: Run Node.js benchmarks
+        run: |
+          export CI=true
+          export GITHUB_SHA="${{ github.sha }}"
+          export GITHUB_REF_NAME="${{ github.ref_name }}"
+
+          bash ./scripts/benchmark_cli.sh install --nodejs 2>&1 | tee install-nodejs.log
+          bash ./scripts/benchmark_cli.sh benchmark --nodejs > BENCHMARKS_NODEJS.md 2>benchmark-nodejs.log
+          cat benchmark-nodejs.log
+
+      - name: Commit and push benchmark report
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add BENCHMARKS_NODEJS.md
+          git commit -m "Update Node.js benchmark results [skip ci]" || exit 0
+          git push --force origin "${HEAD_REF}"
+
+      - name: Comment PR with summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const report = 'BENCHMARKS_NODEJS.md';
+            if (fs.existsSync(report)) {
+              const content = fs.readFileSync(report, 'utf8');
+              const lines = content.split('\n').slice(0, 50);
+              let summary = lines.join('\n');
+              summary += '\n\n---\n\n';
+              summary += `> Full results: [${report}](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${{ github.head_ref }}/${report})\n`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }

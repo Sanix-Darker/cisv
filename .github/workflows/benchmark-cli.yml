@@ -1,0 +1,75 @@
+name: Benchmark CLI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  benchmark-cli:
+    name: CLI Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'benchmarks-cli'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc time python3 python3-pip
+
+      - name: Run CLI benchmarks
+        run: |
+          export CI=true
+          export GITHUB_SHA="${{ github.sha }}"
+          export GITHUB_REF_NAME="${{ github.ref_name }}"
+
+          bash ./scripts/benchmark_cli.sh install --cli 2>&1 | tee install-cli.log
+          bash ./scripts/benchmark_cli.sh benchmark --cli > BENCHMARKS_CLI.md 2>benchmark-cli.log
+          cat benchmark-cli.log
+
+      - name: Commit and push benchmark report
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add BENCHMARKS_CLI.md
+          git commit -m "Update CLI benchmark results [skip ci]" || exit 0
+          git push --force origin "${HEAD_REF}"
+
+      - name: Comment PR with summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const report = 'BENCHMARKS_CLI.md';
+            if (fs.existsSync(report)) {
+              const content = fs.readFileSync(report, 'utf8');
+              const lines = content.split('\n').slice(0, 50);
+              let summary = lines.join('\n');
+              summary += '\n\n---\n\n';
+              summary += `> Full results: [${report}](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${{ github.head_ref }}/${report})\n`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
