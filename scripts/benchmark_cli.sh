@@ -11,7 +11,7 @@ set -uo pipefail
 # ============================================================================
 
 ITERATIONS=3
-BENCH_TIMEOUT=120
+BENCH_TIMEOUT=${BENCH_TIMEOUT:-120}
 SIZES=("large")
 FORCE_REGENERATE=false
 NO_CLEANUP=false
