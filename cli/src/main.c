@@ -300,35 +300,84 @@ static int stream_rows_with_iterator(const char *filename, cisv_config *config, 
     const size_t *lengths = NULL;
     size_t field_count = 0;
     int rc;
+    char *row_buf = NULL;
+    size_t row_buf_cap = 0;
 
     while ((rc = cisv_iterator_next(it, &fields, &lengths, &field_count)) == CISV_ITER_OK) {
-        int first = 1;
+        size_t row_len = 1; // trailing newline
+        size_t emitted_fields = 0;
 
         if (ctx->select_cols && ctx->select_count > 0) {
-            int sel = 0;
-            for (size_t i = 0; i < field_count && sel < ctx->select_count; i++) {
-                while (sel < ctx->select_count && ctx->select_cols[sel] < (int)i) {
-                    sel++;
+            for (int sel = 0; sel < ctx->select_count; sel++) {
+                int col = ctx->select_cols[sel];
+                if (col < 0 || (size_t)col >= field_count) {
+                    continue;
                 }
-                if (sel < ctx->select_count && ctx->select_cols[sel] == (int)i) {
-                    if (!first) fputc(config->delimiter, ctx->output);
-                    fwrite(fields[i], 1, lengths[i], ctx->output);
-                    first = 0;
-                    sel++;
+                row_len += lengths[col];
+                if (emitted_fields > 0) {
+                    row_len += 1; // delimiter
                 }
+                emitted_fields++;
             }
         } else {
             for (size_t i = 0; i < field_count; i++) {
-                if (!first) fputc(config->delimiter, ctx->output);
-                fwrite(fields[i], 1, lengths[i], ctx->output);
+                row_len += lengths[i];
+                if (i > 0) {
+                    row_len += 1; // delimiter
+                }
+            }
+        }
+
+        if (row_len > row_buf_cap) {
+            size_t new_cap = row_buf_cap ? row_buf_cap : 4096;
+            while (new_cap < row_len) {
+                if (new_cap > SIZE_MAX / 2) {
+                    new_cap = row_len;
+                    break;
+                }
+                new_cap *= 2;
+            }
+
+            char *new_buf = realloc(row_buf, new_cap);
+            if (!new_buf) {
+                fprintf(stderr, "Failed to allocate row output buffer\n");
+                free(row_buf);
+                cisv_iterator_close(it);
+                return -1;
+            }
+            row_buf = new_buf;
+            row_buf_cap = new_cap;
+        }
+
+        char *out = row_buf;
+        int first = 1;
+
+        if (ctx->select_cols && ctx->select_count > 0) {
+            for (int sel = 0; sel < ctx->select_count; sel++) {
+                int col = ctx->select_cols[sel];
+                if (col < 0 || (size_t)col >= field_count) {
+                    continue;
+                }
+                if (!first) *out++ = config->delimiter;
+                memcpy(out, fields[col], lengths[col]);
+                out += lengths[col];
+                first = 0;
+            }
+        } else {
+            for (size_t i = 0; i < field_count; i++) {
+                if (!first) *out++ = config->delimiter;
+                memcpy(out, fields[i], lengths[i]);
+                out += lengths[i];
                 first = 0;
             }
         }
 
-        fputc('\n', ctx->output);
+        *out++ = '\n';
+        fwrite(row_buf, 1, (size_t)(out - row_buf), ctx->output);
         ctx->row_count++;
     }
 
+    free(row_buf);
     cisv_iterator_close(it);
     if (rc == CISV_ITER_ERROR) {
         fprintf(stderr, "Parse error while iterating rows\n");

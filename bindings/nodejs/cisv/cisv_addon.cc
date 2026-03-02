@@ -93,6 +93,28 @@ static inline bool isAllAscii(const char* data, size_t len) {
 // Create Napi::String with UTF-8 validation (safe version)
 // Falls back to replacement character representation for invalid UTF-8
 static napi_value SafeNewStringValue(napi_env env, const char* data, size_t len) {
+    // Short fields are extremely common in CSV; avoid heavier ASCII/UTF-8 scans.
+    if (len <= 32) {
+        bool ascii = true;
+        for (size_t i = 0; i < len; i++) {
+            if (static_cast<unsigned char>(data[i]) & 0x80) {
+                ascii = false;
+                break;
+            }
+        }
+
+        napi_value short_value = nullptr;
+        if (ascii) {
+            if (napi_create_string_latin1(env, data, len, &short_value) == napi_ok && short_value) {
+                return short_value;
+            }
+        } else {
+            if (napi_create_string_utf8(env, data, len, &short_value) == napi_ok && short_value) {
+                return short_value;
+            }
+        }
+    }
+
     // Fastest path: ASCII-only data is valid Latin-1.
     // Using Latin-1 creation avoids UTF-8 decoding overhead.
     if (isAllAscii(data, len)) {
