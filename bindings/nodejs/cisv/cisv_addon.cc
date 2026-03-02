@@ -93,8 +93,14 @@ static inline bool isAllAscii(const char* data, size_t len) {
 // Create Napi::String with UTF-8 validation (safe version)
 // Falls back to replacement character representation for invalid UTF-8
 static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
-    // Fastest path: ASCII-only data is always valid UTF-8.
+    // Fastest path: ASCII-only data is valid Latin-1.
+    // Using Latin-1 creation avoids UTF-8 decoding overhead.
     if (isAllAscii(data, len)) {
+        napi_value latin1_value = nullptr;
+        if (napi_create_string_latin1(env, data, len, &latin1_value) == napi_ok && latin1_value) {
+            return Napi::String(env, latin1_value);
+        }
+        // Fallback to UTF-8 path if Latin-1 creation fails unexpectedly.
         return Napi::String::New(env, data, len);
     }
 
