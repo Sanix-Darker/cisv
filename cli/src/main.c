@@ -304,52 +304,40 @@ static int stream_rows_with_iterator(const char *filename, cisv_config *config, 
     size_t row_buf_cap = 0;
 
     while ((rc = cisv_iterator_next(it, &fields, &lengths, &field_count)) == CISV_ITER_OK) {
-        size_t row_len = 1; // trailing newline
-        size_t emitted_fields = 0;
-
-        if (ctx->select_cols && ctx->select_count > 0) {
-            for (int sel = 0; sel < ctx->select_count; sel++) {
-                int col = ctx->select_cols[sel];
-                if (col < 0 || (size_t)col >= field_count) {
-                    continue;
-                }
-                row_len += lengths[col];
-                if (emitted_fields > 0) {
-                    row_len += 1; // delimiter
-                }
-                emitted_fields++;
-            }
-        } else {
-            for (size_t i = 0; i < field_count; i++) {
-                row_len += lengths[i];
-                if (i > 0) {
-                    row_len += 1; // delimiter
-                }
-            }
-        }
-
-        if (row_len > row_buf_cap) {
-            size_t new_cap = row_buf_cap ? row_buf_cap : 4096;
-            while (new_cap < row_len) {
-                if (new_cap > SIZE_MAX / 2) {
-                    new_cap = row_len;
-                    break;
-                }
-                new_cap *= 2;
-            }
-
-            char *new_buf = realloc(row_buf, new_cap);
-            if (!new_buf) {
+        if (row_buf_cap == 0) {
+            row_buf_cap = 4096;
+            row_buf = malloc(row_buf_cap);
+            if (!row_buf) {
                 fprintf(stderr, "Failed to allocate row output buffer\n");
-                free(row_buf);
                 cisv_iterator_close(it);
                 return -1;
             }
-            row_buf = new_buf;
-            row_buf_cap = new_cap;
         }
 
-        char *out = row_buf;
+        size_t used = 0;
+#define ENSURE_ROW_BUF(extra) do { \
+    size_t need = used + (size_t)(extra); \
+    if (need > row_buf_cap) { \
+        size_t new_cap = row_buf_cap; \
+        while (new_cap < need) { \
+            if (new_cap > SIZE_MAX / 2) { \
+                new_cap = need; \
+                break; \
+            } \
+            new_cap *= 2; \
+        } \
+        char *new_buf = realloc(row_buf, new_cap); \
+        if (!new_buf) { \
+            fprintf(stderr, "Failed to grow row output buffer\n"); \
+            free(row_buf); \
+            cisv_iterator_close(it); \
+            return -1; \
+        } \
+        row_buf = new_buf; \
+        row_buf_cap = new_cap; \
+    } \
+} while (0)
+
         int first = 1;
 
         if (ctx->select_cols && ctx->select_count > 0) {
@@ -358,23 +346,34 @@ static int stream_rows_with_iterator(const char *filename, cisv_config *config, 
                 if (col < 0 || (size_t)col >= field_count) {
                     continue;
                 }
-                if (!first) *out++ = config->delimiter;
-                memcpy(out, fields[col], lengths[col]);
-                out += lengths[col];
+                if (!first) {
+                    ENSURE_ROW_BUF(1);
+                    row_buf[used++] = config->delimiter;
+                }
+                ENSURE_ROW_BUF(lengths[col]);
+                memcpy(row_buf + used, fields[col], lengths[col]);
+                used += lengths[col];
                 first = 0;
             }
         } else {
             for (size_t i = 0; i < field_count; i++) {
-                if (!first) *out++ = config->delimiter;
-                memcpy(out, fields[i], lengths[i]);
-                out += lengths[i];
+                if (!first) {
+                    ENSURE_ROW_BUF(1);
+                    row_buf[used++] = config->delimiter;
+                }
+                ENSURE_ROW_BUF(lengths[i]);
+                memcpy(row_buf + used, fields[i], lengths[i]);
+                used += lengths[i];
                 first = 0;
             }
         }
 
-        *out++ = '\n';
-        fwrite(row_buf, 1, (size_t)(out - row_buf), ctx->output);
+        ENSURE_ROW_BUF(1);
+        row_buf[used++] = '\n';
+        fwrite(row_buf, 1, used, ctx->output);
         ctx->row_count++;
+
+#undef ENSURE_ROW_BUF
     }
 
     free(row_buf);
@@ -928,6 +927,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
+    setvbuf(ctx.output, NULL, _IOFBF, 1 << 20);
 
     // Fast path: iterator avoids per-field allocations for common full-stream output.
     if (ctx.head == 0 && ctx.tail == 0 && getenv("CISV_STATS") == NULL) {
