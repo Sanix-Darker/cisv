@@ -1,6 +1,10 @@
 # CISV CLI Makefile
 CC ?= gcc
 
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+PORTABLE ?= 0
+
 # SECURITY: Binary hardening flags for executables
 # -fstack-protector-strong: Protect against stack buffer overflows
 # -D_FORTIFY_SOURCE=2: Detect buffer overflows in string/memory functions
@@ -8,11 +12,38 @@ CC ?= gcc
 # -Wl,-z,relro,-z,now: Full RELRO - make GOT read-only after relocation
 # -fstack-check: Check for stack overflow at runtime
 SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fstack-check -fPIE
-SECURITY_LDFLAGS = -Wl,-z,relro,-z,now -pie
+SECURITY_LDFLAGS =
 
-CFLAGS ?= -O3 -march=native -mavx2 -mtune=native -pipe -fomit-frame-pointer \
-          -Wall -Wextra -std=c11 -flto -ffast-math -funroll-loops \
-          $(SECURITY_CFLAGS)
+BASE_CFLAGS = -O3 -pipe -fomit-frame-pointer -Wall -Wextra -std=c11 -flto \
+              -ffast-math -funroll-loops $(SECURITY_CFLAGS)
+
+ifeq ($(PORTABLE),1)
+    ifeq ($(UNAME_M),x86_64)
+        ARCH_CFLAGS = -msse4.2
+    else ifeq ($(UNAME_M),amd64)
+        ARCH_CFLAGS = -msse4.2
+    else ifeq ($(UNAME_M),arm64)
+        ARCH_CFLAGS = -march=armv8-a
+    else ifeq ($(UNAME_M),aarch64)
+        ARCH_CFLAGS = -march=armv8-a
+    else
+        ARCH_CFLAGS =
+    endif
+else
+    ifeq ($(UNAME_M),x86_64)
+        ARCH_CFLAGS = -march=native -mavx2 -mtune=native
+    else ifeq ($(UNAME_M),amd64)
+        ARCH_CFLAGS = -march=native -mavx2 -mtune=native
+    else ifeq ($(UNAME_M),arm64)
+        ARCH_CFLAGS = -mcpu=native
+    else ifeq ($(UNAME_M),aarch64)
+        ARCH_CFLAGS = -march=native
+    else
+        ARCH_CFLAGS = -march=native
+    endif
+endif
+
+CFLAGS ?= $(BASE_CFLAGS) $(ARCH_CFLAGS)
 LDFLAGS ?= -flto -s $(SECURITY_LDFLAGS)
 
 # Directories
@@ -28,12 +59,13 @@ OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 CLI_BIN = $(BUILD_DIR)/cisv
 
 # Platform detection
-UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
+    SECURITY_LDFLAGS = -Wl,-z,relro,-z,now -pie
     CFLAGS += -D_GNU_SOURCE
     LDFLAGS += -lrt
 endif
 ifeq ($(UNAME_S),Darwin)
+    SECURITY_LDFLAGS =
     CFLAGS += -D__APPLE__
 endif
 

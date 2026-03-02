@@ -1121,6 +1121,20 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
 
         auto deferred = Napi::Promise::Deferred::New(env);
 
+        // Preserve behavior for transform-enabled parsers (native + JS transforms)
+        // until async transform execution is implemented.
+        bool has_c_transforms = rc_ && rc_->pipeline && rc_->pipeline->count > 0;
+        bool has_js_transforms = rc_ && !rc_->js_transforms.empty();
+        if (has_c_transforms || has_js_transforms) {
+            try {
+                Napi::Value result = ParseSync(info);
+                deferred.Resolve(result);
+            } catch (const Napi::Error &e) {
+                deferred.Reject(e.Value());
+            }
+            return deferred.Promise();
+        }
+
         // Use batch parser in a worker thread to avoid blocking the event loop.
         cisv_config worker_config = config_;
         worker_config.field_cb = nullptr;

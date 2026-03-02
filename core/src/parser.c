@@ -2352,13 +2352,14 @@ typedef struct {
     const cisv_chunk_t *chunk;
     const cisv_config *config;
     cisv_result_t *result;
+    size_t chunk_size_hint;
 } ParallelParseArg;
 
 // Thread function for parallel parsing
 static void *parallel_parse_thread(void *arg) {
     ParallelParseArg *parg = (ParallelParseArg *)arg;
 
-    cisv_result_t *result = batch_result_create();
+    cisv_result_t *result = batch_result_create_with_hint(parg->chunk_size_hint);
     if (!result) {
         parg->result = NULL;
         return NULL;
@@ -2438,6 +2439,32 @@ cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *co
         return NULL;
     }
 
+    // Fast path: single chunk does not benefit from thread orchestration.
+    if (chunk_count == 1) {
+        cisv_result_t **results = calloc(1, sizeof(cisv_result_t *));
+        if (!results) {
+            free(chunks);
+            cisv_mmap_close(mmap_file);
+            errno = ENOMEM;
+            return NULL;
+        }
+
+        ParallelParseArg arg = {
+            .chunk = &chunks[0],
+            .config = config,
+            .result = NULL,
+            .chunk_size_hint = (size_t)(chunks[0].end - chunks[0].start),
+        };
+
+        parallel_parse_thread(&arg);
+        results[0] = arg.result;
+
+        free(chunks);
+        cisv_mmap_close(mmap_file);
+        *result_count = 1;
+        return results;
+    }
+
     // Allocate thread arguments and results array
     ParallelParseArg *args = calloc(chunk_count, sizeof(ParallelParseArg));
     pthread_t *threads = calloc(chunk_count, sizeof(pthread_t));
@@ -2458,6 +2485,7 @@ cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *co
         args[i].chunk = &chunks[i];
         args[i].config = config;
         args[i].result = NULL;
+        args[i].chunk_size_hint = (size_t)(chunks[i].end - chunks[i].start);
 
         if (pthread_create(&threads[i], NULL, parallel_parse_thread, &args[i]) != 0) {
             // Thread creation failed - wait for already-launched threads
