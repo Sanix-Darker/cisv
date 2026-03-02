@@ -761,6 +761,83 @@ void test_max_row_size_skip_error_lines(void) {
     }
 }
 
+void test_parallel_custom_quote_chunk_split(void) {
+    TEST("parallel parse uses custom quote in chunk splitting");
+
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/test_cisv_parallel_quote_%d.csv", getpid());
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        FAIL("failed to create temp file");
+        return;
+    }
+
+    fprintf(f, "id|text|flag\n");
+    for (int i = 0; i < 1200; i++) {
+        if (i == 600) {
+            fprintf(f, "%d|'line1\nline2'|ok\n", i);
+        } else {
+            fprintf(f, "%d|'value_%d'|ok\n", i, i);
+        }
+    }
+    fclose(f);
+
+    cisv_config config;
+    cisv_config_init(&config);
+    config.delimiter = '|';
+    config.quote = '\'';
+
+    int result_count = 0;
+    cisv_result_t **results = cisv_parse_file_parallel(path, &config, 2, &result_count);
+    if (!results || result_count <= 0) {
+        unlink(path);
+        FAIL("parallel parse failed");
+        return;
+    }
+
+    size_t total_rows = 0;
+    size_t total_fields = 0;
+    int found_multiline = 0;
+    int had_error = 0;
+
+    for (int i = 0; i < result_count; i++) {
+        cisv_result_t *r = results[i];
+        if (!r) {
+            had_error = 1;
+            continue;
+        }
+        if (r->error_code != 0) {
+            had_error = 1;
+        }
+        total_rows += r->row_count;
+        total_fields += r->total_fields;
+
+        for (size_t row_idx = 0; row_idx < r->row_count; row_idx++) {
+            cisv_row_t *row = &r->rows[row_idx];
+            for (size_t col = 0; col < row->field_count; col++) {
+                if (row->field_lengths[col] == 11 &&
+                    memcmp(row->fields[col], "line1\nline2", 11) == 0) {
+                    found_multiline = 1;
+                }
+            }
+        }
+    }
+
+    cisv_results_free(results, result_count);
+    unlink(path);
+
+    // header + 1200 data rows
+    if (!had_error && total_rows == 1201 && total_fields == 3603 && found_multiline) {
+        PASS();
+    } else {
+        char buf[200];
+        snprintf(buf, sizeof(buf),
+                 "expected rows=1201 fields=3603 multiline=1, got rows=%zu fields=%zu multiline=%d error=%d",
+                 total_rows, total_fields, found_multiline, had_error);
+        FAIL(buf);
+    }
+}
+
 int main(void) {
     printf("CISV Core Library Tests\n");
     printf("========================\n\n");
@@ -800,6 +877,7 @@ int main(void) {
     test_streaming_chunk_boundaries();
     test_parse_comment_lines();
     test_max_row_size_skip_error_lines();
+    test_parallel_custom_quote_chunk_split();
 
     // Summary
     printf("\n========================\n");

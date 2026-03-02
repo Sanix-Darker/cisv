@@ -1900,10 +1900,31 @@ void cisv_mmap_close(cisv_mmap_file_t *file) {
     free(file);
 }
 
-cisv_chunk_t *cisv_split_chunks(
+// Count occurrences of a byte using SWAR masks (8 bytes per iteration).
+// Used by chunk splitter for fast quote parity checks.
+static inline size_t count_char_swar(const uint8_t *data, size_t len, uint8_t target) {
+    size_t count = 0;
+    size_t i = 0;
+
+    while (i + 8 <= len) {
+        uint64_t word;
+        memcpy(&word, data + i, sizeof(word));
+        count += (size_t)__builtin_popcountll(swar_has_byte(word, target));
+        i += 8;
+    }
+
+    for (; i < len; i++) {
+        if (data[i] == target) count++;
+    }
+
+    return count;
+}
+
+static cisv_chunk_t *split_chunks_with_quote(
     const cisv_mmap_file_t *file,
     int num_chunks,
-    int *chunk_count
+    int *chunk_count,
+    char quote_char
 ) {
     if (!file || !file->data || num_chunks <= 0 || !chunk_count) {
         return NULL;
@@ -1941,10 +1962,11 @@ cisv_chunk_t *cisv_split_chunks(
 
             // Count quote characters from chunk_start to target_end
             // to determine if we're inside a quoted field
-            size_t quote_count = 0;
-            for (const uint8_t *q = chunk_start; q < target_end; q++) {
-                if (*q == '"') quote_count++;
-            }
+            size_t quote_count = count_char_swar(
+                chunk_start,
+                (size_t)(target_end - chunk_start),
+                (uint8_t)quote_char
+            );
 
             if (quote_count & 1) {
                 // Odd number of quotes: we're inside a quoted field.
@@ -1952,8 +1974,8 @@ cisv_chunk_t *cisv_split_chunks(
                 const uint8_t *scan = target_end;
                 bool in_q = true;
                 while (scan < end && in_q) {
-                    if (*scan == '"') {
-                        if (scan + 1 < end && *(scan + 1) == '"') {
+                    if (*scan == (uint8_t)quote_char) {
+                        if (scan + 1 < end && *(scan + 1) == (uint8_t)quote_char) {
                             scan += 2;  // Skip escaped quote
                             continue;
                         }
@@ -1980,15 +2002,15 @@ cisv_chunk_t *cisv_split_chunks(
             }
         }
 
-        // Count rows in this chunk using quote-aware scalar loop
-        // chunk_start is always at a row boundary, so initial state is outside quotes
+        // Count rows in this chunk using quote-aware scalar loop.
+        // chunk_start is always at a row boundary, so initial state is outside quotes.
         size_t row_count = 0;
         bool in_quote = false;
         for (const uint8_t *p = chunk_start; p < target_end; p++) {
             uint8_t c = *p;
             if (in_quote) {
-                if (c == '"') {
-                    if (p + 1 < target_end && *(p + 1) == '"') {
+                if (c == (uint8_t)quote_char) {
+                    if (p + 1 < target_end && *(p + 1) == (uint8_t)quote_char) {
                         p++;  // Skip escaped quote
                     } else {
                         in_quote = false;
@@ -1997,7 +2019,7 @@ cisv_chunk_t *cisv_split_chunks(
             } else {
                 if (c == '\n') {
                     row_count++;
-                } else if (c == '"') {
+                } else if (c == (uint8_t)quote_char) {
                     in_quote = true;
                 }
             }
@@ -2014,6 +2036,14 @@ cisv_chunk_t *cisv_split_chunks(
 
     *chunk_count = actual_chunks;
     return chunks;
+}
+
+cisv_chunk_t *cisv_split_chunks(
+    const cisv_mmap_file_t *file,
+    int num_chunks,
+    int *chunk_count
+) {
+    return split_chunks_with_quote(file, num_chunks, chunk_count, '"');
 }
 
 int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
@@ -2482,7 +2512,11 @@ cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *co
 
     // Split into chunks
     int chunk_count;
-    cisv_chunk_t *chunks = cisv_split_chunks(mmap_file, num_threads, &chunk_count);
+    char quote_char = '"';
+    if (config && config->quote != '\0') {
+        quote_char = config->quote;
+    }
+    cisv_chunk_t *chunks = split_chunks_with_quote(mmap_file, num_threads, &chunk_count, quote_char);
     if (!chunks || chunk_count == 0) {
         cisv_mmap_close(mmap_file);
         return NULL;
