@@ -344,29 +344,32 @@ PHP_METHOD(CisvParser, parseFileParallel) {
         return;
     }
 
+    size_t total_rows = 0;
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        cisv_result_t *result = results[chunk];
+        if (!result) continue;
+        if (result->error_code != 0) {
+            zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
+            cisv_results_free(results, result_count);
+            return;
+        }
+        total_rows += result->row_count;
+    }
+
     /* Build result array from all chunks */
     zval rows;
-    array_init(&rows);
+    array_init_size(&rows, (uint32_t)total_rows);
 
     for (int chunk = 0; chunk < result_count; chunk++) {
         cisv_result_t *result = results[chunk];
         if (!result) continue;
 
-        if (result->error_code != 0) {
-            zval_ptr_dtor(&rows);
-            zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
-            cisv_results_free(results, result_count);
-            return;
-        }
-
         for (size_t i = 0; i < result->row_count; i++) {
             zval row;
-            array_init(&row);
             cisv_row_t *r = &result->rows[i];
+            array_init_size(&row, (uint32_t)r->field_count);
             for (size_t j = 0; j < r->field_count; j++) {
-                zval field;
-                ZVAL_STRINGL(&field, r->fields[j], r->field_lengths[j]);
-                add_next_index_zval(&row, &field);
+                add_next_index_stringl(&row, r->fields[j], r->field_lengths[j]);
             }
             add_next_index_zval(&rows, &row);
         }
