@@ -48,12 +48,7 @@ jobs:
             fi
             sleep 5
           done
-          python - << 'PY'
-import importlib
-for mod in ("pandas", "polars", "pyarrow"):
-    importlib.import_module(mod)
-print("Python benchmark dependencies are available")
-PY
+          python -c "import importlib; [importlib.import_module(m) for m in ('pandas','polars','pyarrow')]; print('Python benchmark dependencies are available')"
 
       - name: Run Python benchmarks
         run: |
