@@ -56,6 +56,7 @@ jobs:
           git config user.name "GitHub Action"
           git add BENCHMARKS_PYTHON.md
           git commit -m "Update Python benchmark results [skip ci]" || exit 0
+          git stash push --include-untracked --keep-index -m "benchmark-python-pre-rebase" || true
           git pull --rebase origin "${HEAD_REF}"
           git push origin "${HEAD_REF}" || true
 

@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y python3
           cd bindings/nodejs
           npm ci
-          npm install papaparse csv-parse fast-csv csv-parser d3-dsv csv-string --save-dev || true
+          npm install papaparse csv-parse fast-csv csv-parser d3-dsv csv-string --no-save || true
           cd ../..
 
       - name: Run Node.js benchmarks
@@ -63,6 +63,7 @@ jobs:
           git config user.name "GitHub Action"
           git add BENCHMARKS_NODEJS.md
           git commit -m "Update Node.js benchmark results [skip ci]" || exit 0
+          git stash push --include-untracked --keep-index -m "benchmark-nodejs-pre-rebase" || true
           git pull --rebase origin "${HEAD_REF}"
           git push origin "${HEAD_REF}" || true
 
