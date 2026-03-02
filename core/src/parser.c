@@ -1647,8 +1647,27 @@ static size_t count_rows_internal(const uint8_t *data, size_t size, char quote_c
     bool in_quote = false;
     size_t i = 0;
 
-    // SWAR-accelerated quote-aware counting. We keep the exact behavior but
-    // skip byte-by-byte checks on common fast paths.
+    // Unrolled no-quote fast path (16 bytes/lane) for common datasets.
+    while (!in_quote && i + 16 <= size) {
+        uint64_t word0;
+        uint64_t word1;
+        memcpy(&word0, data + i, sizeof(word0));
+        memcpy(&word1, data + i + 8, sizeof(word1));
+
+        uint64_t quote_mask0 = swar_has_byte(word0, (uint8_t)quote_char);
+        uint64_t quote_mask1 = swar_has_byte(word1, (uint8_t)quote_char);
+        if (quote_mask0 | quote_mask1) {
+            break;
+        }
+
+        uint64_t nl_mask0 = swar_has_byte(word0, '\n');
+        uint64_t nl_mask1 = swar_has_byte(word1, '\n');
+        count += (size_t)__builtin_popcountll(nl_mask0);
+        count += (size_t)__builtin_popcountll(nl_mask1);
+        i += 16;
+    }
+
+    // SWAR-accelerated quote-aware counting for remaining bytes.
     while (i + 8 <= size) {
         uint64_t word;
         memcpy(&word, data + i, sizeof(word));
