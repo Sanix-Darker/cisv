@@ -1926,7 +1926,12 @@ static inline bool batch_ensure_fields(cisv_result_t *r, size_t needed) {
     if (!new_fields) return false;
 
     size_t *new_lengths = realloc(r->all_lengths, new_cap * sizeof(size_t));
-    if (!new_lengths) return false;
+    if (!new_lengths) {
+        // Preserve the successful realloc result so ownership is not lost
+        // if the second growth step fails.
+        r->all_fields = new_fields;
+        return false;
+    }
 
     r->all_fields = new_fields;
     r->all_lengths = new_lengths;
