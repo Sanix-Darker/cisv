@@ -10,7 +10,7 @@ set -uo pipefail
 # CONFIGURATION
 # ============================================================================
 
-ITERATIONS=${CI:+3}
+ITERATIONS=${CI:+2}
 ITERATIONS=${ITERATIONS:-5}
 BENCH_TIMEOUT=120
 SIZES=("large")
@@ -308,7 +308,7 @@ run_benchmark() {
     if [ $success_count -eq 0 ]; then
         echo "FAILED|0"
     else
-        local avg=$(awk "BEGIN {printf \"%.4f\", $total_time / $success_count}")
+        local avg=$(awk "BEGIN {printf \"%.7f\", $total_time / $success_count}")
         echo "$avg|$success_count"
     fi
 }
@@ -602,9 +602,12 @@ PYEOF
 }
 
 generate_test_files() {
+    local row_count=${CI:+500000}
+    row_count=${row_count:-1000000}
+
     if [ ! -f "large.csv" ] || [ "$FORCE_REGENERATE" = "true" ]; then
-        log "Generating large.csv (1M rows)..."
-        generate_csv 1000000 "large.csv"
+        log "Generating large.csv (${row_count} rows)..."
+        generate_csv "$row_count" "large.csv"
     fi
 
     # Derive validation expectations from the actual benchmark file to keep
@@ -615,7 +618,7 @@ generate_test_files() {
     EXPECTED_FIRST_ID=$(awk -F',' 'NR==2 {print $1; exit}' "large.csv")
 
     # Fallbacks if file parsing unexpectedly fails.
-    [ -z "${EXPECTED_ROW_COUNT}" ] && EXPECTED_ROW_COUNT=1000001
+    [ -z "${EXPECTED_ROW_COUNT}" ] && EXPECTED_ROW_COUNT=$((row_count + 1))
     [ -z "${EXPECTED_HEADERS}" ] && EXPECTED_HEADERS="id,name,email,address,phone,date,amount"
     [ -z "${EXPECTED_FIELD_COUNT}" ] && EXPECTED_FIELD_COUNT=7
     [ -z "${EXPECTED_FIRST_ID}" ] && EXPECTED_FIRST_ID="0"
@@ -749,7 +752,7 @@ async function benchmark() {
     if (success === 0) {
         console.log('FAILED|0');
     } else {
-        console.log((totalTime / success).toFixed(4) + '|' + success);
+        console.log((totalTime / success).toFixed(7) + '|' + success);
     }
 }
 
@@ -808,7 +811,7 @@ for _ in range(iterations):
 if success == 0:
     print("FAILED|0")
 else:
-    print(f"{total_time/success:.4f}|{success}")
+    print(f"{total_time/success:.7f}|{success}")
 PYEOF
 ) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
@@ -845,7 +848,7 @@ try:
         total_time += end - start
         success += 1
 
-    print(f"{total_time/success:.4f}|{success}")
+    print(f"{total_time/success:.7f}|{success}")
 except Exception as e:
     print("FAILED|0")
 PYEOF
@@ -868,7 +871,7 @@ try:
         end = time.perf_counter()
         total_time += end - start
 
-    print(f"{total_time/iterations:.4f}|{iterations}")
+    print(f"{total_time/iterations:.7f}|{iterations}")
 except:
     print("FAILED|0")
 PYEOF
@@ -891,7 +894,7 @@ try:
         end = time.perf_counter()
         total_time += end - start
 
-    print(f"{total_time/iterations:.4f}|{iterations}")
+    print(f"{total_time/iterations:.7f}|{iterations}")
 except:
     print("FAILED|0")
 PYEOF
@@ -914,7 +917,7 @@ try:
         end = time.perf_counter()
         total_time += end - start
 
-    print(f"{total_time/iterations:.4f}|{iterations}")
+    print(f"{total_time/iterations:.7f}|{iterations}")
 except:
     print("FAILED|0")
 PYEOF
@@ -939,7 +942,7 @@ for _ in range(iterations):
     end = time.perf_counter()
     total_time += end - start
 
-print(f"{total_time/iterations:.4f}|{iterations}")
+print(f"{total_time/iterations:.7f}|{iterations}")
 PYEOF
 ) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
@@ -962,7 +965,7 @@ for _ in range(iterations):
     end = time.perf_counter()
     total_time += end - start
 
-print(f"{total_time/iterations:.4f}|{iterations}")
+print(f"{total_time/iterations:.7f}|{iterations}")
 PYEOF
 ) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
@@ -983,7 +986,7 @@ try:
         end = time.perf_counter()
         total_time += end - start
 
-    print(f"{total_time/iterations:.4f}|{iterations}")
+    print(f"{total_time/iterations:.7f}|{iterations}")
 except:
     print("FAILED|0")
 PYEOF
@@ -1028,7 +1031,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     else
         log "    cisv extension not found at $php_ext"
@@ -1052,7 +1055,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     else
         result="FAILED|0"
@@ -1079,7 +1082,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_fgetcsv"]="$result"
@@ -1103,7 +1106,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_str_getcsv"]="$result"
@@ -1127,7 +1130,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_splfileobject"]="$result"
@@ -1153,7 +1156,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     else
         result="FAILED|0"
@@ -1180,7 +1183,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_explode"]="$result"
@@ -1204,7 +1207,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_preg_split"]="$result"
@@ -1224,7 +1227,7 @@ for (\$i = 0; \$i < \$iterations; \$i++) {
     \$totalTime += (\$end - \$start);
 }
 
-echo number_format(\$totalTime / \$iterations, 4) . '|' . \$iterations;
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
 " 2>/dev/null) || result="FAILED|0"
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["php_array_map"]="$result"
