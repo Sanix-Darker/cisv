@@ -113,9 +113,9 @@ jobs:
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           # Only x86_64 on Linux (aarch64 via QEMU is too slow)
           CIBW_ARCHS_LINUX: "x86_64"
-          # macOS 10.13+ required for nanobind (aligned allocation)
-          MACOSX_DEPLOYMENT_TARGET: "10.14"
-          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.14"
+          # Align with cibuildwheel's minimum supported deployment target on macOS runners.
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=11.0"
 
       - name: Validate wheel archives
         run: |
