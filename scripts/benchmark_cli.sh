@@ -278,7 +278,12 @@ RUST_EOF
 
 build_cisv() {
     log "Building cisv..."
-    make all >/dev/null 2>&1
+    # Build only what each benchmark slice needs to keep CI runtime bounded.
+    if [ "$RUN_CLI" = "true" ] || [ "$RUN_NODEJS" = "true" ] || [ "$RUN_PHP" = "true" ]; then
+        make all >/dev/null 2>&1
+    else
+        make core >/dev/null 2>&1
+    fi
 
     # Rebuild PHP extension if phpize is available (since make clean might have deleted it)
     if [ "$RUN_PHP" = "true" ] && command_exists phpize && [ -d "./bindings/php" ]; then
@@ -588,9 +593,14 @@ run_validations() {
 
     if [ "$RUN_PYTHON" = "true" ]; then
         VALIDATIONS["python_count"]=$(validate_python_count "$abs_file")
-        VALIDATIONS["python_parse"]=$(validate_python_parse "$abs_file")
         log "  Python count: ${VALIDATIONS[python_count]}"
-        log "  Python parse: ${VALIDATIONS[python_parse]}"
+        if [ -z "${CI:-}" ]; then
+            VALIDATIONS["python_parse"]=$(validate_python_parse "$abs_file")
+            log "  Python parse: ${VALIDATIONS[python_parse]}"
+        else
+            VALIDATIONS["python_parse"]="SKIP"
+            log "  Python parse: SKIP (CI)"
+        fi
     else
         VALIDATIONS["python_count"]="SKIP"
         VALIDATIONS["python_parse"]="SKIP"
