@@ -51,6 +51,7 @@ jobs:
           git config user.name "GitHub Action"
           git add BENCHMARKS_CLI.md
           git commit -m "Update CLI benchmark results [skip ci]" || exit 0
+          git pull --rebase origin "${HEAD_REF}"
           git push origin "${HEAD_REF}" || true
 
       - name: Comment PR with summary
