@@ -599,8 +599,19 @@ generate_test_files() {
         log "Generating large.csv (1M rows)..."
         generate_csv 1000000 "large.csv"
     fi
-    # Set expected row count (1M data rows + 1 header row)
-    EXPECTED_ROW_COUNT=1000001
+
+    # Derive validation expectations from the actual benchmark file to keep
+    # BENCHMARKS.md validation columns accurate even if test data changes.
+    EXPECTED_ROW_COUNT=$(get_row_count "large.csv")
+    EXPECTED_HEADERS=$(head -n 1 "large.csv" | tr -d '\r')
+    EXPECTED_FIELD_COUNT=$(awk -F',' 'NR==1 {print NF; exit}' "large.csv")
+    EXPECTED_FIRST_ID=$(awk -F',' 'NR==2 {print $1; exit}' "large.csv")
+
+    # Fallbacks if file parsing unexpectedly fails.
+    [ -z "${EXPECTED_ROW_COUNT}" ] && EXPECTED_ROW_COUNT=1000001
+    [ -z "${EXPECTED_HEADERS}" ] && EXPECTED_HEADERS="id,name,email,address,phone,date,amount"
+    [ -z "${EXPECTED_FIELD_COUNT}" ] && EXPECTED_FIELD_COUNT=7
+    [ -z "${EXPECTED_FIRST_ID}" ] && EXPECTED_FIRST_ID="0"
 }
 
 # ============================================================================
