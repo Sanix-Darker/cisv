@@ -10,8 +10,7 @@ set -uo pipefail
 # CONFIGURATION
 # ============================================================================
 
-ITERATIONS=${CI:+2}
-ITERATIONS=${ITERATIONS:-5}
+ITERATIONS=3
 BENCH_TIMEOUT=120
 SIZES=("large")
 FORCE_REGENERATE=false
@@ -644,8 +643,7 @@ PYEOF
 }
 
 generate_test_files() {
-    local row_count=${CI:+500000}
-    row_count=${row_count:-1000000}
+    local row_count=1000000
 
     if [ ! -f "large.csv" ] || [ "$FORCE_REGENERATE" = "true" ]; then
         log "Generating large.csv (${row_count} rows)..."

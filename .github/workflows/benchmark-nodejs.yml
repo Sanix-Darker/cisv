@@ -71,17 +71,42 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const marker = '<!-- cisv-benchmark:nodejs -->';
+            const header = '## [NODEJS] CISV BENCHMARK';
             const report = 'BENCHMARKS_NODEJS.md';
             if (fs.existsSync(report)) {
               const content = fs.readFileSync(report, 'utf8');
               const lines = content.split('\n').slice(0, 50);
-              let summary = lines.join('\n');
-              summary += '\n\n---\n\n';
+              let summary = `${marker}\n${header}\n\n${lines.join('\n')}\n\n---\n\n`;
               summary += `> Full results: [${report}](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${{ github.head_ref }}/${report})\n`;
-              github.rest.issues.createComment({
+
+              const { data: comments } = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: summary
+                per_page: 100
               });
+
+              const existing = comments.find(c =>
+                c.user &&
+                c.user.type === 'Bot' &&
+                typeof c.body === 'string' &&
+                (c.body.includes(marker) || c.body.includes(report))
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body: summary
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: summary
+                });
+              }
             }
