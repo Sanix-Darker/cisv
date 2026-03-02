@@ -36,7 +36,20 @@ jobs:
       - name: Install Python benchmark dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --quiet pandas polars pyarrow || true
+          for attempt in 1 2 3; do
+            pip install --quiet pandas polars pyarrow && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to install pandas/polars/pyarrow after retries"
+              exit 1
+            fi
+            sleep 5
+          done
+          python - << 'PY'
+import importlib
+for mod in ("pandas", "polars", "pyarrow"):
+    importlib.import_module(mod)
+print("Python benchmark dependencies are available")
+PY
 
       - name: Run Python benchmarks
         run: |
