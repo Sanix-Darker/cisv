@@ -967,7 +967,8 @@ PYEOF
     RESULTS["python_pandas"]="$result"
     log "    pandas: $result"
 
-    # stdlib csv benchmark
+    # stdlib csv benchmark (skip in CI to keep benchmark workflow duration bounded)
+    if [ -z "${CI:-}" ]; then
     result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import csv
@@ -989,8 +990,10 @@ PYEOF
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["python_csv-stdlib"]="$result"
     log "    csv-stdlib: $result"
+    fi
 
-    # DictReader benchmark
+    # DictReader benchmark (skip in CI to keep benchmark workflow duration bounded)
+    if [ -z "${CI:-}" ]; then
     result=$(timeout "$BENCH_TIMEOUT" python3 << PYEOF 2>/dev/null
 import time
 import csv
@@ -1012,6 +1015,7 @@ PYEOF
     [ -z "$result" ] && result="FAILED|0"
     RESULTS["python_dictreader"]="$result"
     log "    dictreader: $result"
+    fi
 
     # numpy genfromtxt benchmark (skip in CI — extremely slow on large files)
     if [ -z "${CI:-}" ]; then
