@@ -94,8 +94,8 @@ main() {
     # Core C benchmarks
     log_info "Running core benchmarks..."
     benchmark "cisv_parse" "$CISV_BIN parse $LARGE_CSV"
-    benchmark "cisv_count" "$CISV_BIN count $LARGE_CSV"
-    benchmark "cisv_select_3cols" "$CISV_BIN select -c 1,2,3 $LARGE_CSV"
+    benchmark "cisv_count" "$CISV_BIN -c $LARGE_CSV"
+    benchmark "cisv_select_3cols" "$CISV_BIN -s 1,2,3 $LARGE_CSV"
 
     # Memory profiling (if valgrind available)
     if command -v valgrind &> /dev/null; then

@@ -237,12 +237,11 @@ class CisvParser:
 
     def _on_error(self, user: ctypes.c_void_p, line: int, msg: ctypes.c_char_p):
         """Called on parse error."""
-        # SECURITY FIX: Don't silently ignore errors
+        # Note: raising directly from ctypes callbacks is ignored by ctypes and
+        # can produce confusing stderr warnings. Store errors and raise in the
+        # caller after parse returns.
         error_msg = msg.decode('utf-8', errors='replace') if msg else "Unknown error"
         self._parse_errors.append((line, error_msg))
-
-        if self._raise_on_error:
-            raise CisvParseError(f"Parse error at line {line}: {error_msg}")
 
     def _create_parser(self) -> ctypes.c_void_p:
         """Create a new parser instance."""
@@ -355,6 +354,10 @@ class CisvParser:
         finally:
             self._lib.cisv_parser_destroy(parser)
 
+        if self._raise_on_error and self._parse_errors:
+            line, error_msg = self._parse_errors[0]
+            raise CisvParseError(f"Parse error at line {line}: {error_msg}")
+
         return self._rows
 
     @property
@@ -386,10 +389,16 @@ class CisvParser:
 
         try:
             data = content.encode('utf-8')
-            self._lib.cisv_parser_write(parser, data, len(data))
+            result = self._lib.cisv_parser_write(parser, data, len(data))
+            if result < 0:
+                raise CisvParseError(f"Parse error code: {result}")
             self._lib.cisv_parser_end(parser)
         finally:
             self._lib.cisv_parser_destroy(parser)
+
+        if self._raise_on_error and self._parse_errors:
+            line, error_msg = self._parse_errors[0]
+            raise CisvParseError(f"Parse error at line {line}: {error_msg}")
 
         return self._rows
 

@@ -594,25 +594,34 @@ public:
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // Clear previous data
-        rc_->rows.clear();
-        rc_->current.clear();
-        rc_->current_field_index = 0;
+        resetRowState();
 
-        // Set environment for JS transforms
-        rc_->env = env;
-
-        int result = cisv_parser_parse_file(parser_, path.c_str());
+        int result = 0;
+        if (!hasTransforms()) {
+            cisv_result_t *batch = cisv_parse_file_batch(path.c_str(), &config_);
+            if (!batch) {
+                throw Napi::Error::New(env, "parse error: " + std::string(strerror(errno)));
+            }
+            if (batch->error_code != 0) {
+                std::string msg = batch->error_message[0] ? batch->error_message : "parse error";
+                cisv_result_free(batch);
+                throw Napi::Error::New(env, msg);
+            }
+            loadRowsFromBatch(batch);
+            cisv_result_free(batch);
+        } else {
+            // Set environment for JS transforms
+            rc_->env = env;
+            result = cisv_parser_parse_file(parser_, path.c_str());
+            // Clear the environment reference after parsing
+            rc_->env = nullptr;
+            if (result < 0) {
+                throw Napi::Error::New(env, "parse error: " + std::to_string(result));
+            }
+        }
 
         auto end = std::chrono::high_resolution_clock::now();
         parse_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
-        // Clear the environment reference after parsing
-        rc_->env = nullptr;
-
-        if (result < 0) {
-            throw Napi::Error::New(env, "parse error: " + std::to_string(result));
-        }
 
         return drainRows(env);
     }
@@ -631,22 +640,33 @@ public:
 
         std::string content = info[0].As<Napi::String>();
 
-        // Clear previous data
-        rc_->rows.clear();
-        rc_->current.clear();
-        rc_->current_field_index = 0;
+        resetRowState();
 
-        // Set environment for JS transforms
-        rc_->env = env;
+        if (!hasTransforms()) {
+            cisv_result_t *batch = cisv_parse_string_batch(content.c_str(), content.length(), &config_);
+            if (!batch) {
+                throw Napi::Error::New(env, "parse error: " + std::string(strerror(errno)));
+            }
+            if (batch->error_code != 0) {
+                std::string msg = batch->error_message[0] ? batch->error_message : "parse error";
+                cisv_result_free(batch);
+                throw Napi::Error::New(env, msg);
+            }
+            loadRowsFromBatch(batch);
+            cisv_result_free(batch);
+        } else {
+            // Set environment for JS transforms
+            rc_->env = env;
 
-        // Write the string content as chunks
-        cisv_parser_write(parser_, (const uint8_t*)content.c_str(), content.length());
-        cisv_parser_end(parser_);
+            // Write the string content as chunks
+            cisv_parser_write(parser_, (const uint8_t*)content.c_str(), content.length());
+            cisv_parser_end(parser_);
+
+            // Clear the environment reference after parsing
+            rc_->env = nullptr;
+        }
 
         total_bytes_ = content.length();
-
-        // Clear the environment reference after parsing
-        rc_->env = nullptr;
 
         return drainRows(env);
     }
@@ -1363,6 +1383,35 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
     }
 
 private:
+    bool hasTransforms() const {
+        bool has_c_transforms = rc_ && rc_->pipeline && rc_->pipeline->count > 0;
+        bool has_js_transforms = rc_ && !rc_->js_transforms.empty();
+        return has_c_transforms || has_js_transforms;
+    }
+
+    void resetRowState() {
+        if (!rc_) return;
+        rc_->rows.clear();
+        rc_->current.clear();
+        rc_->current_field_index = 0;
+    }
+
+    void loadRowsFromBatch(const cisv_result_t *result) {
+        if (!rc_ || !result) return;
+        rc_->rows.clear();
+        rc_->rows.reserve(result->row_count);
+
+        for (size_t i = 0; i < result->row_count; i++) {
+            const cisv_row_t *row = &result->rows[i];
+            std::vector<std::string> out_row;
+            out_row.reserve(row->field_count);
+            for (size_t j = 0; j < row->field_count; j++) {
+                out_row.emplace_back(row->fields[j], row->field_lengths[j]);
+            }
+            rc_->rows.emplace_back(std::move(out_row));
+        }
+    }
+
     Napi::Value drainRows(Napi::Env env) {
         if (!rc_) {
             return Napi::Array::New(env, 0);
