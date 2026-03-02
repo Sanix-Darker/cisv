@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <chrono>
+#include <cstdint>
 
 namespace {
 
@@ -60,11 +61,77 @@ static bool isValidUtf8(const char* data, size_t len) {
     return true;
 }
 
+// Fast path for common ASCII-only CSV data.
+static inline bool isAllAscii(const char* data, size_t len) {
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(data);
+    size_t i = 0;
+
+    // Check machine-word chunks first.
+    const size_t word_size = sizeof(uintptr_t);
+    const uintptr_t high_mask = sizeof(uintptr_t) == 8
+        ? static_cast<uintptr_t>(0x8080808080808080ULL)
+        : static_cast<uintptr_t>(0x80808080UL);
+
+    while (i + word_size <= len) {
+        uintptr_t word;
+        memcpy(&word, bytes + i, word_size);
+        if (word & high_mask) {
+            return false;
+        }
+        i += word_size;
+    }
+
+    while (i < len) {
+        if (bytes[i] & 0x80) {
+            return false;
+        }
+        i++;
+    }
+    return true;
+}
+
 // Create Napi::String with UTF-8 validation (safe version)
 // Falls back to replacement character representation for invalid UTF-8
-static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
+static napi_value SafeNewStringValue(napi_env env, const char* data, size_t len) {
+    // Short fields are extremely common in CSV; avoid heavier ASCII/UTF-8 scans.
+    if (len <= 32) {
+        bool ascii = true;
+        for (size_t i = 0; i < len; i++) {
+            if (static_cast<unsigned char>(data[i]) & 0x80) {
+                ascii = false;
+                break;
+            }
+        }
+
+        napi_value short_value = nullptr;
+        if (ascii) {
+            if (napi_create_string_latin1(env, data, len, &short_value) == napi_ok && short_value) {
+                return short_value;
+            }
+        } else {
+            if (napi_create_string_utf8(env, data, len, &short_value) == napi_ok && short_value) {
+                return short_value;
+            }
+        }
+    }
+
+    // Fastest path: ASCII-only data is valid Latin-1.
+    // Using Latin-1 creation avoids UTF-8 decoding overhead.
+    if (isAllAscii(data, len)) {
+        napi_value latin1_value = nullptr;
+        if (napi_create_string_latin1(env, data, len, &latin1_value) == napi_ok && latin1_value) {
+            return latin1_value;
+        }
+        // Fallback to UTF-8 path if Latin-1 creation fails unexpectedly.
+        napi_value utf8_value = nullptr;
+        napi_create_string_utf8(env, data, len, &utf8_value);
+        return utf8_value;
+    }
+
     if (isValidUtf8(data, len)) {
-        return Napi::String::New(env, data, len);
+        napi_value utf8_value = nullptr;
+        napi_create_string_utf8(env, data, len, &utf8_value);
+        return utf8_value;
     }
 
     // Invalid UTF-8 - replace invalid bytes with replacement character
@@ -109,7 +176,13 @@ static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
         }
     }
 
-    return Napi::String::New(env, safe_str);
+    napi_value safe_value = nullptr;
+    napi_create_string_utf8(env, safe_str.c_str(), safe_str.length(), &safe_value);
+    return safe_value;
+}
+
+static Napi::String SafeNewString(Napi::Env env, const char* data, size_t len) {
+    return Napi::String(env, SafeNewStringValue(env, data, len));
 }
 
 // Extended RowCollector that handles transforms
@@ -266,6 +339,76 @@ static void error_cb(void *user, int line, const char *msg) {
     fprintf(stderr, "CSV Parse Error at line %d: %s\n", line, msg);
 }
 
+class ParseFileWorker final : public Napi::AsyncWorker {
+public:
+    ParseFileWorker(
+        Napi::Env env,
+        std::string path,
+        cisv_config config,
+        Napi::Promise::Deferred deferred
+    ) : Napi::AsyncWorker(env),
+        path_(std::move(path)),
+        config_(config),
+        deferred_(deferred) {}
+
+    void Execute() override {
+        cisv_result_t *result = cisv_parse_file_batch(path_.c_str(), &config_);
+        if (!result) {
+            SetError("parse error: " + std::string(strerror(errno)));
+            return;
+        }
+
+        if (result->error_code != 0) {
+            std::string msg = result->error_message[0] ? result->error_message : "parse error";
+            if (msg.rfind("parse error", 0) != 0) {
+                msg = "parse error: " + msg;
+            }
+            SetError(msg);
+            cisv_result_free(result);
+            return;
+        }
+
+        rows_.reserve(result->row_count);
+        for (size_t i = 0; i < result->row_count; i++) {
+            cisv_row_t *row = &result->rows[i];
+            std::vector<std::string> out_row;
+            out_row.reserve(row->field_count);
+            for (size_t j = 0; j < row->field_count; j++) {
+                out_row.emplace_back(row->fields[j], row->field_lengths[j]);
+            }
+            rows_.emplace_back(std::move(out_row));
+        }
+
+        cisv_result_free(result);
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        Napi::Array out = Napi::Array::New(env, rows_.size());
+
+        for (size_t i = 0; i < rows_.size(); i++) {
+            Napi::Array row = Napi::Array::New(env, rows_[i].size());
+            for (size_t j = 0; j < rows_[i].size(); j++) {
+                const std::string &field = rows_[i][j];
+                row[j] = SafeNewString(env, field.c_str(), field.length());
+            }
+            out[i] = row;
+        }
+
+        deferred_.Resolve(out);
+    }
+
+    void OnError(const Napi::Error &e) override {
+        deferred_.Reject(e.Value());
+    }
+
+private:
+    std::string path_;
+    cisv_config config_;
+    Napi::Promise::Deferred deferred_;
+    std::vector<std::vector<std::string>> rows_;
+};
+
 } // namespace
 
 class CisvParser : public Napi::ObjectWrap<CisvParser> {
@@ -310,6 +453,8 @@ public:
         total_bytes_ = 0;
         is_destroyed_ = false;
         iterator_ = nullptr;
+        batch_result_ = nullptr;
+        stream_buffering_active_ = true;
 
         // Initialize configuration with defaults
         cisv_config_init(&config_);
@@ -503,6 +648,7 @@ public:
                 delete rc_;
                 rc_ = nullptr;
             }
+            clearBatchResult();
             is_destroyed_ = true;
         }
     }
@@ -528,25 +674,34 @@ public:
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // Clear previous data
-        rc_->rows.clear();
-        rc_->current.clear();
-        rc_->current_field_index = 0;
+        resetRowState();
 
-        // Set environment for JS transforms
-        rc_->env = env;
-
-        int result = cisv_parser_parse_file(parser_, path.c_str());
+        int result = 0;
+        if (!hasTransforms()) {
+            cisv_result_t *batch = cisv_parse_file_batch(path.c_str(), &config_);
+            if (!batch) {
+                throw Napi::Error::New(env, "parse error: " + std::string(strerror(errno)));
+            }
+            if (batch->error_code != 0) {
+                std::string msg = batch->error_message[0] ? batch->error_message : "parse error";
+                cisv_result_free(batch);
+                throw Napi::Error::New(env, msg);
+            }
+            clearBatchResult();
+            batch_result_ = batch;
+        } else {
+            // Set environment for JS transforms
+            rc_->env = env;
+            result = cisv_parser_parse_file(parser_, path.c_str());
+            // Clear the environment reference after parsing
+            rc_->env = nullptr;
+            if (result < 0) {
+                throw Napi::Error::New(env, "parse error: " + std::to_string(result));
+            }
+        }
 
         auto end = std::chrono::high_resolution_clock::now();
         parse_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
-        // Clear the environment reference after parsing
-        rc_->env = nullptr;
-
-        if (result < 0) {
-            throw Napi::Error::New(env, "parse error: " + std::to_string(result));
-        }
 
         return drainRows(env);
     }
@@ -565,22 +720,33 @@ public:
 
         std::string content = info[0].As<Napi::String>();
 
-        // Clear previous data
-        rc_->rows.clear();
-        rc_->current.clear();
-        rc_->current_field_index = 0;
+        resetRowState();
 
-        // Set environment for JS transforms
-        rc_->env = env;
+        if (!hasTransforms()) {
+            cisv_result_t *batch = cisv_parse_string_batch(content.c_str(), content.length(), &config_);
+            if (!batch) {
+                throw Napi::Error::New(env, "parse error: " + std::string(strerror(errno)));
+            }
+            if (batch->error_code != 0) {
+                std::string msg = batch->error_message[0] ? batch->error_message : "parse error";
+                cisv_result_free(batch);
+                throw Napi::Error::New(env, msg);
+            }
+            clearBatchResult();
+            batch_result_ = batch;
+        } else {
+            // Set environment for JS transforms
+            rc_->env = env;
 
-        // Write the string content as chunks
-        cisv_parser_write(parser_, (const uint8_t*)content.c_str(), content.length());
-        cisv_parser_end(parser_);
+            // Write the string content as chunks
+            cisv_parser_write(parser_, (const uint8_t*)content.c_str(), content.length());
+            cisv_parser_end(parser_);
+
+            // Clear the environment reference after parsing
+            rc_->env = nullptr;
+        }
 
         total_bytes_ = content.length();
-
-        // Clear the environment reference after parsing
-        rc_->env = nullptr;
 
         return drainRows(env);
     }
@@ -597,44 +763,95 @@ public:
             throw Napi::TypeError::New(env, "Expected one argument");
         }
 
+        // Streaming writes produce row-callback data, not batch results.
+        clearBatchResult();
+
         // Set environment for JS transforms
         rc_->env = env;
 
+        const uint8_t* chunk_data = nullptr;
+        size_t chunk_size = 0;
+        std::string chunk_storage;
+
         if (info[0].IsBuffer()) {
             auto buf = info[0].As<Napi::Buffer<uint8_t>>();
-            size_t buf_len = buf.Length();
-            // Check for overflow before adding to total_bytes_
-            if (buf_len > SIZE_MAX - total_bytes_) {
-                throw Napi::Error::New(env, "Total bytes would overflow");
-            }
-            cisv_parser_write(parser_, buf.Data(), buf_len);
-            total_bytes_ += buf_len;
-            return;
+            chunk_data = buf.Data();
+            chunk_size = buf.Length();
+        } else if (info[0].IsString()) {
+            chunk_storage = info[0].As<Napi::String>();
+            chunk_data = reinterpret_cast<const uint8_t*>(chunk_storage.data());
+            chunk_size = chunk_storage.size();
+        } else {
+            throw Napi::TypeError::New(env, "Expected Buffer or String");
         }
 
-        if (info[0].IsString()) {
-            std::string chunk = info[0].As<Napi::String>();
-            size_t chunk_size = chunk.size();
-            // Check for overflow before adding to total_bytes_
-            if (chunk_size > SIZE_MAX - total_bytes_) {
-                throw Napi::Error::New(env, "Total bytes would overflow");
-            }
-            cisv_parser_write(parser_, reinterpret_cast<const uint8_t*>(chunk.data()), chunk_size);
-            total_bytes_ += chunk_size;
-            return;
+        // Check for overflow before adding to total_bytes_
+        if (chunk_size > SIZE_MAX - total_bytes_) {
+            throw Napi::Error::New(env, "Total bytes would overflow");
         }
 
-        throw Napi::TypeError::New(env, "Expected Buffer or String");
+        // Fast streaming mode:
+        // Buffer chunks when no transforms/iterator are active and batch-parse on end().
+        // If buffered payload exceeds threshold, flush once to parser and continue streaming.
+        if (!hasTransforms() && iterator_ == nullptr) {
+            if (chunk_size > SIZE_MAX - pending_stream_.size()) {
+                throw Napi::Error::New(env, "Buffered stream size would overflow");
+            }
+
+            if (stream_buffering_active_) {
+                pending_stream_.append(reinterpret_cast<const char*>(chunk_data), chunk_size);
+                total_bytes_ += chunk_size;
+
+                if (pending_stream_.size() > kStreamBufferLimitBytes) {
+                    flushPendingStreamToParser();
+                    stream_buffering_active_ = false;
+                }
+                return;
+            }
+        } else if (!pending_stream_.empty()) {
+            flushPendingStreamToParser();
+            stream_buffering_active_ = false;
+        }
+
+        cisv_parser_write(parser_, chunk_data, chunk_size);
+        total_bytes_ += chunk_size;
     }
 
     void End(const Napi::CallbackInfo &info) {
-        if (!is_destroyed_) {
-            cisv_parser_end(parser_);
-            // Clear the environment reference after ending to prevent stale references
-            rc_->env = nullptr;
-            // Note: JS transforms stored in rc_->js_transforms remain valid
-            // as they are Persistent references managed by the addon lifecycle
+        if (is_destroyed_) {
+            return;
         }
+
+        if (stream_buffering_active_ && !pending_stream_.empty() &&
+            !hasTransforms() && iterator_ == nullptr &&
+            rc_ && rc_->rows.empty() && rc_->current.empty()) {
+            cisv_result_t *batch = cisv_parse_string_batch(
+                pending_stream_.data(), pending_stream_.size(), &config_);
+            if (!batch) {
+                throw Napi::Error::New(info.Env(), "parse error: " + std::string(strerror(errno)));
+            }
+            if (batch->error_code != 0) {
+                std::string msg = batch->error_message[0] ? batch->error_message : "parse error";
+                cisv_result_free(batch);
+                throw Napi::Error::New(info.Env(), msg);
+            }
+            clearBatchResult();
+            batch_result_ = batch;
+            pending_stream_.clear();
+            rc_->env = nullptr;
+            return;
+        }
+
+        if (!pending_stream_.empty()) {
+            flushPendingStreamToParser();
+            stream_buffering_active_ = false;
+        }
+
+        cisv_parser_end(parser_);
+        // Clear the environment reference after ending to prevent stale references
+        rc_->env = nullptr;
+        // Note: JS transforms stored in rc_->js_transforms remain valid
+        // as they are Persistent references managed by the addon lifecycle
     }
 
     Napi::Value GetRows(const Napi::CallbackInfo &info) {
@@ -642,16 +859,23 @@ public:
             Napi::Env env = info.Env();
             throw Napi::Error::New(env, "Parser has been destroyed");
         }
+        if (!pending_stream_.empty()) {
+            flushPendingStreamToParser();
+            stream_buffering_active_ = false;
+        }
         return drainRows(info.Env());
     }
 
     void Clear(const Napi::CallbackInfo &info) {
         if (!is_destroyed_ && rc_) {
+            clearBatchResult();
             rc_->rows.clear();
             rc_->current.clear();
             rc_->current_field_index = 0;
             total_bytes_ = 0;
             parse_time_ = 0;
+            pending_stream_.clear();
+            stream_buffering_active_ = true;
             // Also clear the environment reference
             rc_->env = nullptr;
         }
@@ -870,10 +1094,25 @@ Napi::Value TransformByName(const Napi::CallbackInfo &info) {
         // Handle JavaScript function transforms by name
         Napi::Function func = info[1].As<Napi::Function>();
 
-        // Add to the C transform pipeline by name
-        if (cisv_transform_pipeline_add_js_by_name(rc_->pipeline, field_name.c_str(), &func) < 0) {
-            throw Napi::Error::New(env, "Failed to add JS transform for field: " + field_name);
+        if (!rc_->pipeline || !rc_->pipeline->header_fields) {
+            throw Napi::Error::New(env,
+                "Header fields are not set. Call setHeaderFields([...]) before transformByName(..., fn).");
         }
+
+        int field_index = -1;
+        for (size_t i = 0; i < rc_->pipeline->header_count; i++) {
+            if (strcmp(rc_->pipeline->header_fields[i], field_name.c_str()) == 0) {
+                field_index = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (field_index < 0) {
+            throw Napi::Error::New(env, "Unknown field name: " + field_name);
+        }
+
+        // Store callback in the same map used by applyTransforms().
+        rc_->js_transforms[field_index] = Napi::Persistent(func);
 
     } else {
         throw Napi::TypeError::New(env, "Transform must be a string type or function");
@@ -1008,6 +1247,11 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
         }
 
         // Clear JavaScript transforms
+        for (auto &pair : rc_->js_transforms) {
+            if (!pair.second.IsEmpty()) {
+                pair.second.Reset();
+            }
+        }
         rc_->js_transforms.clear();
 
         // Clear C transforms - destroy and DON'T recreate pipeline yet
@@ -1033,17 +1277,31 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
 
         std::string path = info[0].As<Napi::String>();
 
-        // Create a promise
         auto deferred = Napi::Promise::Deferred::New(env);
 
-        // For simplicity, we'll use sync parsing here
-        // FIXME: In production, this should use worker threads
-        try {
-            Napi::Value result = ParseSync(info);
-            deferred.Resolve(result);
-        } catch (const Napi::Error& e) {
-            deferred.Reject(e.Value());
+        // Preserve behavior for transform-enabled parsers (native + JS transforms)
+        // until async transform execution is implemented.
+        bool has_c_transforms = rc_ && rc_->pipeline && rc_->pipeline->count > 0;
+        bool has_js_transforms = rc_ && !rc_->js_transforms.empty();
+        if (has_c_transforms || has_js_transforms) {
+            try {
+                Napi::Value result = ParseSync(info);
+                deferred.Resolve(result);
+            } catch (const Napi::Error &e) {
+                deferred.Reject(e.Value());
+            }
+            return deferred.Promise();
         }
+
+        // Use batch parser in a worker thread to avoid blocking the event loop.
+        cisv_config worker_config = config_;
+        worker_config.field_cb = nullptr;
+        worker_config.row_cb = nullptr;
+        worker_config.error_cb = nullptr;
+        worker_config.user = nullptr;
+
+        auto *worker = new ParseFileWorker(env, path, worker_config, deferred);
+        worker->Queue();
 
         return deferred.Promise();
     }
@@ -1090,10 +1348,22 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
         }
 
         Napi::Object stats = Napi::Object::New(env);
+        size_t row_count = 0;
+        size_t field_count = 0;
+        if (batch_result_) {
+            row_count = batch_result_->row_count;
+            if (batch_result_->row_count > 0) {
+                field_count = batch_result_->rows[0].field_count;
+            }
+        } else if (rc_) {
+            row_count = rc_->rows.size();
+            if (!rc_->rows.empty()) {
+                field_count = rc_->rows[0].size();
+            }
+        }
 
-        stats.Set("rowCount", Napi::Number::New(env, rc_ ? rc_->rows.size() : 0));
-        stats.Set("fieldCount", Napi::Number::New(env,
-            (rc_ && !rc_->rows.empty()) ? rc_->rows[0].size() : 0));
+        stats.Set("rowCount", Napi::Number::New(env, row_count));
+        stats.Set("fieldCount", Napi::Number::New(env, field_count));
         stats.Set("totalBytes", Napi::Number::New(env, total_bytes_));
         stats.Set("parseTime", Napi::Number::New(env, parse_time_));
         stats.Set("currentLine", Napi::Number::New(env,
@@ -1233,14 +1503,13 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
             throw Napi::Error::New(env, "Error reading CSV row");
         }
 
-        // Create array of strings for the row
-        Napi::Array row = Napi::Array::New(env, field_count);
+        napi_value row;
+        napi_create_array_with_length(env, field_count, &row);
         for (size_t i = 0; i < field_count; i++) {
-            // SECURITY: Use safe string creation to handle invalid UTF-8
-            row.Set(i, SafeNewString(env, fields[i], lengths[i]));
+            napi_set_element(env, row, i, SafeNewStringValue(env, fields[i], lengths[i]));
         }
 
-        return row;
+        return Napi::Value(env, row);
     }
 
     /**
@@ -1263,27 +1532,94 @@ Napi::Value RemoveTransformByName(const Napi::CallbackInfo &info) {
     }
 
 private:
+    void clearBatchResult() {
+        if (batch_result_) {
+            cisv_result_free(batch_result_);
+            batch_result_ = nullptr;
+        }
+    }
+
+    bool hasTransforms() const {
+        bool has_c_transforms = rc_ && rc_->pipeline && rc_->pipeline->count > 0;
+        bool has_js_transforms = rc_ && !rc_->js_transforms.empty();
+        return has_c_transforms || has_js_transforms;
+    }
+
+    void resetRowState() {
+        clearBatchResult();
+        pending_stream_.clear();
+        stream_buffering_active_ = true;
+        if (!rc_) return;
+        rc_->rows.clear();
+        rc_->current.clear();
+        rc_->current_field_index = 0;
+    }
+
+    void flushPendingStreamToParser() {
+        if (pending_stream_.empty()) {
+            return;
+        }
+        cisv_parser_write(
+            parser_,
+            reinterpret_cast<const uint8_t*>(pending_stream_.data()),
+            pending_stream_.size());
+        pending_stream_.clear();
+    }
+
+    void loadRowsFromBatch(const cisv_result_t *result) {
+        if (!rc_ || !result) return;
+        rc_->rows.clear();
+        rc_->rows.reserve(result->row_count);
+
+        for (size_t i = 0; i < result->row_count; i++) {
+            const cisv_row_t *row = &result->rows[i];
+            std::vector<std::string> out_row;
+            out_row.reserve(row->field_count);
+            for (size_t j = 0; j < row->field_count; j++) {
+                out_row.emplace_back(row->fields[j], row->field_lengths[j]);
+            }
+            rc_->rows.emplace_back(std::move(out_row));
+        }
+    }
+
     Napi::Value drainRows(Napi::Env env) {
+        if (batch_result_) {
+            napi_value rows;
+            napi_create_array_with_length(env, batch_result_->row_count, &rows);
+            for (size_t i = 0; i < batch_result_->row_count; ++i) {
+                const cisv_row_t *src_row = &batch_result_->rows[i];
+                napi_value row;
+                napi_create_array_with_length(env, src_row->field_count, &row);
+                for (size_t j = 0; j < src_row->field_count; ++j) {
+                    napi_set_element(env, row, j, SafeNewStringValue(env, src_row->fields[j], src_row->field_lengths[j]));
+                }
+                napi_set_element(env, rows, i, row);
+            }
+            return Napi::Value(env, rows);
+        }
+
         if (!rc_) {
             return Napi::Array::New(env, 0);
         }
 
-        Napi::Array rows = Napi::Array::New(env, rc_->rows.size());
+        napi_value rows;
+        napi_create_array_with_length(env, rc_->rows.size(), &rows);
 
         for (size_t i = 0; i < rc_->rows.size(); ++i) {
-            Napi::Array row = Napi::Array::New(env, rc_->rows[i].size());
+            napi_value row;
+            napi_create_array_with_length(env, rc_->rows[i].size(), &row);
             for (size_t j = 0; j < rc_->rows[i].size(); ++j) {
                 // SECURITY: Use safe string creation to handle invalid UTF-8 in CSV data
                 const std::string& field = rc_->rows[i][j];
-                row[j] = SafeNewString(env, field.c_str(), field.length());
+                napi_set_element(env, row, j, SafeNewStringValue(env, field.c_str(), field.length()));
             }
-            rows[i] = row;
+            napi_set_element(env, rows, i, row);
         }
 
         // Don't clear here if we want to keep data for multiple reads
         // rc_->rows.clear();
 
-        return rows;
+        return Napi::Value(env, rows);
     }
 
     cisv_parser *parser_;
@@ -1293,6 +1629,10 @@ private:
     double parse_time_;
     bool is_destroyed_;
     cisv_iterator_t *iterator_;  // For row-by-row iteration
+    cisv_result_t *batch_result_;
+    std::string pending_stream_;
+    bool stream_buffering_active_;
+    static constexpr size_t kStreamBufferLimitBytes = 8 * 1024 * 1024;
 };
 
 // Initialize all exports

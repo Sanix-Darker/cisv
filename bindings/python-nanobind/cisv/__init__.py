@@ -18,7 +18,7 @@ from ._core import (
     CisvIterator,
 )
 
-__version__ = '0.2.0'
+__version__ = '0.2.6'
 __all__ = [
     'parse_file',
     'parse_file_fast',

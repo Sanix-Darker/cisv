@@ -1,0 +1,136 @@
+name: Benchmark Python
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: benchmark-python-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-python:
+    name: Python Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'benchmarks-python'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3; do
+            pip install --quiet pandas polars pyarrow && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "Failed to install pandas/polars/pyarrow after retries"
+              exit 1
+            fi
+            sleep 5
+          done
+          python - << 'PY'
+import importlib
+for mod in ("pandas", "polars", "pyarrow"):
+    importlib.import_module(mod)
+print("Python benchmark dependencies are available")
+PY
+
+      - name: Run Python benchmarks
+        run: |
+          export CI=true
+          export BENCH_TIMEOUT=300
+          export GITHUB_SHA="${{ github.sha }}"
+          export GITHUB_REF_NAME="${{ github.ref_name }}"
+          echo "Running benchmark script from commit: $(git rev-parse HEAD)"
+
+          bash ./scripts/benchmark_cli.sh install --python 2>&1 | tee install-python.log
+          bash ./scripts/benchmark_cli.sh benchmark --python > BENCHMARKS_PYTHON.md 2>benchmark-python.log
+          cat benchmark-python.log
+
+      - name: Commit and push benchmark report
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add BENCHMARKS_PYTHON.md
+          git commit -m "Update Python benchmark results [skip ci]" || exit 0
+          git stash push --include-untracked --keep-index -m "benchmark-python-pre-rebase" || true
+          git pull --rebase origin "${HEAD_REF}"
+          git push origin "${HEAD_REF}" || true
+
+      - name: Comment PR with summary
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- cisv-benchmark:python -->';
+            const header = '## [PYTHON] CISV BENCHMARK';
+            const report = 'BENCHMARKS_PYTHON.md';
+            const headRef = context.payload.pull_request.head.ref;
+            if (fs.existsSync(report)) {
+              const content = fs.readFileSync(report, 'utf8');
+              const lines = content.split('\n').slice(0, 50);
+              let summary = `${marker}\n${header}\n\n${lines.join('\n')}\n\n---\n\n`;
+              summary += `> Full results: [${report}](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${headRef}/${report})\n`;
+
+              const { data: comments } = await github.rest.issues.listComments({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+
+              const existing = comments.find(c =>
+                c.user &&
+                c.user.type === 'Bot' &&
+                typeof c.body === 'string' &&
+                (c.body.includes(marker) || c.body.includes(report))
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body: summary
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: summary
+                });
+              }
+            } else {
+              const fallback = `${marker}\n${header}\n\nBenchmark ran, but ${report} was not found in the workspace. Check workflow logs.`;
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: fallback
+              });
+            }

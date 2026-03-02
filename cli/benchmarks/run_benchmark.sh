@@ -123,10 +123,15 @@ run_benchmark() {
             local end=$(date +%s.%N 2>/dev/null || date +%s)
             local elapsed=$(awk "BEGIN {print $end - $start}")
             times+=("$elapsed")
-            # Try to get row count from output (for counting operations)
-            local trimmed=$(echo "$output" | tr -d '[:space:]')
-            if [[ "$trimmed" =~ ^[0-9]+$ ]]; then
-                row_count="$trimmed"
+            # Only infer row count from command output in "count" benchmarks.
+            # For "select", tools output CSV text and numeric-only extraction can
+            # mis-detect values from payload lines.
+            if [ "$category" = "count" ]; then
+                local trimmed
+                trimmed=$(echo "$output" | tr -d '[:space:]')
+                if [[ "$trimmed" =~ ^[0-9]+$ ]]; then
+                    row_count="$trimmed"
+                fi
             fi
         else
             echo "  Error: command failed"

@@ -177,6 +177,16 @@ void cisv_transform_pipeline_destroy(cisv_transform_pipeline_t *pipeline) {
     free(pipeline->header_hash_table);
     pipeline->header_hash_table = NULL;
 
+    // Free header field names
+    if (pipeline->header_fields) {
+        for (size_t i = 0; i < pipeline->header_count; i++) {
+            free(pipeline->header_fields[i]);
+        }
+        free(pipeline->header_fields);
+        pipeline->header_fields = NULL;
+        pipeline->header_count = 0;
+    }
+
     free(pipeline);
 }
 

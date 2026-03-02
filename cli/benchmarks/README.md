@@ -133,6 +133,8 @@ cut                  0.112s      76.8 MB/s      100,001
 Benchmark complete!
 ```
 
+`Rows` in `count` mode comes from tool output when numeric. `Rows` in `select` mode is normalized to the expected generated row count for comparability.
+
 ## Benchmark Categories
 
 ### Row Counting

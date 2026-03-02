@@ -41,6 +41,23 @@ static inline cisv_parser_object *cisv_parser_from_obj(zend_object *obj) {
 
 #define Z_CISV_PARSER_P(zv) cisv_parser_from_obj(Z_OBJ_P(zv))
 
+static void php_cisv_result_to_zval_rows(zval *rows, const cisv_result_t *result) {
+    array_init_size(rows, result ? (uint32_t)result->row_count : 0);
+    if (!result) {
+        return;
+    }
+
+    for (size_t i = 0; i < result->row_count; i++) {
+        const cisv_row_t *r = &result->rows[i];
+        zval row;
+        array_init_size(&row, (uint32_t)r->field_count);
+        for (size_t j = 0; j < r->field_count; j++) {
+            add_next_index_stringl(&row, r->fields[j], r->field_lengths[j]);
+        }
+        add_next_index_zval(rows, &row);
+    }
+}
+
 /* Callbacks */
 static void php_cisv_field_callback(void *user, const char *data, size_t len) {
     cisv_parser_object *obj = (cisv_parser_object *)user;
@@ -188,23 +205,20 @@ PHP_METHOD(CisvParser, parseFile) {
 
     cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
 
-    /* Clear previous data - properly reinitialize embedded zvals */
-    zval_ptr_dtor(&intern->rows);
-    ZVAL_UNDEF(&intern->rows);
-    array_init(&intern->rows);
-    zval_ptr_dtor(&intern->current_row);
-    ZVAL_UNDEF(&intern->current_row);
-    array_init(&intern->current_row);
-
-    /* Parse file */
-    int result = cisv_parser_parse_file(intern->parser, filename);
-    if (result < 0) {
-        zend_throw_exception_ex(zend_ce_exception, 0, "Failed to parse file: %s", strerror(-result));
+    cisv_result_t *result = cisv_parse_file_batch(filename, &intern->config);
+    if (!result) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Failed to parse file: %s", strerror(errno));
         return;
     }
 
-    /* Return rows */
-    RETURN_ZVAL(&intern->rows, 1, 0);
+    if (result->error_code != 0) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
+        cisv_result_free(result);
+        return;
+    }
+
+    php_cisv_result_to_zval_rows(return_value, result);
+    cisv_result_free(result);
 }
 
 /* PHP_METHOD(CisvParser, parseString) */
@@ -218,20 +232,20 @@ PHP_METHOD(CisvParser, parseString) {
 
     cisv_parser_object *intern = Z_CISV_PARSER_P(ZEND_THIS);
 
-    /* Clear previous data - properly reinitialize embedded zvals */
-    zval_ptr_dtor(&intern->rows);
-    ZVAL_UNDEF(&intern->rows);
-    array_init(&intern->rows);
-    zval_ptr_dtor(&intern->current_row);
-    ZVAL_UNDEF(&intern->current_row);
-    array_init(&intern->current_row);
+    cisv_result_t *result = cisv_parse_string_batch(csv, csv_len, &intern->config);
+    if (!result) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Failed to parse string: %s", strerror(errno));
+        return;
+    }
 
-    /* Parse string */
-    cisv_parser_write(intern->parser, (const uint8_t *)csv, csv_len);
-    cisv_parser_end(intern->parser);
+    if (result->error_code != 0) {
+        zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
+        cisv_result_free(result);
+        return;
+    }
 
-    /* Return rows */
-    RETURN_ZVAL(&intern->rows, 1, 0);
+    php_cisv_result_to_zval_rows(return_value, result);
+    cisv_result_free(result);
 }
 
 /* PHP_METHOD(CisvParser, countRows) */
@@ -330,29 +344,32 @@ PHP_METHOD(CisvParser, parseFileParallel) {
         return;
     }
 
+    size_t total_rows = 0;
+    for (int chunk = 0; chunk < result_count; chunk++) {
+        cisv_result_t *result = results[chunk];
+        if (!result) continue;
+        if (result->error_code != 0) {
+            zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
+            cisv_results_free(results, result_count);
+            return;
+        }
+        total_rows += result->row_count;
+    }
+
     /* Build result array from all chunks */
     zval rows;
-    array_init(&rows);
+    array_init_size(&rows, (uint32_t)total_rows);
 
     for (int chunk = 0; chunk < result_count; chunk++) {
         cisv_result_t *result = results[chunk];
         if (!result) continue;
 
-        if (result->error_code != 0) {
-            zval_ptr_dtor(&rows);
-            zend_throw_exception_ex(zend_ce_exception, 0, "Parse error: %s", result->error_message);
-            cisv_results_free(results, result_count);
-            return;
-        }
-
         for (size_t i = 0; i < result->row_count; i++) {
             zval row;
-            array_init(&row);
             cisv_row_t *r = &result->rows[i];
+            array_init_size(&row, (uint32_t)r->field_count);
             for (size_t j = 0; j < r->field_count; j++) {
-                zval field;
-                ZVAL_STRINGL(&field, r->fields[j], r->field_lengths[j]);
-                add_next_index_zval(&row, &field);
+                add_next_index_stringl(&row, r->fields[j], r->field_lengths[j]);
             }
             add_next_index_zval(&rows, &row);
         }
@@ -468,11 +485,9 @@ PHP_METHOD(CisvParser, fetchRow) {
     }
 
     /* Build PHP array */
-    array_init(return_value);
+    array_init_size(return_value, (uint32_t)field_count);
     for (size_t i = 0; i < field_count; i++) {
-        zval field;
-        ZVAL_STRINGL(&field, fields[i], lengths[i]);
-        add_next_index_zval(return_value, &field);
+        add_next_index_stringl(return_value, fields[i], lengths[i]);
     }
 }
 

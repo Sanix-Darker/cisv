@@ -227,6 +227,12 @@ static nb::tuple parse_file_raw(
     if (path.empty()) {
         throw std::invalid_argument("Path cannot be empty");
     }
+    if (delimiter.empty() || delimiter.size() > 1) {
+        throw std::invalid_argument("Delimiter must be a single character");
+    }
+    if (quote.empty() || quote.size() > 1) {
+        throw std::invalid_argument("Quote must be a single character");
+    }
 
     // Setup config
     cisv_config config;
@@ -370,6 +376,12 @@ static nb::tuple parse_file_count_only(
 ) {
     if (path.empty()) {
         throw std::invalid_argument("Path cannot be empty");
+    }
+    if (delimiter.empty() || delimiter.size() > 1) {
+        throw std::invalid_argument("Delimiter must be a single character");
+    }
+    if (quote.empty() || quote.size() > 1) {
+        throw std::invalid_argument("Quote must be a single character");
     }
 
     // Setup config

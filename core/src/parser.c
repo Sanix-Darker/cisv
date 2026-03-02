@@ -64,11 +64,18 @@ typedef struct cisv_parser {
     char comment;
     int from_line;
     int to_line;
+    size_t max_row_size;
+    bool skip_lines_with_error;
+    bool has_row_controls;
+    void (*parse_impl)(struct cisv_parser *p);
 
     // Statistics
     size_t rows;
     size_t fields;
     size_t current_row_fields;
+    size_t current_row_size;
+    bool skip_current_row;
+    bool row_is_comment;
 
     // Buffer for accumulating quoted field content
     uint8_t *quote_buffer __attribute__((aligned(64)));
@@ -346,6 +353,38 @@ static inline void yield_field(cisv_parser *p, const uint8_t *start, const uint8
     }
 
     if (__builtin_expect(start < end || !p->skip_empty_lines, 1)) {
+        size_t field_len = (size_t)(end - start);
+
+        if (__builtin_expect(p->has_row_controls, 0)) {
+            // Detect comment lines from the first unquoted field.
+            if (p->current_row_fields == 0) {
+                p->row_is_comment = (field_len > 0 && start[0] == (uint8_t)p->comment && p->comment != 0);
+                if (p->row_is_comment) {
+                    p->skip_current_row = true;
+                }
+            }
+
+            if (!p->skip_current_row && p->max_row_size > 0) {
+                size_t next_size = p->current_row_size + field_len + 1;  // +1 delimiter/newline budget
+                if (next_size > p->max_row_size) {
+                    if (p->ecb) {
+                        p->ecb(p->user, p->line_num + 1, "Row exceeds max_row_size");
+                    }
+                    if (p->skip_lines_with_error) {
+                        p->skip_current_row = true;
+                    }
+                }
+                p->current_row_size = next_size;
+            }
+
+            if (p->skip_current_row) {
+                if (__builtin_expect(p->streaming_mode, 0)) {
+                    p->stream_buffer_pos = 0;
+                }
+                return;
+            }
+        }
+
         p->fcb(p->user, (const char*)start, end - start);
         p->fields++;
         p->current_row_fields++;
@@ -372,6 +411,33 @@ static inline void yield_quoted_field(cisv_parser *p) {
     }
 
     if (__builtin_expect(start < end || !p->skip_empty_lines, 1)) {
+        size_t field_len = (size_t)(end - start);
+
+        if (__builtin_expect(p->has_row_controls, 0)) {
+            // Quoted first fields are never comment-line prefixes.
+            if (p->current_row_fields == 0) {
+                p->row_is_comment = false;
+            }
+
+            if (!p->skip_current_row && p->max_row_size > 0) {
+                size_t next_size = p->current_row_size + field_len + 1;  // +1 delimiter/newline budget
+                if (next_size > p->max_row_size) {
+                    if (p->ecb) {
+                        p->ecb(p->user, p->line_num + 1, "Row exceeds max_row_size");
+                    }
+                    if (p->skip_lines_with_error) {
+                        p->skip_current_row = true;
+                    }
+                }
+                p->current_row_size = next_size;
+            }
+
+            if (p->skip_current_row) {
+                p->quote_buffer_pos = 0;
+                return;
+            }
+        }
+
         p->fcb(p->user, (const char*)start, end - start);
         p->fields++;
         p->current_row_fields++;
@@ -380,13 +446,55 @@ static inline void yield_quoted_field(cisv_parser *p) {
     p->quote_buffer_pos = 0;
 }
 
+// Flush buffered streaming data as a complete field at end-of-stream.
+// We cannot call yield_field() directly here because it would re-append data
+// to stream_buffer while streaming_mode is enabled.
+static inline void yield_stream_buffer_field(cisv_parser *p) {
+    if (!p->fcb || p->stream_buffer_pos == 0) return;
+
+    const uint8_t *start = p->stream_buffer;
+    const uint8_t *end = p->stream_buffer + p->stream_buffer_pos;
+
+    if (__builtin_expect(p->trim, 0)) {
+        while (start < end && __builtin_expect(is_ws(*start), 0)) start++;
+        while (start < end && __builtin_expect(is_ws(*(end-1)), 0)) end--;
+    }
+
+    if (__builtin_expect(start < end || !p->skip_empty_lines, 1)) {
+        p->fcb(p->user, (const char*)start, end - start);
+        p->fields++;
+        p->current_row_fields++;
+    }
+
+    p->stream_buffer_pos = 0;
+}
+
 static inline void yield_row(cisv_parser *p) {
     // SECURITY: Protect against line number overflow (2+ billion rows)
     if (__builtin_expect(p->line_num < INT_MAX, 1)) {
         p->line_num++;
     }
+    // Drop rows marked as invalid when skip_lines_with_error is enabled.
+    if (p->skip_current_row) {
+        p->skip_current_row = false;
+        p->current_row_fields = 0;
+        p->current_row_size = 0;
+        p->row_is_comment = false;
+        return;
+    }
+
+    // Skip comment lines.
+    if (p->row_is_comment) {
+        p->current_row_fields = 0;
+        p->current_row_size = 0;
+        p->row_is_comment = false;
+        return;
+    }
+
     // Skip empty rows if skip_empty_lines is enabled
     if (p->skip_empty_lines && p->current_row_fields == 0) {
+        p->current_row_size = 0;
+        p->row_is_comment = false;
         return;
     }
     if (p->rcb && p->line_num >= p->from_line &&
@@ -395,6 +503,8 @@ static inline void yield_row(cisv_parser *p) {
     }
     p->rows++;
     p->current_row_fields = 0;
+    p->current_row_size = 0;
+    p->row_is_comment = false;
 }
 
 // Forward declare all parse functions
@@ -412,6 +522,44 @@ static void parse_sse2(cisv_parser *p);
 #endif
 // Scalar fallback for platforms without SIMD
 static void parse_scalar(cisv_parser *p);
+
+static inline void parse_dispatch(cisv_parser *p) {
+    if (p->parse_impl) {
+        p->parse_impl(p);
+        return;
+    }
+
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+#ifdef __AVX512F__
+    if (__builtin_cpu_supports("avx512f")) {
+        p->parse_impl = parse_avx512;
+        p->parse_impl(p);
+        return;
+    }
+#endif
+#ifdef __AVX2__
+    if (__builtin_cpu_supports("avx2")) {
+        p->parse_impl = parse_avx2;
+        p->parse_impl(p);
+        return;
+    }
+#endif
+#if defined(__SSE2__) && !defined(__AVX2__) && !defined(__AVX512F__)
+    p->parse_impl = parse_sse2;
+    p->parse_impl(p);
+    return;
+#endif
+#endif
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+    p->parse_impl = parse_neon;
+    p->parse_impl(p);
+    return;
+#endif
+
+    p->parse_impl = parse_scalar;
+    p->parse_impl(p);
+}
 
 #ifdef __AVX512F__
 // AVX-512 ultra-fast path
@@ -562,9 +710,9 @@ static void parse_avx512(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         // SECURITY: Report unterminated quote at EOF
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
@@ -575,7 +723,7 @@ static void parse_avx512(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -734,9 +882,9 @@ static void parse_avx2(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         // SECURITY: Report unterminated quote at EOF
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
@@ -747,7 +895,7 @@ static void parse_avx2(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -925,9 +1073,9 @@ static void parse_neon(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
         }
@@ -936,7 +1084,7 @@ static void parse_neon(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -1093,9 +1241,9 @@ static void parse_sse2(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
         }
@@ -1104,7 +1252,7 @@ static void parse_sse2(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -1287,9 +1435,9 @@ static void parse_scalar(cisv_parser *p) {
         }
     }
 
-    if (p->state == S_NORMAL && p->field_start < p->end) {
+    if (!p->streaming_mode && p->state == S_NORMAL && p->field_start < p->end) {
         yield_field(p, p->field_start, p->end);
-    } else if (p->state == S_QUOTED) {
+    } else if (!p->streaming_mode && p->state == S_QUOTED) {
         // SECURITY: Report unterminated quote at EOF
         if (p->ecb) {
             p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
@@ -1300,7 +1448,7 @@ static void parse_scalar(cisv_parser *p) {
         }
     }
 
-    if (p->current_row_fields > 0) {
+    if (!p->streaming_mode && p->current_row_fields > 0) {
         yield_row(p);
     }
 }
@@ -1347,6 +1495,9 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     p->comment = config->comment;
     p->from_line = config->from_line;
     p->to_line = config->to_line;
+    p->max_row_size = config->max_row_size;
+    p->skip_lines_with_error = config->skip_lines_with_error;
+    p->has_row_controls = (config->max_row_size > 0 || config->comment != 0);
 
     p->fcb = config->field_cb;
     p->rcb = config->row_cb;
@@ -1356,6 +1507,10 @@ cisv_parser *cisv_parser_create_with_config(const cisv_config *config) {
     p->fd = -1;
     p->line_num = 0;
     p->current_row_fields = 0;
+    p->current_row_size = 0;
+    p->skip_current_row = false;
+    p->row_is_comment = false;
+    p->parse_impl = NULL;
 
     // Allocate quote buffer with cache-line alignment for SIMD access
     // Start at 64KB to avoid early reallocations and match MIN_BUFFER_INCREMENT
@@ -1401,6 +1556,20 @@ void cisv_parser_destroy(cisv_parser *p) {
 }
 
 int cisv_parser_parse_file(cisv_parser *p, const char *path) {
+    if (!p || !path) return -EINVAL;
+
+    // If this parser instance was used previously, release old resources
+    // before opening a new file.
+    if (p->base) {
+        munmap(p->base, p->size);
+        p->base = NULL;
+        p->size = 0;
+    }
+    if (p->fd >= 0) {
+        close(p->fd);
+        p->fd = -1;
+    }
+
     p->fd = open(path, O_RDONLY);
     if (p->fd < 0) return -errno;
 
@@ -1451,19 +1620,22 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
     p->line_num = 0;
     p->current_row_fields = 0;
     p->quote_buffer_pos = 0;
+    p->stream_buffer_pos = 0;
+    p->streaming_mode = false;
+    p->current_row_size = 0;
+    p->skip_current_row = false;
+    p->row_is_comment = false;
 
-    // Dispatch to best available SIMD implementation
-#ifdef __AVX512F__
-    parse_avx512(p);
-#elif defined(__AVX2__)
-    parse_avx2(p);
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    parse_neon(p);
-#elif defined(__SSE2__)
-    parse_sse2(p);
-#else
-    parse_scalar(p);
-#endif
+    // Runtime ISA dispatch with scalar fallback.
+    parse_dispatch(p);
+
+    // Release file resources immediately after parse to avoid descriptor
+    // retention when parser objects are reused.
+    munmap(p->base, p->size);
+    p->base = NULL;
+    p->size = 0;
+    close(p->fd);
+    p->fd = -1;
 
     return 0;
 }
@@ -1473,8 +1645,77 @@ int cisv_parser_parse_file(cisv_parser *p, const char *path) {
 static size_t count_rows_internal(const uint8_t *data, size_t size, char quote_char) {
     size_t count = 0;
     bool in_quote = false;
+    size_t i = 0;
 
-    for (size_t i = 0; i < size; i++) {
+    // Unrolled no-quote fast path (16 bytes/lane) for common datasets.
+    while (!in_quote && i + 16 <= size) {
+        uint64_t word0;
+        uint64_t word1;
+        memcpy(&word0, data + i, sizeof(word0));
+        memcpy(&word1, data + i + 8, sizeof(word1));
+
+        uint64_t quote_mask0 = swar_has_byte(word0, (uint8_t)quote_char);
+        uint64_t quote_mask1 = swar_has_byte(word1, (uint8_t)quote_char);
+        if (quote_mask0 | quote_mask1) {
+            break;
+        }
+
+        uint64_t nl_mask0 = swar_has_byte(word0, '\n');
+        uint64_t nl_mask1 = swar_has_byte(word1, '\n');
+        count += (size_t)__builtin_popcountll(nl_mask0);
+        count += (size_t)__builtin_popcountll(nl_mask1);
+        i += 16;
+    }
+
+    // SWAR-accelerated quote-aware counting for remaining bytes.
+    while (i + 8 <= size) {
+        uint64_t word;
+        memcpy(&word, data + i, sizeof(word));
+
+        if (in_quote) {
+            // While in quoted mode, only quote bytes can change state.
+            uint64_t quote_mask = swar_has_byte(word, (uint8_t)quote_char);
+            if (!quote_mask) {
+                i += 8;
+                continue;
+            }
+        } else {
+            uint64_t quote_mask = swar_has_byte(word, (uint8_t)quote_char);
+            uint64_t nl_mask = swar_has_byte(word, '\n');
+
+            // Fast path: no quotes in this lane, count all newlines via popcount.
+            if (!quote_mask) {
+                count += (size_t)__builtin_popcountll(nl_mask);
+                i += 8;
+                continue;
+            }
+        }
+
+        // Slow path for mixed/special lanes.
+        for (size_t j = 0; j < 8; j++) {
+            uint8_t c = data[i + j];
+            if (in_quote) {
+                if (c == (uint8_t)quote_char) {
+                    // Look ahead for escaped quote ("")
+                    if (i + j + 1 < size && data[i + j + 1] == (uint8_t)quote_char) {
+                        j++;
+                    } else {
+                        in_quote = false;
+                    }
+                }
+            } else {
+                if (c == '\n') {
+                    count++;
+                } else if (c == (uint8_t)quote_char) {
+                    in_quote = true;
+                }
+            }
+        }
+        i += 8;
+    }
+
+    // Scalar tail
+    for (; i < size; i++) {
         uint8_t c = data[i];
         if (in_quote) {
             if (c == (uint8_t)quote_char) {
@@ -1485,7 +1726,6 @@ static size_t count_rows_internal(const uint8_t *data, size_t size, char quote_c
                     in_quote = false;
                 }
             }
-            // Newlines inside quotes are NOT row boundaries
         } else {
             if (c == '\n') {
                 count++;
@@ -1519,13 +1759,18 @@ size_t cisv_parser_count_rows(const char *path) {
         return 0;
     }
 
-    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    int flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    flags |= MAP_POPULATE;
+#endif
+
+    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, flags, fd, 0);
     if (base == MAP_FAILED) {
         close(fd);
         return 0;
     }
 
-    madvise(base, st.st_size, MADV_SEQUENTIAL);
+    madvise(base, st.st_size, MADV_SEQUENTIAL | MADV_WILLNEED);
 
     size_t count = count_rows_internal(base, st.st_size, '"');
 
@@ -1551,13 +1796,18 @@ size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *c
         return 0;
     }
 
-    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    int flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    flags |= MAP_POPULATE;
+#endif
+
+    uint8_t *base = (uint8_t*)mmap(NULL, st.st_size, PROT_READ, flags, fd, 0);
     if (base == MAP_FAILED) {
         close(fd);
         return 0;
     }
 
-    madvise(base, st.st_size, MADV_SEQUENTIAL);
+    madvise(base, st.st_size, MADV_SEQUENTIAL | MADV_WILLNEED);
 
     size_t count = count_rows_internal(base, st.st_size, config->quote);
 
@@ -1567,6 +1817,8 @@ size_t cisv_parser_count_rows_with_config(const char *path, const cisv_config *c
 }
 
 int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
+    if (!p || (!chunk && len > 0)) return -EINVAL;
+
     // Enable streaming mode - fields may span chunks
     p->streaming_mode = true;
 
@@ -1574,18 +1826,7 @@ int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
     p->end = chunk + len;
     p->field_start = p->cur;
 
-    // Dispatch to best available SIMD implementation
-#ifdef __AVX512F__
-    parse_avx512(p);
-#elif defined(__AVX2__)
-    parse_avx2(p);
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    parse_neon(p);
-#elif defined(__SSE2__)
-    parse_sse2(p);
-#else
-    parse_scalar(p);
-#endif
+    parse_dispatch(p);
 
     // After parsing, buffer any partial unquoted field for next chunk
     // (quoted fields are already handled by quote_buffer)
@@ -1601,10 +1842,31 @@ int cisv_parser_write(cisv_parser *p, const uint8_t *chunk, size_t len) {
 }
 
 void cisv_parser_end(cisv_parser *p) {
+    if (!p) return;
+
+    if (p->streaming_mode) {
+        if (p->state == S_NORMAL && p->stream_buffer_pos > 0) {
+            yield_stream_buffer_field(p);
+        } else if (p->state == S_QUOTED && p->quote_buffer_pos > 0) {
+            if (p->ecb) {
+                p->ecb(p->user, p->line_num, "Unterminated quoted field at EOF");
+            }
+            yield_quoted_field(p);
+        }
+        if (p->current_row_fields > 0) {
+            yield_row(p);
+        }
+        p->streaming_mode = false;
+        return;
+    }
+
     if (p->state == S_NORMAL && p->field_start && p->field_start < p->cur) {
         yield_field(p, p->field_start, p->cur);
     } else if (p->state == S_QUOTED && p->quote_buffer_pos > 0) {
         yield_quoted_field(p);
+    }
+    if (p->current_row_fields > 0) {
+        yield_row(p);
     }
 }
 
@@ -1667,10 +1929,31 @@ void cisv_mmap_close(cisv_mmap_file_t *file) {
     free(file);
 }
 
-cisv_chunk_t *cisv_split_chunks(
+// Count occurrences of a byte using SWAR masks (8 bytes per iteration).
+// Used by chunk splitter for fast quote parity checks.
+static inline size_t count_char_swar(const uint8_t *data, size_t len, uint8_t target) {
+    size_t count = 0;
+    size_t i = 0;
+
+    while (i + 8 <= len) {
+        uint64_t word;
+        memcpy(&word, data + i, sizeof(word));
+        count += (size_t)__builtin_popcountll(swar_has_byte(word, target));
+        i += 8;
+    }
+
+    for (; i < len; i++) {
+        if (data[i] == target) count++;
+    }
+
+    return count;
+}
+
+static cisv_chunk_t *split_chunks_with_quote(
     const cisv_mmap_file_t *file,
     int num_chunks,
-    int *chunk_count
+    int *chunk_count,
+    char quote_char
 ) {
     if (!file || !file->data || num_chunks <= 0 || !chunk_count) {
         return NULL;
@@ -1708,10 +1991,11 @@ cisv_chunk_t *cisv_split_chunks(
 
             // Count quote characters from chunk_start to target_end
             // to determine if we're inside a quoted field
-            size_t quote_count = 0;
-            for (const uint8_t *q = chunk_start; q < target_end; q++) {
-                if (*q == '"') quote_count++;
-            }
+            size_t quote_count = count_char_swar(
+                chunk_start,
+                (size_t)(target_end - chunk_start),
+                (uint8_t)quote_char
+            );
 
             if (quote_count & 1) {
                 // Odd number of quotes: we're inside a quoted field.
@@ -1719,8 +2003,8 @@ cisv_chunk_t *cisv_split_chunks(
                 const uint8_t *scan = target_end;
                 bool in_q = true;
                 while (scan < end && in_q) {
-                    if (*scan == '"') {
-                        if (scan + 1 < end && *(scan + 1) == '"') {
+                    if (*scan == (uint8_t)quote_char) {
+                        if (scan + 1 < end && *(scan + 1) == (uint8_t)quote_char) {
                             scan += 2;  // Skip escaped quote
                             continue;
                         }
@@ -1747,15 +2031,15 @@ cisv_chunk_t *cisv_split_chunks(
             }
         }
 
-        // Count rows in this chunk using quote-aware scalar loop
-        // chunk_start is always at a row boundary, so initial state is outside quotes
+        // Count rows in this chunk using quote-aware scalar loop.
+        // chunk_start is always at a row boundary, so initial state is outside quotes.
         size_t row_count = 0;
         bool in_quote = false;
         for (const uint8_t *p = chunk_start; p < target_end; p++) {
             uint8_t c = *p;
             if (in_quote) {
-                if (c == '"') {
-                    if (p + 1 < target_end && *(p + 1) == '"') {
+                if (c == (uint8_t)quote_char) {
+                    if (p + 1 < target_end && *(p + 1) == (uint8_t)quote_char) {
                         p++;  // Skip escaped quote
                     } else {
                         in_quote = false;
@@ -1764,7 +2048,7 @@ cisv_chunk_t *cisv_split_chunks(
             } else {
                 if (c == '\n') {
                     row_count++;
-                } else if (c == '"') {
+                } else if (c == (uint8_t)quote_char) {
                     in_quote = true;
                 }
             }
@@ -1783,6 +2067,14 @@ cisv_chunk_t *cisv_split_chunks(
     return chunks;
 }
 
+cisv_chunk_t *cisv_split_chunks(
+    const cisv_mmap_file_t *file,
+    int num_chunks,
+    int *chunk_count
+) {
+    return split_chunks_with_quote(file, num_chunks, chunk_count, '"');
+}
+
 int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
     if (!p || !chunk || !chunk->start) return -1;
 
@@ -1793,19 +2085,11 @@ int cisv_parse_chunk(cisv_parser *p, const cisv_chunk_t *chunk) {
     p->state = S_NORMAL;
     p->quote_buffer_pos = 0;
     p->current_row_fields = 0;
+    p->current_row_size = 0;
+    p->skip_current_row = false;
+    p->row_is_comment = false;
 
-    // Dispatch to best available SIMD implementation
-#ifdef __AVX512F__
-    parse_avx512(p);
-#elif defined(__AVX2__)
-    parse_avx2(p);
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-    parse_neon(p);
-#elif defined(__SSE2__)
-    parse_sse2(p);
-#else
-    parse_scalar(p);
-#endif
+    parse_dispatch(p);
 
     return 0;
 }
@@ -1856,7 +2140,12 @@ static inline bool batch_ensure_fields(cisv_result_t *r, size_t needed) {
     if (!new_fields) return false;
 
     size_t *new_lengths = realloc(r->all_lengths, new_cap * sizeof(size_t));
-    if (!new_lengths) return false;
+    if (!new_lengths) {
+        // Preserve the successful realloc result so ownership is not lost
+        // if the second growth step fails.
+        r->all_fields = new_fields;
+        return false;
+    }
 
     r->all_fields = new_fields;
     r->all_lengths = new_lengths;
@@ -2171,13 +2460,14 @@ typedef struct {
     const cisv_chunk_t *chunk;
     const cisv_config *config;
     cisv_result_t *result;
+    size_t chunk_size_hint;
 } ParallelParseArg;
 
 // Thread function for parallel parsing
 static void *parallel_parse_thread(void *arg) {
     ParallelParseArg *parg = (ParallelParseArg *)arg;
 
-    cisv_result_t *result = batch_result_create();
+    cisv_result_t *result = batch_result_create_with_hint(parg->chunk_size_hint);
     if (!result) {
         parg->result = NULL;
         return NULL;
@@ -2251,10 +2541,40 @@ cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *co
 
     // Split into chunks
     int chunk_count;
-    cisv_chunk_t *chunks = cisv_split_chunks(mmap_file, num_threads, &chunk_count);
+    char quote_char = '"';
+    if (config && config->quote != '\0') {
+        quote_char = config->quote;
+    }
+    cisv_chunk_t *chunks = split_chunks_with_quote(mmap_file, num_threads, &chunk_count, quote_char);
     if (!chunks || chunk_count == 0) {
         cisv_mmap_close(mmap_file);
         return NULL;
+    }
+
+    // Fast path: single chunk does not benefit from thread orchestration.
+    if (chunk_count == 1) {
+        cisv_result_t **results = calloc(1, sizeof(cisv_result_t *));
+        if (!results) {
+            free(chunks);
+            cisv_mmap_close(mmap_file);
+            errno = ENOMEM;
+            return NULL;
+        }
+
+        ParallelParseArg arg = {
+            .chunk = &chunks[0],
+            .config = config,
+            .result = NULL,
+            .chunk_size_hint = (size_t)(chunks[0].end - chunks[0].start),
+        };
+
+        parallel_parse_thread(&arg);
+        results[0] = arg.result;
+
+        free(chunks);
+        cisv_mmap_close(mmap_file);
+        *result_count = 1;
+        return results;
     }
 
     // Allocate thread arguments and results array
@@ -2277,6 +2597,7 @@ cisv_result_t **cisv_parse_file_parallel(const char *path, const cisv_config *co
         args[i].chunk = &chunks[i];
         args[i].config = config;
         args[i].result = NULL;
+        args[i].chunk_size_hint = (size_t)(chunks[i].end - chunks[i].start);
 
         if (pthread_create(&threads[i], NULL, parallel_parse_thread, &args[i]) != 0) {
             // Thread creation failed - wait for already-launched threads

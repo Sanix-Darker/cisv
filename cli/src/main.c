@@ -97,14 +97,44 @@ typedef struct {
     char **current_row;
     size_t current_field_count;
     size_t current_field_capacity;
+    size_t current_input_col;
+    int current_select_pos;
     size_t current_row_num;
     int in_header;
 
     cisv_config *config;
 } cli_context;
 
+static int compare_ints_asc(const void *a, const void *b) {
+    int ia = *(const int *)a;
+    int ib = *(const int *)b;
+    return (ia > ib) - (ia < ib);
+}
+
 static void field_callback(void *user, const char *data, size_t len) {
     cli_context *ctx = (cli_context *)user;
+    int should_store = 1;
+
+    if (ctx->select_cols && ctx->select_count > 0) {
+        should_store = 0;
+        int current_col = (int)ctx->current_input_col;
+
+        while (ctx->current_select_pos < ctx->select_count &&
+               ctx->select_cols[ctx->current_select_pos] < current_col) {
+            ctx->current_select_pos++;
+        }
+
+        if (ctx->current_select_pos < ctx->select_count &&
+            ctx->select_cols[ctx->current_select_pos] == current_col) {
+            should_store = 1;
+            ctx->current_select_pos++;
+        }
+    }
+
+    ctx->current_input_col++;
+    if (!should_store) {
+        return;
+    }
 
     if (ctx->current_field_count >= ctx->current_field_capacity) {
         size_t new_capacity = ctx->current_field_capacity * 2;
@@ -138,6 +168,8 @@ static void row_callback(void *user) {
             free(ctx->current_row[i]);
         }
         ctx->current_field_count = 0;
+        ctx->current_input_col = 0;
+        ctx->current_select_pos = 0;
         ctx->current_row_num++;
         return;
     }
@@ -163,23 +195,9 @@ static void row_callback(void *user) {
     } else {
         int first = 1;
         for (size_t i = 0; i < ctx->current_field_count; i++) {
-            int should_output = 1;
-
-            if (ctx->select_cols && ctx->select_count > 0) {
-                should_output = 0;
-                for (int j = 0; j < ctx->select_count; j++) {
-                    if (ctx->select_cols[j] == (int)i) {
-                        should_output = 1;
-                        break;
-                    }
-                }
-            }
-
-            if (should_output) {
-                if (!first) fprintf(ctx->output, "%c", ctx->config->delimiter);
-                fprintf(ctx->output, "%s", ctx->current_row[i]);
-                first = 0;
-            }
+            if (!first) fprintf(ctx->output, "%c", ctx->config->delimiter);
+            fprintf(ctx->output, "%s", ctx->current_row[i]);
+            first = 0;
 
             free(ctx->current_row[i]);
         }
@@ -187,6 +205,8 @@ static void row_callback(void *user) {
         ctx->current_field_count = 0;
     }
 
+    ctx->current_input_col = 0;
+    ctx->current_select_pos = 0;
     ctx->row_count++;
     ctx->current_row_num++;
 }
@@ -267,6 +287,156 @@ static void benchmark_file(const char *filename, cisv_config *config) {
         printf("Run %d: %.2f ms, %zu rows, %.2f MB/s\n",
                i + 1, end - start, count, throughput);
     }
+}
+
+static int stream_rows_with_iterator(const char *filename, cisv_config *config, cli_context *ctx) {
+    cisv_iterator_t *it = cisv_iterator_open(filename, config);
+    if (!it) {
+        perror("cisv_iterator_open");
+        return -1;
+    }
+
+    const char **fields = NULL;
+    const size_t *lengths = NULL;
+    size_t field_count = 0;
+    int rc;
+    char *row_buf = NULL;
+    size_t row_buf_cap = 0;
+    char *out_buf = NULL;
+    size_t out_buf_cap = 0;
+    size_t out_buf_used = 0;
+
+    while ((rc = cisv_iterator_next(it, &fields, &lengths, &field_count)) == CISV_ITER_OK) {
+        if (row_buf_cap == 0) {
+            row_buf_cap = 4096;
+            row_buf = malloc(row_buf_cap);
+            if (!row_buf) {
+                fprintf(stderr, "Failed to allocate row output buffer\n");
+                cisv_iterator_close(it);
+                return -1;
+            }
+
+            out_buf_cap = 1 << 20;  // 1 MiB batched output buffer
+            out_buf = malloc(out_buf_cap);
+            if (!out_buf) {
+                fprintf(stderr, "Failed to allocate output flush buffer\n");
+                free(row_buf);
+                cisv_iterator_close(it);
+                return -1;
+            }
+        }
+
+        size_t used = 0;
+#define ENSURE_ROW_BUF(extra) do { \
+    size_t need = used + (size_t)(extra); \
+    if (need > row_buf_cap) { \
+        size_t new_cap = row_buf_cap; \
+        while (new_cap < need) { \
+            if (new_cap > SIZE_MAX / 2) { \
+                new_cap = need; \
+                break; \
+            } \
+            new_cap *= 2; \
+        } \
+        char *new_buf = realloc(row_buf, new_cap); \
+        if (!new_buf) { \
+            fprintf(stderr, "Failed to grow row output buffer\n"); \
+            free(row_buf); \
+            cisv_iterator_close(it); \
+            return -1; \
+        } \
+        row_buf = new_buf; \
+        row_buf_cap = new_cap; \
+    } \
+} while (0)
+
+        int first = 1;
+
+        if (ctx->select_cols && ctx->select_count > 0) {
+            for (int sel = 0; sel < ctx->select_count; sel++) {
+                int col = ctx->select_cols[sel];
+                if (col < 0 || (size_t)col >= field_count) {
+                    continue;
+                }
+                if (!first) {
+                    ENSURE_ROW_BUF(1);
+                    row_buf[used++] = config->delimiter;
+                }
+                ENSURE_ROW_BUF(lengths[col]);
+                memcpy(row_buf + used, fields[col], lengths[col]);
+                used += lengths[col];
+                first = 0;
+            }
+        } else {
+            for (size_t i = 0; i < field_count; i++) {
+                if (!first) {
+                    ENSURE_ROW_BUF(1);
+                    row_buf[used++] = config->delimiter;
+                }
+                ENSURE_ROW_BUF(lengths[i]);
+                memcpy(row_buf + used, fields[i], lengths[i]);
+                used += lengths[i];
+                first = 0;
+            }
+        }
+
+        ENSURE_ROW_BUF(1);
+        row_buf[used++] = '\n';
+        if (used >= out_buf_cap) {
+            if (out_buf_used > 0) {
+                if (fwrite(out_buf, 1, out_buf_used, ctx->output) != out_buf_used) {
+                    fprintf(stderr, "Failed writing buffered output\n");
+                    free(out_buf);
+                    free(row_buf);
+                    cisv_iterator_close(it);
+                    return -1;
+                }
+                out_buf_used = 0;
+            }
+            if (fwrite(row_buf, 1, used, ctx->output) != used) {
+                fprintf(stderr, "Failed writing row output\n");
+                free(out_buf);
+                free(row_buf);
+                cisv_iterator_close(it);
+                return -1;
+            }
+        } else {
+            if (out_buf_used + used > out_buf_cap) {
+                if (fwrite(out_buf, 1, out_buf_used, ctx->output) != out_buf_used) {
+                    fprintf(stderr, "Failed writing buffered output\n");
+                    free(out_buf);
+                    free(row_buf);
+                    cisv_iterator_close(it);
+                    return -1;
+                }
+                out_buf_used = 0;
+            }
+            memcpy(out_buf + out_buf_used, row_buf, used);
+            out_buf_used += used;
+        }
+        ctx->row_count++;
+
+#undef ENSURE_ROW_BUF
+    }
+
+    if (out_buf_used > 0) {
+        if (fwrite(out_buf, 1, out_buf_used, ctx->output) != out_buf_used) {
+            fprintf(stderr, "Failed final buffered output flush\n");
+            free(out_buf);
+            free(row_buf);
+            cisv_iterator_close(it);
+            return -1;
+        }
+    }
+
+    free(out_buf);
+    free(row_buf);
+    cisv_iterator_close(it);
+    if (rc == CISV_ITER_ERROR) {
+        fprintf(stderr, "Parse error while iterating rows\n");
+        return -1;
+    }
+    return 0;
 }
 
 // Writer CLI implementation
@@ -682,6 +852,7 @@ int main(int argc, char *argv[]) {
                     tok = strtok(NULL, ",");
                 }
                 ctx.select_count = i;
+                qsort(ctx.select_cols, ctx.select_count, sizeof(int), compare_ints_asc);
 
                 free(cols_copy);
                 break;
@@ -809,6 +980,22 @@ int main(int argc, char *argv[]) {
             free(ctx.tail_field_counts);
             return 1;
         }
+    }
+    setvbuf(ctx.output, NULL, _IOFBF, 1 << 20);
+
+    // Fast path: iterator avoids per-field allocations for common full-stream output.
+    if (ctx.head == 0 && ctx.tail == 0 && getenv("CISV_STATS") == NULL) {
+        int iter_result = stream_rows_with_iterator(filename, &config, &ctx);
+        if (iter_result < 0) {
+            free(ctx.current_row);
+            free(ctx.select_cols);
+            if (ctx.output != stdout) fclose(ctx.output);
+            return 1;
+        }
+        free(ctx.current_row);
+        free(ctx.select_cols);
+        if (ctx.output != stdout) fclose(ctx.output);
+        return 0;
     }
 
     config.field_cb = field_callback;
