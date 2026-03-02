@@ -66,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, macos-14]
+        os: [ubuntu-latest, macos-14]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,6 +116,16 @@ jobs:
           # macOS 10.13+ required for nanobind (aligned allocation)
           MACOSX_DEPLOYMENT_TARGET: "10.14"
           CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.14"
+
+      - name: Validate wheel archives
+        run: |
+          ls -1 bindings/python-nanobind/wheelhouse/*.whl >/dev/null
+          count=0
+          for wheel in bindings/python-nanobind/wheelhouse/*.whl; do
+            python -m zipfile -t "$wheel"
+            count=$((count + 1))
+          done
+          echo "Validated ${count} wheel(s)"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -181,18 +191,47 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: wheels-*
-          path: dist
+          path: dist/wheels
           merge-multiple: true
 
       - name: Download sdist
         uses: actions/download-artifact@v4
         with:
           name: sdist
-          path: dist
+          path: dist/sdist
+
+      - name: Prepare publish directory
+        run: |
+          mkdir -p dist/publish
+          cp -v dist/wheels/*.whl dist/publish/
+          cp -v dist/sdist/*.tar.gz dist/publish/
+
+      - name: Validate distribution archives
+        run: |
+          ls -1 dist/publish/* >/dev/null
+          count=0
+          for path in dist/publish/*; do
+            case "$path" in
+              *.whl)
+                python -m zipfile -t "$path"
+                ;;
+              *.tar.gz)
+                tar -tzf "$path" >/dev/null
+                ;;
+              *)
+                echo "Unexpected distribution file: $path"
+                exit 1
+                ;;
+            esac
+            count=$((count + 1))
+          done
+          echo "Validated ${count} distribution file(s)"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: dist/publish
+          attestations: false
           password: ${{ secrets.PYPI_API_TOKEN }}
 
   # Publish to npm
