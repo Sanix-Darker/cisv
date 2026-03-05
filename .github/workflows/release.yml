@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  create:
   workflow_dispatch:
     inputs:
       tag:
@@ -15,8 +16,13 @@ permissions:
   contents: write
   id-token: write  # Required for PyPI trusted publishing
 
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || (github.event_name == 'create' && github.event.ref) || github.ref_name }}
+  RELEASE_REF: ${{ github.event.inputs.tag || (github.event_name == 'create' && format('refs/tags/{0}', github.event.ref)) || github.ref }}
+
 jobs:
   release-diagnostics:
+    if: github.event_name != 'create' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
     runs-on: ubuntu-latest
     steps:
       - name: Print GitHub event context
@@ -31,12 +37,16 @@ jobs:
           echo "run_id=${{ github.run_id }}"
           echo "repository=${{ github.repository }}"
           echo "event_inputs_tag=${{ github.event.inputs.tag || '' }}"
+          echo "event_ref=${{ github.event.ref || '' }}"
+          echo "event_ref_type=${{ github.event.ref_type || '' }}"
+          echo "resolved_release_tag=${{ env.RELEASE_TAG }}"
+          echo "resolved_release_ref=${{ env.RELEASE_REF }}"
 
       - name: Checkout for tag diagnostics
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Print tag/commit diagnostics
         run: |
@@ -52,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Install PHP build dependencies
         run: |
@@ -82,12 +92,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
 
   # Build Python wheels for multiple platforms
@@ -101,7 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -115,11 +125,7 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" | sed 's/^v//' >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${{ env.RELEASE_TAG }}" | sed 's/^v//' >> $GITHUB_OUTPUT
 
       - name: Update version in pyproject.toml
         shell: bash
@@ -173,7 +179,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -183,11 +189,7 @@ jobs:
       - name: Get version from tag
         id: get_version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" | sed 's/^v//' >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${{ env.RELEASE_TAG }}" | sed 's/^v//' >> $GITHUB_OUTPUT
 
       - name: Update version in pyproject.toml
         run: |
