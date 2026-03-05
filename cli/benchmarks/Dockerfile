@@ -51,4 +51,4 @@ RUN chmod +x /benchmark/run_benchmark.sh
 
 WORKDIR /benchmark
 ENTRYPOINT ["/benchmark/run_benchmark.sh"]
-CMD ["--rows=100000", "--cols=7", "--iterations=5"]
+CMD ["--rows=1000000", "--cols=7", "--iterations=5"]

@@ -39,6 +39,7 @@ python scripts/benchmark_python.py --rows 1000000 --parallel
 
 Benchmark modes for cisv:
 - cisv: Single-threaded, returns list[list[str]]
+- cisv-iterator: Row-by-row iterator parsing (streaming)
 - cisv-parallel: Multi-threaded, returns list[list[str]]
 - cisv-fast: Multi-threaded + numpy arrays (faster than list output)
 - cisv-bench: Multi-threaded, no data marshaling (raw parsing speed)
@@ -144,6 +145,33 @@ def benchmark_cisv(filepath: str, parallel: bool = False, fast: bool = False, be
         'parse_time': parse_time,
         'parse_rows': parse_rows,
         'parse_cols': parse_cols,
+    }, None
+
+
+def benchmark_cisv_iterator(filepath: str) -> tuple:
+    """Benchmark cisv iterator parser."""
+    try:
+        import cisv
+    except ImportError:
+        return None, "cisv not installed"
+
+    print("Benchmarking cisv (iterator)...")
+
+    start = time.perf_counter()
+    rows = 0
+    cols = 0
+    for row in cisv.open_iterator(filepath):
+        rows += 1
+        if rows == 1:
+            cols = len(row)
+    parse_time = time.perf_counter() - start
+
+    return {
+        'count_time': None,
+        'count_rows': None,
+        'parse_time': parse_time,
+        'parse_rows': rows - 1,  # exclude header
+        'parse_cols': cols,
     }, None
 
 
@@ -355,6 +383,11 @@ def main():
 
     # Run cisv benchmarks
     results['cisv'], err = benchmark_cisv(filepath, parallel=False, fast=False)
+    if err:
+        print(f"  Skipped: {err}")
+
+    # Run iterator cisv benchmark
+    results['cisv-iterator'], err = benchmark_cisv_iterator(filepath)
     if err:
         print(f"  Skipped: {err}")
 

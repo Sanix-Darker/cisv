@@ -60,6 +60,7 @@ docker run -ti --cpus=2 --memory=4g --rm \
 | Mode | Description |
 |------|-------------|
 | `cisv` | Single-threaded, returns `list[list[str]]` |
+| `cisv-iterator` | Row-by-row iterator parsing with minimal memory usage |
 | `cisv-parallel` | Multi-threaded, returns `list[list[str]]` |
 | `cisv-fast` | Multi-threaded + numpy arrays (faster than list output) |
 | `cisv-bench` | Multi-threaded, no data marshaling (raw parsing speed) |

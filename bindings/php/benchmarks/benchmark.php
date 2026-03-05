@@ -7,6 +7,7 @@
  *
  * CISV Benchmark Modes:
  * - cisv: Single-threaded parsing, returns array of rows
+ * - cisv-iterator: Row-by-row iterator parsing (streaming)
  * - cisv-parallel: Multi-threaded parsing (auto-detect CPU cores)
  * - cisv-bench: Multi-threaded, count only (raw parsing speed, no data marshaling)
  * - cisv-count: Fast row counting using SIMD
@@ -157,6 +158,18 @@ if ($cisvAvailable) {
     $results['cisv'] = benchmark('cisv', function() use ($filepath) {
         $parser = new CisvParser();
         return $parser->parseFile($filepath);
+    }, $config['iterations']);
+
+    // Benchmark: cisv extension (iterator - row-by-row streaming)
+    $results['cisv-iterator'] = benchmark('cisv-iterator', function() use ($filepath) {
+        $parser = new CisvParser();
+        $parser->openIterator($filepath);
+        $rows = [];
+        while (($row = $parser->fetchRow()) !== false) {
+            $rows[] = $row;
+        }
+        $parser->closeIterator();
+        return $rows;
     }, $config['iterations']);
 
     // Benchmark: cisv extension (parallel - multi-threaded)

@@ -5,6 +5,7 @@ Docker benchmark for the Node.js binding against common JS CSV parsers.
 ## Compared Libraries
 
 - `cisv`
+- `cisv-iterator`
 - `udsv`
 - `papaparse`
 - `csv-parse`
@@ -48,5 +49,6 @@ docker run --rm --cpus=2 --memory=4g \
 ## Notes
 
 - `cisv` in this benchmark measures full parse + JS marshaling cost (`string[][]`).
+- `cisv-iterator` measures row-by-row streaming overhead through `openIterator`/`fetchRow`.
 - Results are printed as average time and throughput (MB/s).
 - Run with fixed CPU/memory limits to reduce noise across machines.
