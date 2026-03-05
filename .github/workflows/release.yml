@@ -20,6 +20,10 @@ env:
   RELEASE_TAG: ${{ github.event.inputs.tag || (github.event_name == 'create' && github.event.ref) || github.ref_name }}
   RELEASE_REF: ${{ github.event.inputs.tag || (github.event_name == 'create' && format('refs/tags/{0}', github.event.ref)) || github.ref }}
 
+concurrency:
+  group: release-${{ github.event.inputs.tag || (github.event_name == 'create' && github.event.ref) || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   release-diagnostics:
     if: github.event_name != 'create' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
@@ -53,9 +57,38 @@ jobs:
           git show -s --oneline --decorate HEAD
           git tag --points-at HEAD || true
 
+  release-state:
+    needs: release-diagnostics
+    if: github.event_name != 'create' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
+    runs-on: ubuntu-latest
+    outputs:
+      release_exists: ${{ steps.check.outputs.release_exists }}
+    steps:
+      - name: Check if release already exists for tag
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = process.env.RELEASE_TAG;
+            try {
+              await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              core.setOutput('release_exists', 'true');
+              core.info(`Release already exists for ${tag}.`);
+            } catch (error) {
+              if (error.status === 404) {
+                core.setOutput('release_exists', 'false');
+                core.info(`No release exists yet for ${tag}.`);
+              } else {
+                throw error;
+              }
+            }
+
 
   validate-php-binding:
-    needs: release-diagnostics
+    needs: [release-state]
+    if: needs.release-state.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -82,27 +115,10 @@ jobs:
         run: |
           php -d extension=cisv.so bindings/php/scripts/verify_api.php
           php -d extension=cisv.so -r 'echo "CisvParser methods: ".implode(",", get_class_methods("CisvParser")).PHP_EOL;'
-  create-release:
-    needs:
-      - release-diagnostics
-      - validate-php-binding
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ env.RELEASE_REF }}
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
-
   # Build Python wheels for multiple platforms
   build-python-wheels:
-    needs: release-diagnostics
+    needs: [release-state, validate-php-binding]
+    if: needs.release-state.outputs.release_exists != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -173,8 +189,9 @@ jobs:
   # Build source distribution
   build-python-sdist:
     needs:
-      - release-diagnostics
+      - release-state
       - validate-php-binding
+    if: needs.release-state.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,7 +234,8 @@ jobs:
   # Publish to PyPI
   publish-pypi:
     runs-on: ubuntu-latest
-    needs: [build-python-wheels, build-python-sdist]
+    needs: [release-state, build-python-wheels, build-python-sdist]
+    if: needs.release-state.outputs.release_exists != 'true'
     environment:
       name: pypi
       url: https://pypi.org/project/cisv/
@@ -272,12 +290,12 @@ jobs:
   # Publish to npm
   publish-npm:
     runs-on: ubuntu-latest
-    needs: [release-diagnostics, create-release]
-    continue-on-error: true
+    needs: [release-state, validate-php-binding]
+    if: needs.release-state.outputs.release_exists != 'true'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
       - uses: actions/setup-node@v4
         with:
@@ -287,11 +305,7 @@ jobs:
       - name: Get version from tag
         id: get_version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.tag }}" | sed 's/^v//' >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
+          echo "VERSION=${{ env.RELEASE_TAG }}" | sed 's/^v//' >> $GITHUB_OUTPUT
 
       - name: Prepare npm package
         run: |
@@ -314,3 +328,24 @@ jobs:
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    needs:
+      - release-state
+      - validate-php-binding
+      - publish-pypi
+      - publish-npm
+    if: needs.release-state.outputs.release_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
