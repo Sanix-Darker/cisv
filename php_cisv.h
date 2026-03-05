@@ -15,7 +15,7 @@
 #include "php.h"
 
 /* Extension information */
-#define PHP_CISV_VERSION "0.4.2"
+#define PHP_CISV_VERSION "0.4.4"
 #define PHP_CISV_EXTNAME "cisv"
 
 /* Module entry point */
