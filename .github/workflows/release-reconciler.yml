@@ -1,0 +1,76 @@
+name: Release Reconciler
+
+on:
+  push:
+    branches: [master]
+  create:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  ensure-latest-tag-release:
+    if: github.event_name != 'create' || github.event.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch release for latest missing v* tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const tags = await github.paginate(github.rest.repos.listTags, {
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            const latestTag = tags.find(t => /^v\d/.test(t.name));
+            if (!latestTag) {
+              core.info('No v* tags found.');
+              return;
+            }
+
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            const releaseExists = releases.some(r => r.tag_name === latestTag.name);
+            if (releaseExists) {
+              core.info(`Release already exists for ${latestTag.name}.`);
+              return;
+            }
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner,
+              repo,
+              workflow_id: 'release.yml',
+              per_page: 100
+            });
+
+            const activeForTag = runs.some(r =>
+              (r.status === 'queued' || r.status === 'in_progress') &&
+              r.head_branch === latestTag.name
+            );
+
+            if (activeForTag) {
+              core.info(`Release workflow already running for ${latestTag.name}.`);
+              return;
+            }
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: 'release.yml',
+              ref: 'master',
+              inputs: { tag: latestTag.name }
+            });
+
+            core.info(`Dispatched Release workflow for ${latestTag.name}.`);
