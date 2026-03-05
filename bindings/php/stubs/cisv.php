@@ -69,6 +69,26 @@ if (false) {
         public function setQuote(string $quote): self {}
 
         /**
+         * Parse a CSV file in parallel.
+         *
+         * @param string $filename Path to CSV file
+         * @param int|null $num_threads Number of worker threads (0/null = auto)
+         * @return array<int, array<int, string>> Array of row arrays
+         * @throws \RuntimeException If file cannot be read
+         */
+        public function parseFileParallel(string $filename, ?int $num_threads = null): array {}
+
+        /**
+         * Benchmark parse mode (parallel count only, no row marshaling).
+         *
+         * @param string $filename Path to CSV file
+         * @param int|null $num_threads Number of worker threads (0/null = auto)
+         * @return array{rows:int, fields:int}
+         * @throws \RuntimeException If file cannot be read
+         */
+        public function parseFileBenchmark(string $filename, ?int $num_threads = null): array {}
+
+        /**
          * Open a file for row-by-row iteration.
          *
          * Provides fgetcsv-style streaming with minimal memory footprint.

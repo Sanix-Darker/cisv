@@ -34,13 +34,6 @@ if ($requiredMethods === []) {
     exit(1);
 }
 
-// Keep compatibility checks for runtime methods used by downstream integrations.
-foreach (['parseFileParallel', 'parseFileBenchmark'] as $compatMethod) {
-    if (!in_array($compatMethod, $requiredMethods, true)) {
-        $requiredMethods[] = $compatMethod;
-    }
-}
-
 $reflection = new ReflectionClass('CisvParser');
 $available = array_map(
     static fn(ReflectionMethod $method): string => $method->getName(),

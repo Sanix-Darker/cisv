@@ -564,6 +564,50 @@ echo \$rowCount . '|' . \$fieldCount . '|' . \$firstId . '|' . \$headers;
     fi
 }
 
+# Validate PHP cisv iterator result
+validate_php_iterator() {
+    local file="$1"
+    local php_ext="${PROJECT_ROOT}/bindings/php/modules/cisv.so"
+    local lib_path="${PROJECT_ROOT}/core/build"
+
+    if [ ! -f "$php_ext" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local result=$(LD_LIBRARY_PATH="$lib_path" php -d "extension=$php_ext" -r "
+\$parser = new CisvParser();
+\$parser->openIterator('$file');
+\$rows = 0;
+\$fieldCount = 0;
+\$headers = '';
+\$firstId = '';
+while ((\$row = \$parser->fetchRow()) !== false) {
+    \$rows++;
+    if (\$rows === 1) {
+        \$fieldCount = count(\$row);
+        \$headers = implode(',', \$row);
+    } elseif (\$rows === 2) {
+        \$firstId = \$row[0] ?? '';
+    }
+}
+\$parser->closeIterator();
+echo \$rows . '|' . \$fieldCount . '|' . \$firstId . '|' . \$headers;
+" 2>/dev/null)
+
+    local row_count=$(echo "$result" | cut -d'|' -f1)
+    local field_count=$(echo "$result" | cut -d'|' -f2)
+    local first_id=$(echo "$result" | cut -d'|' -f3)
+    local headers=$(echo "$result" | cut -d'|' -f4)
+
+    if [ "$row_count" = "$EXPECTED_ROW_COUNT" ] && [ "$field_count" = "$EXPECTED_FIELD_COUNT" ] && \
+       [ "$first_id" = "$EXPECTED_FIRST_ID" ] && [ "$headers" = "$EXPECTED_HEADERS" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:rows=$row_count,fields=$field_count"
+    fi
+}
+
 # Run all validations
 run_validations() {
     local file="$1"
@@ -609,11 +653,14 @@ run_validations() {
     if [ "$RUN_PHP" = "true" ]; then
         VALIDATIONS["php_count"]=$(validate_php_count "$abs_file")
         VALIDATIONS["php_parse"]=$(validate_php_parse "$abs_file")
+        VALIDATIONS["php_iterator"]=$(validate_php_iterator "$abs_file")
         log "  PHP count: ${VALIDATIONS[php_count]}"
         log "  PHP parse: ${VALIDATIONS[php_parse]}"
+        log "  PHP iterator: ${VALIDATIONS[php_iterator]}"
     else
         VALIDATIONS["php_count"]="SKIP"
         VALIDATIONS["php_parse"]="SKIP"
+        VALIDATIONS["php_iterator"]="SKIP"
     fi
 }
 
@@ -1165,6 +1212,34 @@ echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
     RESULTS["php_cisv-count"]="$result"
     log "    cisv (count): $result"
 
+    # cisv PHP extension benchmark (iterator row-by-row)
+    if [ -f "$php_ext" ]; then
+        result=$(timeout "$BENCH_TIMEOUT" env LD_LIBRARY_PATH="$lib_path:${LD_LIBRARY_PATH:-}" BENCH_FILE="$abs_file" php -d "extension=$php_ext" -r "
+\$file = getenv('BENCH_FILE');
+\$iterations = ${ITERATIONS};
+\$totalTime = 0;
+
+for (\$i = 0; \$i < \$iterations; \$i++) {
+    \$start = microtime(true);
+    \$parser = new CisvParser();
+    \$parser->openIterator(\$file);
+    while ((\$row = \$parser->fetchRow()) !== false) {
+        // Iterate through all rows to benchmark marshaling in iterator mode.
+    }
+    \$parser->closeIterator();
+    \$end = microtime(true);
+    \$totalTime += (\$end - \$start);
+}
+
+echo number_format(\$totalTime / \$iterations, 7) . '|' . \$iterations;
+" 2>/dev/null) || result="FAILED|0"
+    else
+        result="FAILED|0"
+    fi
+    [ -z "$result" ] && result="FAILED|0"
+    RESULTS["php_cisv-iterator"]="$result"
+    log "    cisv (iterator): $result"
+
     # PHP native fgetcsv benchmark
     result=$(timeout "$BENCH_TIMEOUT" env BENCH_FILE="$abs_file" php -r "
 \$file = getenv('BENCH_FILE');
@@ -1498,6 +1573,7 @@ Task: Parse the entire CSV file using PHP parsers.
 |--------|----------|--------------|------|-------|
 | **cisv (parse)** $(format_result_validated "php_cisv" "$file_size_mb" "php_parse")
 | **cisv (count)** $(format_result_validated "php_cisv-count" "$file_size_mb" "php_count")
+| **cisv (iterator)** $(format_result_validated "php_cisv-iterator" "$file_size_mb" "php_iterator")
 | fgetcsv $(format_result "php_fgetcsv" "$file_size_mb") - |
 | str_getcsv $(format_result "php_str_getcsv" "$file_size_mb") - |
 | SplFileObject $(format_result "php_splfileobject" "$file_size_mb") - |
@@ -1508,6 +1584,7 @@ Task: Parse the entire CSV file using PHP parsers.
 
 > **Note:** cisv (count) shows native C performance without PHP array creation overhead.
 > cisv (parse) includes the cost of converting C data to PHP arrays.
+> cisv (iterator) measures row-by-row fetch overhead with low memory usage.
 
 ---
 EOF
@@ -1560,8 +1637,8 @@ For each CISV binding, the following validations are performed:
 
 ### Validation Results Summary
 
-| Binding | Count | Parse |
-|---------|-------|-------|
+| Binding | Count | Parse | Iterator |
+|---------|-------|-------|----------|
 EOF
 
     if [ "$RUN_CLI" = "true" ]; then
@@ -1574,7 +1651,7 @@ EOF
         echo "| Python | $(format_validation "python_count") | $(format_validation "python_parse") |"
     fi
     if [ "$RUN_PHP" = "true" ]; then
-        echo "| PHP | $(format_validation "php_count") | $(format_validation "php_parse") |"
+        echo "| PHP | $(format_validation "php_count") | $(format_validation "php_parse") | $(format_validation "php_iterator") |"
     fi
 
     cat << EOF
