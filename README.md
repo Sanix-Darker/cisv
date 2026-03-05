@@ -4,6 +4,17 @@
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Sanix-Darker/cisv)
 
+## DEPRECATED REPOSITORY
+
+This monorepo is deprecated and no longer the primary source for installs/releases.
+
+Use the split repositories instead:
+- Core C library: https://github.com/Sanix-Darker/cisv-core
+- CLI: https://github.com/Sanix-Darker/cisv-cli
+- PHP binding: https://github.com/Sanix-Darker/cisv-php
+- Node.js binding: https://github.com/Sanix-Darker/cisv-nodejs
+- Python binding: https://github.com/Sanix-Darker/cisv-python
+
 High-performance CSV parser and writer with SIMD optimizations (AVX-512/AVX2). Available as a C library, CLI tool, and bindings for Node.js, Python, and PHP.
 
 Blog post: [How I accidentally created the fastest CSV parser ever made](https://sanixdk.xyz/blogs/how-i-accidentally-created-the-fastest-csv-parser-ever-made)
