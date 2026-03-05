@@ -43,8 +43,38 @@ jobs:
           git show -s --oneline --decorate HEAD
           git tag --points-at HEAD || true
 
-  create-release:
+
+  validate-php-binding:
     needs: release-diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install PHP build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-dev php-pear build-essential
+
+      - name: Build and install cisv extension
+        run: |
+          cd bindings/php/src
+          phpize
+          ./configure
+          make -j"$(nproc)"
+          sudo make install
+
+      - name: Verify exported PHP API
+        run: |
+          php -d extension=cisv.so bindings/php/scripts/verify_api.php
+          php -d extension=cisv.so -r 'echo "CisvParser methods: ".implode(",", get_class_methods("CisvParser")).PHP_EOL;'
+  create-release:
+    needs:
+      - release-diagnostics
+      - validate-php-binding
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -135,7 +165,9 @@ jobs:
 
   # Build source distribution
   build-python-sdist:
-    needs: release-diagnostics
+    needs:
+      - release-diagnostics
+      - validate-php-binding
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
