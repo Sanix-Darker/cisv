@@ -12,19 +12,34 @@ if (!class_exists('CisvParser')) {
     exit(1);
 }
 
-$requiredMethods = [
-    '__construct',
-    'parseFile',
-    'parseString',
-    'countRows',
-    'setDelimiter',
-    'setQuote',
-    'parseFileParallel',
-    'parseFileBenchmark',
-    'openIterator',
-    'fetchRow',
-    'closeIterator',
-];
+$repoRoot = dirname(__DIR__, 3);
+$stubFile = $repoRoot . '/bindings/php/stubs/cisv.php';
+
+if (!is_file($stubFile)) {
+    fwrite(STDERR, "[cisv][php-api] stub file not found: {$stubFile}\n");
+    exit(1);
+}
+
+$stubContent = file_get_contents($stubFile);
+if ($stubContent === false) {
+    fwrite(STDERR, "[cisv][php-api] failed to read stub file: {$stubFile}\n");
+    exit(1);
+}
+
+preg_match_all('/public\\s+(?:static\\s+)?function\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(/', $stubContent, $matches);
+$requiredMethods = array_values(array_unique($matches[1] ?? []));
+
+if ($requiredMethods === []) {
+    fwrite(STDERR, "[cisv][php-api] no methods detected in stubs\n");
+    exit(1);
+}
+
+// Keep compatibility checks for runtime methods used by downstream integrations.
+foreach (['parseFileParallel', 'parseFileBenchmark'] as $compatMethod) {
+    if (!in_array($compatMethod, $requiredMethods, true)) {
+        $requiredMethods[] = $compatMethod;
+    }
+}
 
 $reflection = new ReflectionClass('CisvParser');
 $available = array_map(
