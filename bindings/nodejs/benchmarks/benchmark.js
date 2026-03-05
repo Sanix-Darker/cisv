@@ -6,6 +6,7 @@
  *
  * Libraries compared:
  * - cisv: High-performance C parser with SIMD optimizations
+ * - cisv-iterator: Row-by-row iterator parsing (streaming)
  * - udsv: Ultra-fast DSV parser
  * - papaparse: Popular browser/node CSV parser
  * - csv-parse: Node.js stream/sync CSV parser
@@ -208,6 +209,18 @@ async function main() {
             parser.write(fileBuffer);
             parser.end();
             return parser.getRows();
+        }, args.iterations);
+
+        // Benchmark: cisv iterator API (row-by-row streaming)
+        results['cisv-iterator'] = await benchmark('cisv-iterator', () => {
+            const parser = new cisv.cisvParser();
+            parser.openIterator(filepath);
+            let rows = 0;
+            while (parser.fetchRow() !== null) {
+                rows++;
+            }
+            parser.closeIterator();
+            return rows;
         }, args.iterations);
     } else {
         console.log('Benchmarking cisv...');

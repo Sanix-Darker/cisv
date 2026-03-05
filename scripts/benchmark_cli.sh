@@ -446,6 +446,50 @@ console.log(rowCount + '|' + fieldCount + '|' + firstId + '|' + headers);
     fi
 }
 
+# Validate Node.js cisv iterator result
+validate_nodejs_iterator() {
+    local file="$1"
+
+    if [ ! -f "./bindings/nodejs/cisv/index.js" ]; then
+        echo "SKIP"
+        return
+    fi
+
+    local result=$(cd ./bindings/nodejs && node -e "
+const { cisvParser } = require('./cisv/index.js');
+const p = new cisvParser();
+p.openIterator('$file');
+let rows = 0;
+let fieldCount = 0;
+let firstId = '';
+let headers = '';
+let row;
+while ((row = p.fetchRow()) !== null) {
+    rows++;
+    if (rows === 1) {
+        fieldCount = row.length;
+        headers = row.join(',');
+    } else if (rows === 2) {
+        firstId = row[0] || '';
+    }
+}
+p.closeIterator();
+console.log(rows + '|' + fieldCount + '|' + firstId + '|' + headers);
+" 2>/dev/null)
+
+    local row_count=$(echo "$result" | cut -d'|' -f1)
+    local field_count=$(echo "$result" | cut -d'|' -f2)
+    local first_id=$(echo "$result" | cut -d'|' -f3)
+    local headers=$(echo "$result" | cut -d'|' -f4)
+
+    if [ "$row_count" = "$EXPECTED_ROW_COUNT" ] && [ "$field_count" = "$EXPECTED_FIELD_COUNT" ] && \
+       [ "$first_id" = "$EXPECTED_FIRST_ID" ] && [ "$headers" = "$EXPECTED_HEADERS" ]; then
+        echo "PASS"
+    else
+        echo "FAIL:rows=$row_count,fields=$field_count"
+    fi
+}
+
 # Validate Python cisv count result
 validate_python_count() {
     local file="$1"
@@ -628,11 +672,14 @@ run_validations() {
     if [ "$RUN_NODEJS" = "true" ]; then
         VALIDATIONS["nodejs_count"]=$(validate_nodejs_count "$abs_file")
         VALIDATIONS["nodejs_parse"]=$(validate_nodejs_parse "$abs_file")
+        VALIDATIONS["nodejs_iterator"]=$(validate_nodejs_iterator "$abs_file")
         log "  Node.js count: ${VALIDATIONS[nodejs_count]}"
         log "  Node.js parse: ${VALIDATIONS[nodejs_parse]}"
+        log "  Node.js iterator: ${VALIDATIONS[nodejs_iterator]}"
     else
         VALIDATIONS["nodejs_count"]="SKIP"
         VALIDATIONS["nodejs_parse"]="SKIP"
+        VALIDATIONS["nodejs_iterator"]="SKIP"
     fi
 
     if [ "$RUN_PYTHON" = "true" ]; then
@@ -758,7 +805,7 @@ run_cli_benchmarks() {
 }
 
 # ============================================================================
-# NODE.JS BENCHMARKS (7 parsers)
+# NODE.JS BENCHMARKS (9 parsers)
 # ============================================================================
 
 run_nodejs_benchmarks() {
@@ -801,6 +848,12 @@ async function benchmark() {
                 const { cisvParser } = require('./cisv/index.js');
                 const p = new cisvParser();
                 p.parseSync(file);
+            } else if (parser === 'cisv-iterator') {
+                const { cisvParser } = require('./cisv/index.js');
+                const p = new cisvParser();
+                p.openIterator(file);
+                while (p.fetchRow() !== null) {}
+                p.closeIterator();
             } else if (parser === 'cisv-count') {
                 // Pure C row counting - shows raw library performance
                 const { cisvParser } = require('./cisv/index.js');
@@ -857,8 +910,8 @@ async function benchmark() {
 benchmark();
 JSEOF
 
-    # Run benchmarks for 8 parsers (including cisv-count to show raw C performance)
-    for parser in "cisv" "cisv-count" "papaparse" "csv-parse" "fast-csv" "csv-parser" "d3-dsv" "csv-string"; do
+    # Run benchmarks for 9 parsers (including cisv-count to show raw C performance)
+    for parser in "cisv" "cisv-count" "cisv-iterator" "papaparse" "csv-parse" "fast-csv" "csv-parser" "d3-dsv" "csv-string"; do
         local result
         result=$(timeout "$BENCH_TIMEOUT" bash -c "cd ./bindings/nodejs && node _bench.js \"$abs_file\" \"$parser\"" 2>/dev/null) || result="FAILED|0"
         [ -z "$result" ] && result="FAILED|0"
@@ -1523,6 +1576,7 @@ Task: Parse the entire CSV file using Node.js parsers.
 |--------|----------|--------------|------|-------|
 | **cisv (parse)** $(format_result_validated "nodejs_cisv" "$file_size_mb" "nodejs_parse")
 | **cisv (count)** $(format_result_validated "nodejs_cisv-count" "$file_size_mb" "nodejs_count")
+| **cisv (iterator)** $(format_result_validated "nodejs_cisv-iterator" "$file_size_mb" "nodejs_iterator")
 | papaparse $(format_result "nodejs_papaparse" "$file_size_mb") - |
 | csv-parse $(format_result "nodejs_csv-parse" "$file_size_mb") - |
 | fast-csv $(format_result "nodejs_fast-csv" "$file_size_mb") - |
@@ -1532,6 +1586,7 @@ Task: Parse the entire CSV file using Node.js parsers.
 
 > **Note:** cisv (count) shows native C performance without JS object creation overhead.
 > cisv (parse) includes the cost of converting C data to JavaScript arrays.
+> cisv (iterator) measures row-by-row fetch overhead with low memory usage.
 
 ---
 EOF
@@ -1645,7 +1700,7 @@ EOF
         echo "| CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") | - |"
     fi
     if [ "$RUN_NODEJS" = "true" ]; then
-        echo "| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") | - |"
+        echo "| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") | $(format_validation "nodejs_iterator") |"
     fi
     if [ "$RUN_PYTHON" = "true" ]; then
         echo "| Python | $(format_validation "python_count") | $(format_validation "python_parse") | - |"
