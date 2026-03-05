@@ -61,9 +61,10 @@ jobs:
 
       - name: Build and install cisv extension
         run: |
-          cd bindings/php/src
+          make core
+          cd bindings/php
           phpize
-          ./configure
+          ./configure --enable-cisv
           make -j"$(nproc)"
           sudo make install
 
