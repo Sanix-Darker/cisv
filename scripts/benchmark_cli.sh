@@ -1145,7 +1145,7 @@ PYEOF
 }
 
 # ============================================================================
-# PHP BENCHMARKS (8 parsers)
+# PHP BENCHMARKS (10 parsers)
 # ============================================================================
 
 run_php_benchmarks() {
@@ -1642,13 +1642,13 @@ For each CISV binding, the following validations are performed:
 EOF
 
     if [ "$RUN_CLI" = "true" ]; then
-        echo "| CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") |"
+        echo "| CLI | $(format_validation "cli_count") | $(format_validation "cli_parse") | - |"
     fi
     if [ "$RUN_NODEJS" = "true" ]; then
-        echo "| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") |"
+        echo "| Node.js | $(format_validation "nodejs_count") | $(format_validation "nodejs_parse") | - |"
     fi
     if [ "$RUN_PYTHON" = "true" ]; then
-        echo "| Python | $(format_validation "python_count") | $(format_validation "python_parse") |"
+        echo "| Python | $(format_validation "python_count") | $(format_validation "python_parse") | - |"
     fi
     if [ "$RUN_PHP" = "true" ]; then
         echo "| PHP | $(format_validation "php_count") | $(format_validation "php_parse") | $(format_validation "php_iterator") |"
