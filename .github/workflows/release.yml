@@ -241,14 +241,14 @@ jobs:
       url: https://pypi.org/project/cisv/
     steps:
       - name: Download wheels
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: dist/wheels
           merge-multiple: true
 
       - name: Download sdist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist/sdist
